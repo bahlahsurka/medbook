@@ -9,6 +9,7 @@ export default function Sidebar({ open, entries, activeSystem, setActiveSystem, 
       background: '#fff', borderRight: '1px solid #e5e7eb',
       display: 'flex', flexDirection: 'column', overflow: 'hidden',
       transition: 'all .2s ease', flexShrink: 0,
+      height: '100%', maxHeight: '100vh',
     }}>
       {/* Header */}
       <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
@@ -50,7 +51,7 @@ export default function Sidebar({ open, entries, activeSystem, setActiveSystem, 
       </div>
 
       {/* Systems list */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflowY: 'scroll', WebkitOverflowScrolling: 'touch', minHeight: 0 }}>
         {SYSTEMS.map(sys => {
           const cnt = (entries[sys] || []).length;
           const isActive = activeSystem === sys && ['list','add','detail'].includes(view);
