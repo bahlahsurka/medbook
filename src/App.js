@@ -82,10 +82,17 @@ export default function App() {
 
   const logout = () => supabase.auth.signOut();
 
-  const onSaved = useCallback((entry) => {
-    setEntries(prev => ({ ...prev, [entry.system]: [entry, ...(prev[entry.system] || [])] }));
+  const onSaved = useCallback((saved) => {
+    // saved is array (one per selected system)
+    const arr = Array.isArray(saved) ? saved : [saved];
+    setEntries(prev => {
+      const next = { ...prev };
+      arr.forEach(entry => { next[entry.system] = [entry, ...(next[entry.system] || [])]; });
+      return next;
+    });
     setView('list');
-    showToast('Entry saved ✓');
+    const sys = arr.length > 1 ? `${arr.length} systems` : arr[0]?.system;
+    showToast(`Saved to ${sys} ✓`);
   }, [showToast]);
 
   const onDeleted = useCallback((id, system) => {
@@ -334,7 +341,7 @@ export default function App() {
           {/* DETAIL */}
           {!fetching && view === 'detail' && selected && (
             <DetailView entry={selected} onBack={() => setView('list')}
-              onDeleted={onDeleted} onUpdated={onUpdated} />
+              onDeleted={onDeleted} onUpdated={onUpdated} userId={session.user.id} />
           )}
 
           {/* LIST */}
