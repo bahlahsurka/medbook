@@ -54,24 +54,57 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Load entries
+  // Load entries with retry (handles Supabase cold start on free tier)
   useEffect(() => {
     if (!session) { setEntries({}); return; }
-    setFetching(true);
-    supabase.from('entries')
-      .select('*').eq('user_id', session.user.id)
-      .order('created_at', { ascending: false })
-      .then(({ data, error }) => {
-        if (error) { showToast('Failed to load entries', 'err'); setFetching(false); return; }
-        const grouped = {};
-        SYSTEMS.forEach(s => { grouped[s] = []; });
-        (data || []).forEach(e => {
-          if (grouped[e.system]) grouped[e.system].push(e);
-          else grouped[e.system] = [e];
-        });
-        setEntries(grouped);
-        setFetching(false);
+    let cancelled = false;
+
+    const groupEntries = (data) => {
+      const grouped = {};
+      SYSTEMS.forEach(s => { grouped[s] = []; });
+      (data || []).forEach(e => {
+        if (grouped[e.system]) grouped[e.system].push(e);
+        else grouped[e.system] = [e];
       });
+      return grouped;
+    };
+
+    const fetchEntries = async (attempt = 1) => {
+      setFetching(true);
+      try {
+        const { data, error } = await supabase
+          .from('entries')
+          .select('*')
+          .eq('user_id', session.user.id)
+          .order('created_at', { ascending: false });
+
+        if (cancelled) return;
+
+        if (error) throw error;
+
+        // If empty and this is first attempt, retry once after 3s
+        // (handles Supabase cold start returning stale empty response)
+        if ((!data || data.length === 0) && attempt === 1) {
+          setTimeout(() => { if (!cancelled) fetchEntries(2); }, 3000);
+          return;
+        }
+
+        setEntries(groupEntries(data));
+        setFetching(false);
+      } catch (err) {
+        if (cancelled) return;
+        if (attempt < 3) {
+          // Retry up to 3 times with increasing delay
+          setTimeout(() => { if (!cancelled) fetchEntries(attempt + 1); }, attempt * 2000);
+        } else {
+          showToast('Could not load entries — check your connection', 'err');
+          setFetching(false);
+        }
+      }
+    };
+
+    fetchEntries();
+    return () => { cancelled = true; };
   }, [session]);
 
   const showToast = useCallback((msg, type = 'ok') => {
@@ -299,8 +332,19 @@ export default function App() {
         <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '14px 12px' : '20px' }}>
 
           {fetching && (
-            <div style={{ textAlign: 'center', color: '#9ca3af', paddingTop: 60, fontSize: 14 }}>
-              Loading your notebook…
+            <div style={{ textAlign: 'center', paddingTop: 80 }}>
+              <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 8 }}>
+                Loading your notebook…
+              </div>
+              <div style={{ fontSize: 11, color: '#9ca3af' }}>
+                First load may take a few seconds
+              </div>
+              <div style={{
+                margin: '20px auto 0', width: 32, height: 32,
+                border: '3px solid #e5e7eb', borderTop: '3px solid #2563eb',
+                borderRadius: '50%', animation: 'spin 0.8s linear infinite'
+              }} />
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
             </div>
           )}
 
