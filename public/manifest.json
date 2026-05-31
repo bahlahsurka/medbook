@@ -1,0 +1,25 @@
+{
+  "short_name": "MedBook",
+  "name": "MedBook — Medical Notebook",
+  "description": "Your personal USMLE Step 2 notebook",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#2563eb",
+  "background_color": "#f9fafb",
+  "scope": "/"
+}
