@@ -5,8 +5,8 @@ import { SYS_COLOR, DIFF_COLOR } from '../lib/constants';
 export default function DetailView({ entry, onBack, onDeleted, onUpdated }) {
   const [lightbox, setLightbox] = useState(null);
   const [deleting, setDeleting] = useState(false);
-  const color = SYS_COLOR[entry.system] || '#3498db';
-  const dc = DIFF_COLOR[entry.difficulty] || '#5a6580';
+  const color = SYS_COLOR[entry.system] || '#2563eb';
+  const dc = DIFF_COLOR[entry.difficulty] || '#6b7280';
 
   const fmtDate = iso => new Date(iso).toLocaleDateString('en-GB', {
     day: '2-digit', month: 'short', year: 'numeric'
@@ -30,57 +30,59 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated }) {
   };
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto', fontFamily: "'Syne', sans-serif" }}>
+    <div style={{ maxWidth: 680, margin: '0 auto' }}>
 
       {/* Lightbox */}
       {lightbox && (
         <div onClick={() => setLightbox(null)} style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.9)', zIndex: 1000,
-          display: 'flex', alignItems: 'center', justifyContent: 'center'
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.85)', zIndex: 1000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
         }}>
-          <img src={lightbox} alt="" style={{ maxWidth: '92vw', maxHeight: '90vh', borderRadius: 10 }} />
-          <div style={{ position: 'absolute', top: 18, right: 24, color: '#fff', fontSize: 28, cursor: 'pointer' }}>✕</div>
+          <img src={lightbox} alt=""
+            style={{ maxWidth: '100%', maxHeight: '90vh', borderRadius: 8 }} />
+          <div style={{ position: 'absolute', top: 16, right: 20,
+            color: '#fff', fontSize: 26, cursor: 'pointer', fontWeight: 300 }}>✕</div>
         </div>
       )}
 
-      {/* Header row */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 22 }}>
-        <div style={{ flex: 1 }}>
-          <button onClick={onBack} style={{
-            background: 'none', border: 'none', color: '#4a5070',
-            cursor: 'pointer', fontSize: 13, padding: 0, marginBottom: 12,
-            fontFamily: "'Syne', sans-serif", display: 'flex', alignItems: 'center', gap: 4
-          }}>← {entry.system}</button>
+      {/* Back */}
+      <button onClick={onBack} style={{
+        background: 'none', border: 'none', color: '#6b7280',
+        cursor: 'pointer', fontSize: 13, padding: 0, marginBottom: 16,
+        display: 'flex', alignItems: 'center', gap: 4, fontWeight: 500
+      }}>← Back to {entry.system}</button>
 
-          <div style={{ fontSize: 22, fontWeight: 800, color: '#fff', lineHeight: 1.3 }}>
-            {entry.title}
-          </div>
-
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10, alignItems: 'center' }}>
-            {entry.topic && (
-              <Tag label={entry.topic} color={color} />
-            )}
-            <Tag label={entry.difficulty} color={dc} />
-            <span style={{ fontSize: 11, color: '#3a4060' }}>{fmtDate(entry.created_at)}</span>
-            {entry.review_count > 0 && (
-              <span style={{ fontSize: 11, color: '#27ae60', fontWeight: 700 }}>
-                ✓ Reviewed {entry.review_count}× {entry.last_reviewed && `· Last: ${fmtDate(entry.last_reviewed)}`}
-              </span>
-            )}
-          </div>
+      {/* Title card */}
+      <div style={{
+        background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10,
+        padding: '20px', marginBottom: 16,
+        borderTop: `3px solid ${color}`,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+      }}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: '#111827', lineHeight: 1.4, marginBottom: 12 }}>
+          {entry.title}
         </div>
 
-        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 16 }}>
+          {entry.topic && <Tag label={entry.topic} color={color} />}
+          <Tag label={entry.difficulty} color={dc} />
+          <span style={{ fontSize: 12, color: '#9ca3af' }}>{fmtDate(entry.created_at)}</span>
+          {entry.review_count > 0 && (
+            <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 600 }}>
+              ✓ Reviewed {entry.review_count}× {entry.last_reviewed && `· Last: ${fmtDate(entry.last_reviewed)}`}
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={markReviewed} style={{
-            background: '#0d2016', border: '1px solid #27ae6050', color: '#27ae60',
-            borderRadius: 8, padding: '8px 14px', fontSize: 12, cursor: 'pointer',
-            fontWeight: 700, fontFamily: "'Syne', sans-serif"
-          }}>✓ Reviewed</button>
+            background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#16a34a',
+            borderRadius: 7, padding: '8px 16px', fontSize: 13, cursor: 'pointer', fontWeight: 600
+          }}>✓ Mark Reviewed</button>
           <button onClick={deleteEntry} disabled={deleting} style={{
-            background: '#2a0d0d', border: '1px solid #e74c3c30', color: '#e74c3c',
-            borderRadius: 8, padding: '8px 14px', fontSize: 12,
-            cursor: deleting ? 'not-allowed' : 'pointer',
-            fontFamily: "'Syne', sans-serif"
+            background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626',
+            borderRadius: 7, padding: '8px 16px', fontSize: 13,
+            cursor: deleting ? 'not-allowed' : 'pointer', fontWeight: 600
           }}>{deleting ? '…' : 'Delete'}</button>
         </div>
       </div>
@@ -88,27 +90,37 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated }) {
       {/* Notes */}
       {entry.notes && (
         <div style={{
-          background: '#10121a', border: '1px solid #1c1f2e', borderRadius: 12,
-          padding: '18px 22px', marginBottom: 22, lineHeight: 1.85,
-          fontSize: 14, color: '#c8cce0', whiteSpace: 'pre-wrap',
-          fontFamily: "'Literata', serif"
-        }}>{entry.notes}</div>
+          background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10,
+          padding: '18px 20px', marginBottom: 16,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+        }}>
+          <div style={{ fontSize: 10, color: '#9ca3af', letterSpacing: 0.8,
+            fontWeight: 600, textTransform: 'uppercase', marginBottom: 12 }}>Review Notes</div>
+          <div style={{ lineHeight: 1.85, fontSize: 14, color: '#1f2937', whiteSpace: 'pre-wrap' }}>
+            {entry.notes}
+          </div>
+        </div>
       )}
 
       {/* Images */}
       {entry.images?.length > 0 && (
-        <>
-          <div style={{ fontSize: 10, color: '#4a5070', letterSpacing: 1.5, fontWeight: 800, marginBottom: 12 }}>
-            IMAGES ({entry.images.length}) — tap to expand
+        <div style={{
+          background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10,
+          padding: '18px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+        }}>
+          <div style={{ fontSize: 10, color: '#9ca3af', letterSpacing: 0.8,
+            fontWeight: 600, textTransform: 'uppercase', marginBottom: 14 }}>
+            Images ({entry.images.length}) — tap to expand
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {entry.images.map((url, i) => (
               <img key={i} src={url} alt=""
                 onClick={() => setLightbox(url)}
-                style={{ width: '100%', borderRadius: 10, border: '1px solid #1c1f2e', cursor: 'zoom-in' }} />
+                style={{ width: '100%', borderRadius: 8, border: '1px solid #e5e7eb',
+                  cursor: 'zoom-in', display: 'block' }} />
             ))}
           </div>
-        </>
+        </div>
       )}
     </div>
   );
@@ -117,8 +129,8 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated }) {
 function Tag({ label, color }) {
   return (
     <span style={{
-      fontSize: 11, fontWeight: 700, background: `${color}20`, color,
-      borderRadius: 6, padding: '3px 10px', letterSpacing: 0.3
+      fontSize: 11, fontWeight: 500, background: `${color}12`, color,
+      borderRadius: 4, padding: '2px 8px', border: `1px solid ${color}25`
     }}>{label}</span>
   );
 }

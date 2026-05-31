@@ -16,43 +16,44 @@ export default function Dashboard({ entries }) {
   }, [entries]);
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto', fontFamily: "'Syne', sans-serif" }}>
-      <div style={{ fontSize: 18, fontWeight: 800, color: '#fff', marginBottom: 22 }}>Dashboard</div>
+    <div style={{ maxWidth: 680, margin: '0 auto' }}>
+      <div style={{ fontSize: 16, fontWeight: 700, color: '#111827', marginBottom: 20 }}>Dashboard</div>
 
       {/* Top stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 20 }}>
         {[
-          { label: 'Total Entries', val: stats.total, icon: '📋', color: '#3498db' },
-          { label: 'Reviewed',      val: stats.reviewed, icon: '✓', color: '#27ae60' },
-          { label: 'Flagged',       val: stats.flagged, icon: '⚑', color: '#9b59b6' },
+          { label: 'Total Entries', val: stats.total, color: '#2563eb' },
+          { label: 'Reviewed',      val: stats.reviewed, color: '#16a34a' },
+          { label: 'Flagged',       val: stats.flagged, color: '#7c3aed' },
+          { label: 'With Images',   val: stats.withImages, color: '#d97706' },
         ].map(s => (
           <div key={s.label} style={{
-            background: '#10121a', border: '1px solid #1c1f2e',
+            background: '#fff', border: '1px solid #e5e7eb',
             borderTop: `3px solid ${s.color}`,
-            borderRadius: 12, padding: '16px 18px'
+            borderRadius: 10, padding: '16px',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
           }}>
-            <div style={{ fontSize: 22, marginBottom: 6 }}>{s.icon}</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: '#fff' }}>{s.val}</div>
-            <div style={{ fontSize: 10, color: '#4a5070', letterSpacing: 1 }}>{s.label.toUpperCase()}</div>
+            <div style={{ fontSize: 26, fontWeight: 700, color: '#111827' }}>{s.val}</div>
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2, fontWeight: 500 }}>{s.label}</div>
           </div>
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 16 }}>
         {/* By System */}
-        <div style={{ background: '#10121a', border: '1px solid #1c1f2e', borderRadius: 12, padding: 18 }}>
-          <div style={{ fontSize: 10, color: '#4a5070', letterSpacing: 1.5, fontWeight: 800, marginBottom: 14 }}>
-            ENTRIES BY SYSTEM
-          </div>
+        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10,
+          padding: 18, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+          <div style={{ fontSize: 11, color: '#9ca3af', letterSpacing: 0.8,
+            fontWeight: 600, textTransform: 'uppercase', marginBottom: 14 }}>Entries by System</div>
           {stats.bySystem.length === 0 ? (
-            <div style={{ fontSize: 12, color: '#3a4060' }}>No entries yet</div>
+            <div style={{ fontSize: 13, color: '#9ca3af' }}>No entries yet</div>
           ) : stats.bySystem.map(s => (
-            <div key={s.name} style={{ marginBottom: 9 }}>
+            <div key={s.name} style={{ marginBottom: 10 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                <span style={{ fontSize: 11, color: '#8890b0' }}>{s.name}</span>
-                <span style={{ fontSize: 11, color: s.color, fontWeight: 700 }}>{s.count}</span>
+                <span style={{ fontSize: 12, color: '#374151' }}>{s.name}</span>
+                <span style={{ fontSize: 12, color: s.color, fontWeight: 600 }}>{s.count}</span>
               </div>
-              <div style={{ height: 4, background: '#1c1f2e', borderRadius: 3 }}>
+              <div style={{ height: 4, background: '#f3f4f6', borderRadius: 3 }}>
                 <div style={{
                   height: '100%', borderRadius: 3, background: s.color,
                   width: `${Math.max(6, (s.count / stats.total) * 100)}%`,
@@ -64,46 +65,41 @@ export default function Dashboard({ entries }) {
         </div>
 
         {/* By Difficulty */}
-        <div style={{ background: '#10121a', border: '1px solid #1c1f2e', borderRadius: 12, padding: 18 }}>
-          <div style={{ fontSize: 10, color: '#4a5070', letterSpacing: 1.5, fontWeight: 800, marginBottom: 14 }}>
-            BY DIFFICULTY
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10,
+          padding: 18, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+          <div style={{ fontSize: 11, color: '#9ca3af', letterSpacing: 0.8,
+            fontWeight: 600, textTransform: 'uppercase', marginBottom: 14 }}>By Difficulty</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {stats.byDiff.map(d => (
               <div key={d.d} style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                background: '#0c0e14', borderRadius: 8, padding: '10px 14px',
-                borderLeft: `3px solid ${DIFF_COLOR[d.d]}`
+                background: `${DIFF_COLOR[d.d]}08`, borderRadius: 8,
+                padding: '10px 14px', border: `1px solid ${DIFF_COLOR[d.d]}20`
               }}>
-                <span style={{ fontSize: 12, color: '#8890b0' }}>{d.d}</span>
-                <span style={{ fontSize: 18, fontWeight: 800, color: DIFF_COLOR[d.d] }}>{d.count}</span>
+                <span style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>{d.d}</span>
+                <span style={{ fontSize: 18, fontWeight: 700, color: DIFF_COLOR[d.d] }}>{d.count}</span>
               </div>
             ))}
-          </div>
-
-          <div style={{ marginTop: 14, padding: '10px 14px', background: '#0c0e14', borderRadius: 8 }}>
-            <div style={{ fontSize: 10, color: '#4a5070', letterSpacing: 1 }}>WITH IMAGES</div>
-            <div style={{ fontSize: 18, fontWeight: 800, color: '#f39c12', marginTop: 2 }}>{stats.withImages}</div>
           </div>
         </div>
       </div>
 
       {/* Most reviewed */}
       {stats.mostReviewed.filter(e => e.review_count > 0).length > 0 && (
-        <div style={{ background: '#10121a', border: '1px solid #1c1f2e', borderRadius: 12, padding: 18 }}>
-          <div style={{ fontSize: 10, color: '#4a5070', letterSpacing: 1.5, fontWeight: 800, marginBottom: 14 }}>
-            MOST REVIEWED
-          </div>
-          {stats.mostReviewed.filter(e => e.review_count > 0).map(e => (
+        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10,
+          padding: 18, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+          <div style={{ fontSize: 11, color: '#9ca3af', letterSpacing: 0.8,
+            fontWeight: 600, textTransform: 'uppercase', marginBottom: 14 }}>Most Reviewed</div>
+          {stats.mostReviewed.filter(e => e.review_count > 0).map((e, i) => (
             <div key={e.id} style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '8px 0', borderBottom: '1px solid #1c1f2e'
+              padding: '10px 0', borderBottom: i < 4 ? '1px solid #f3f4f6' : 'none'
             }}>
               <div>
-                <div style={{ fontSize: 13, color: '#c0c8e0', fontWeight: 600 }}>{e.title}</div>
-                <div style={{ fontSize: 10, color: '#4a5070' }}>{e.system}</div>
+                <div style={{ fontSize: 13, color: '#111827', fontWeight: 500 }}>{e.title}</div>
+                <div style={{ fontSize: 11, color: '#9ca3af' }}>{e.system}</div>
               </div>
-              <span style={{ fontSize: 12, color: '#27ae60', fontWeight: 700 }}>×{e.review_count}</span>
+              <span style={{ fontSize: 13, color: '#16a34a', fontWeight: 600 }}>×{e.review_count}</span>
             </div>
           ))}
         </div>

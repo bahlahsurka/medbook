@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { supabase } from '../lib/supabase';
 
 export default function Auth() {
-  const [mode, setMode] = useState('login'); // login | signup | reset
+  const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -34,37 +34,36 @@ export default function Auth() {
 
   return (
     <div style={{
-      minHeight: '100vh', background: '#0c0e14', display: 'flex',
-      alignItems: 'center', justifyContent: 'center', padding: 20,
-      fontFamily: "'Syne', sans-serif"
+      minHeight: '100vh', background: '#f9fafb',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
     }}>
       <div style={{ width: '100%', maxWidth: 400 }}>
         {/* Logo */}
-        <div style={{ textAlign: 'center', marginBottom: 40 }}>
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <div style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 56, height: 56, borderRadius: 16,
-            background: 'linear-gradient(135deg, #e74c3c, #9b59b6)',
-            marginBottom: 16, fontSize: 26
+            width: 48, height: 48, borderRadius: 12,
+            background: '#2563eb', marginBottom: 14, fontSize: 22, color: '#fff'
           }}>⚕</div>
-          <div style={{ fontSize: 26, fontWeight: 800, color: '#fff', letterSpacing: -0.5 }}>MedBook</div>
-          <div style={{ fontSize: 13, color: '#4a5070', marginTop: 4, fontFamily: "'Literata', serif" }}>
-            Your personal medical notebook
+          <div style={{ fontSize: 22, fontWeight: 700, color: '#111827' }}>MedBook</div>
+          <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>
+            Your personal USMLE notebook
           </div>
         </div>
 
         {/* Card */}
         <div style={{
-          background: '#10121a', border: '1px solid #1c1f2e',
-          borderRadius: 16, padding: '32px 28px'
+          background: '#fff', border: '1px solid #e5e7eb',
+          borderRadius: 12, padding: '28px 24px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.08)'
         }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#fff', marginBottom: 24 }}>
-            {mode === 'login' ? 'Sign in' : mode === 'signup' ? 'Create account' : 'Reset password'}
+          <div style={{ fontSize: 15, fontWeight: 600, color: '#111827', marginBottom: 20 }}>
+            {mode === 'login' ? 'Sign in to your account' : mode === 'signup' ? 'Create an account' : 'Reset your password'}
           </div>
 
           <form onSubmit={handle} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div>
-              <label style={labelStyle}>EMAIL</label>
+              <label style={labelStyle}>EMAIL ADDRESS</label>
               <input type="email" value={email} onChange={e => setEmail(e.target.value)}
                 required placeholder="your@email.com" style={inputStyle} />
             </div>
@@ -80,16 +79,15 @@ export default function Auth() {
             {msg && (
               <div style={{
                 padding: '10px 14px', borderRadius: 8, fontSize: 13,
-                background: msg.type === 'ok' ? '#0d2016' : '#2a0d0d',
-                color: msg.type === 'ok' ? '#27ae60' : '#e74c3c',
-                border: `1px solid ${msg.type === 'ok' ? '#27ae6040' : '#e74c3c40'}`
+                background: msg.type === 'ok' ? '#f0fdf4' : '#fef2f2',
+                color: msg.type === 'ok' ? '#15803d' : '#dc2626',
+                border: `1px solid ${msg.type === 'ok' ? '#bbf7d0' : '#fecaca'}`
               }}>{msg.text}</div>
             )}
 
             <button type="submit" disabled={loading} style={{
-              background: 'linear-gradient(135deg, #e74c3c, #9b59b6)',
-              color: '#fff', border: 'none', borderRadius: 10,
-              padding: '13px', fontSize: 14, fontWeight: 700,
+              background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8,
+              padding: '11px', fontSize: 14, fontWeight: 600,
               cursor: loading ? 'not-allowed' : 'pointer',
               opacity: loading ? 0.7 : 1, marginTop: 4
             }}>
@@ -97,13 +95,12 @@ export default function Auth() {
             </button>
           </form>
 
-          {/* Links */}
-          <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
+          <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
             {mode === 'login' && (<>
               <span style={linkStyle} onClick={() => { setMode('signup'); setMsg(null); }}>
                 Don't have an account? Sign up
               </span>
-              <span style={{ ...linkStyle, color: '#3a4060' }} onClick={() => { setMode('reset'); setMsg(null); }}>
+              <span style={{ ...linkStyle, color: '#9ca3af' }} onClick={() => { setMode('reset'); setMsg(null); }}>
                 Forgot password?
               </span>
             </>)}
@@ -120,18 +117,15 @@ export default function Auth() {
 }
 
 const labelStyle = {
-  fontSize: 10, color: '#4a5070', letterSpacing: 1.8,
-  fontWeight: 800, display: 'block', marginBottom: 6
+  fontSize: 11, color: '#6b7280', letterSpacing: 0.5,
+  fontWeight: 600, display: 'block', marginBottom: 6, textTransform: 'uppercase'
 };
-
 const inputStyle = {
-  width: '100%', background: '#0c0e14', border: '1px solid #1c1f2e',
-  borderRadius: 8, color: '#e8e8e8', padding: '11px 14px',
+  width: '100%', background: '#fff', border: '1px solid #d1d5db',
+  borderRadius: 8, color: '#111827', padding: '10px 12px',
   fontSize: 14, outline: 'none', boxSizing: 'border-box',
-  fontFamily: "'Syne', sans-serif"
 };
-
 const linkStyle = {
-  fontSize: 13, color: '#9b59b6', cursor: 'pointer',
+  fontSize: 13, color: '#2563eb', cursor: 'pointer',
   textDecoration: 'underline', textUnderlineOffset: 3
 };
