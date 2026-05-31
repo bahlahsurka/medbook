@@ -1,20 +1,210 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { SYS_COLOR, DIFF_COLOR, DIFFICULTY, SYSTEMS } from '../lib/constants';
+import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
 
+// ── Highlight colors ───────────────────────────────────────────────────────
+const HL_COLORS = [
+  { name: 'Yellow',  bg: '#fef08a', text: '#713f12' },
+  { name: 'Green',   bg: '#bbf7d0', text: '#14532d' },
+  { name: 'Blue',    bg: '#bfdbfe', text: '#1e3a8a' },
+  { name: 'Pink',    bg: '#fbcfe8', text: '#831843' },
+  { name: 'Orange',  bg: '#fed7aa', text: '#7c2d12' },
+];
+
+// ── Render notes with highlights ───────────────────────────────────────────
+// highlights: [{ start, end, color }]
+function renderHighlighted(text, highlights) {
+  if (!highlights || highlights.length === 0) {
+    return <span style={{ whiteSpace: 'pre-wrap' }}>{text}</span>;
+  }
+  // Sort and merge overlapping
+  const sorted = [...highlights].sort((a, b) => a.start - b.start);
+  const parts = [];
+  let cursor = 0;
+  sorted.forEach((h, i) => {
+    if (h.start > cursor) parts.push({ text: text.slice(cursor, h.start), hl: null });
+    parts.push({ text: text.slice(h.start, h.end), hl: h.color });
+    cursor = h.end;
+  });
+  if (cursor < text.length) parts.push({ text: text.slice(cursor), hl: null });
+  return (
+    <span style={{ whiteSpace: 'pre-wrap' }}>
+      {parts.map((p, i) =>
+        p.hl
+          ? <mark key={i} style={{ background: p.hl.bg, color: p.hl.text,
+              borderRadius: 2, padding: '0 1px' }}>{p.text}</mark>
+          : <span key={i}>{p.text}</span>
+      )}
+    </span>
+  );
+}
+
+// ── Lightbox with swipe ────────────────────────────────────────────────────
+function Lightbox({ images, startIndex, onClose }) {
+  const [idx, setIdx] = useState(startIndex);
+  const touchStart = useRef(null);
+
+  const prev = () => setIdx(i => (i - 1 + images.length) % images.length);
+  const next = () => setIdx(i => (i + 1) % images.length);
+
+  const onTouchStart = e => { touchStart.current = e.touches[0].clientX; };
+  const onTouchEnd = e => {
+    if (touchStart.current === null) return;
+    const dx = e.changedTouches[0].clientX - touchStart.current;
+    if (dx < -50) next();
+    else if (dx > 50) prev();
+    touchStart.current = null;
+  };
+
+  useEffect(() => {
+    const onKey = e => {
+      if (e.key === 'ArrowRight') next();
+      if (e.key === 'ArrowLeft') prev();
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', zIndex: 1000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center'
+    }}
+      onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}
+      onClick={onClose}>
+
+      {/* Close */}
+      <div style={{ position: 'absolute', top: 16, right: 20,
+        color: '#fff', fontSize: 28, cursor: 'pointer', zIndex: 10,
+        lineHeight: 1, fontWeight: 300 }}
+        onClick={onClose}>✕</div>
+
+      {/* Counter */}
+      {images.length > 1 && (
+        <div style={{ position: 'absolute', top: 18, left: '50%', transform: 'translateX(-50%)',
+          color: '#fff', fontSize: 13, fontWeight: 500,
+          background: 'rgba(0,0,0,0.4)', padding: '4px 12px', borderRadius: 20 }}>
+          {idx + 1} / {images.length}
+        </div>
+      )}
+
+      {/* Prev arrow */}
+      {images.length > 1 && (
+        <div onClick={e => { e.stopPropagation(); prev(); }} style={{
+          position: 'absolute', left: 12, color: '#fff', fontSize: 32,
+          cursor: 'pointer', padding: '8px 14px',
+          background: 'rgba(0,0,0,0.3)', borderRadius: 8, userSelect: 'none'
+        }}>‹</div>
+      )}
+
+      <img src={images[idx]} alt=""
+        onClick={e => e.stopPropagation()}
+        style={{ maxWidth: '90vw', maxHeight: '85vh', borderRadius: 8, objectFit: 'contain' }} />
+
+      {/* Next arrow */}
+      {images.length > 1 && (
+        <div onClick={e => { e.stopPropagation(); next(); }} style={{
+          position: 'absolute', right: 12, color: '#fff', fontSize: 32,
+          cursor: 'pointer', padding: '8px 14px',
+          background: 'rgba(0,0,0,0.3)', borderRadius: 8, userSelect: 'none'
+        }}>›</div>
+      )}
+    </div>
+  );
+}
+
+// ── Highlight toolbar ──────────────────────────────────────────────────────
+function HighlightToolbar({ onHighlight, onRemove }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+      marginBottom: 10
+    }}>
+      <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600 }}>HIGHLIGHT:</span>
+      {HL_COLORS.map(c => (
+        <button key={c.name} onClick={() => onHighlight(c)}
+          title={c.name}
+          style={{
+            width: 22, height: 22, borderRadius: 4, border: '1px solid #e5e7eb',
+            background: c.bg, cursor: 'pointer', flexShrink: 0
+          }} />
+      ))}
+      <button onClick={onRemove}
+        style={{ fontSize: 11, background: '#f3f4f6', border: '1px solid #e5e7eb',
+          borderRadius: 5, padding: '3px 10px', cursor: 'pointer',
+          color: '#6b7280', fontWeight: 600 }}>Remove</button>
+    </div>
+  );
+}
+
+// ── Highlightable textarea ─────────────────────────────────────────────────
+function HighlightableTextarea({ value, onChange, highlights, onHighlightsChange }) {
+  const textareaRef = useRef();
+
+  const applyHighlight = (color) => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    if (start === end) return;
+    const newHl = [...(highlights || []), { start, end, color }];
+    onHighlightsChange(newHl);
+  };
+
+  const removeHighlight = () => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    if (start === end) { onHighlightsChange([]); return; }
+    const filtered = (highlights || []).filter(h => !(h.start < end && h.end > start));
+    onHighlightsChange(filtered);
+  };
+
+  return (
+    <div>
+      <HighlightToolbar onHighlight={applyHighlight} onRemove={removeHighlight} />
+      <div style={{ position: 'relative' }}>
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={e => {
+            onChange(e.target.value);
+            onHighlightsChange([]); // clear highlights when text changes significantly
+          }}
+          rows={8}
+          style={{ ...inp, resize: 'vertical', lineHeight: 1.7 }}
+        />
+      </div>
+      {(highlights || []).length > 0 && (
+        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
+          {highlights.length} highlight{highlights.length !== 1 ? 's' : ''} applied
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main component ─────────────────────────────────────────────────────────
 export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId }) {
-  const [lightbox, setLightbox]   = useState(null);
-  const [deleting, setDeleting]   = useState(false);
-  const [editing, setEditing]     = useState(false);
+  const [lightboxIdx, setLightboxIdx] = useState(null);
+  const [deleting, setDeleting]       = useState(false);
+  const [editing, setEditing]         = useState(false);
 
-  const [editTitle, setEditTitle] = useState(entry.title);
-  const [editNotes, setEditNotes] = useState(entry.notes || '');
-  const [editDiff, setEditDiff]   = useState(entry.difficulty || 'Medium');
-  const [editImages, setEditImages] = useState(entry.images || []);
-  const [newImages, setNewImages] = useState([]);
-  const [saving, setSaving]       = useState(false);
-  const [editErr, setEditErr]     = useState(null);
-  const [sysOpen, setSysOpen]     = useState(false);
+  const [editTitle, setEditTitle]     = useState(entry.title);
+  const [editNotes, setEditNotes]     = useState(entry.notes || '');
+  const [editDiff, setEditDiff]       = useState(entry.difficulty || 'Medium');
+  const [editImages, setEditImages]   = useState(entry.images || []);
+  const [editHighlights, setEditHighlights] = useState(entry.highlights || []);
+  const [newImages, setNewImages]     = useState([]);
+  const [saving, setSaving]           = useState(false);
+  const [editErr, setEditErr]         = useState(null);
+
+  // View-mode highlight selection
+  const notesRef = useRef();
+  const [viewHighlights, setViewHighlights] = useState(entry.highlights || []);
+  const [showViewHL, setShowViewHL]   = useState(false);
 
   const color = SYS_COLOR[entry.system] || '#2563eb';
   const dc    = DIFF_COLOR[entry.difficulty] || '#6b7280';
@@ -57,6 +247,53 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     return data.publicUrl;
   };
 
+  // Apply highlight in view mode
+  const applyViewHighlight = (color) => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    const container = notesRef.current;
+    if (!container || !container.contains(range.commonAncestorContainer)) return;
+
+    // Calculate char offsets
+    const preRange = document.createRange();
+    preRange.selectNodeContents(container);
+    preRange.setEnd(range.startContainer, range.startOffset);
+    const start = preRange.toString().length;
+    const end = start + range.toString().length;
+
+    const newHl = [...viewHighlights, { start, end, color }];
+    setViewHighlights(newHl);
+    sel.removeAllRanges();
+
+    // Save to DB
+    supabase.from('entries').update({ highlights: newHl }).eq('id', entry.id).then(() => {});
+    onUpdated({ ...entry, highlights: newHl });
+  };
+
+  const removeViewHighlight = () => {
+    const sel = window.getSelection();
+    let newHl;
+    if (sel && !sel.isCollapsed) {
+      const range = sel.getRangeAt(0);
+      const container = notesRef.current;
+      if (container && container.contains(range.commonAncestorContainer)) {
+        const preRange = document.createRange();
+        preRange.selectNodeContents(container);
+        preRange.setEnd(range.startContainer, range.startOffset);
+        const start = preRange.toString().length;
+        const end = start + range.toString().length;
+        newHl = viewHighlights.filter(h => !(h.start < end && h.end > start));
+      }
+    } else {
+      newHl = [];
+    }
+    if (!newHl) newHl = [];
+    setViewHighlights(newHl);
+    supabase.from('entries').update({ highlights: newHl }).eq('id', entry.id).then(() => {});
+    onUpdated({ ...entry, highlights: newHl });
+  };
+
   const saveEdit = async () => {
     if (!editTitle.trim()) { setEditErr('Title is required'); return; }
     setSaving(true); setEditErr(null);
@@ -68,8 +305,10 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         notes: editNotes.trim(),
         difficulty: editDiff,
         images: allImages,
+        highlights: editHighlights,
       }).eq('id', entry.id).select().single();
       if (error) throw error;
+      setViewHighlights(editHighlights);
       onUpdated(data);
       setEditing(false);
       setNewImages([]);
@@ -83,6 +322,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     setEditNotes(entry.notes || '');
     setEditDiff(entry.difficulty || 'Medium');
     setEditImages(entry.images || []);
+    setEditHighlights(entry.highlights || []);
     setNewImages([]);
     setEditErr(null);
   };
@@ -114,8 +354,12 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         </Field>
 
         <Field label="REVIEW NOTES">
-          <textarea value={editNotes} onChange={e => setEditNotes(e.target.value)}
-            rows={8} style={{ ...inp, resize: 'vertical', lineHeight: 1.7 }} />
+          <HighlightableTextarea
+            value={editNotes}
+            onChange={setEditNotes}
+            highlights={editHighlights}
+            onHighlightsChange={setEditHighlights}
+          />
         </Field>
 
         {editImages.length > 0 && (
@@ -189,16 +433,12 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   return (
     <div style={{ maxWidth: 680, margin: '0 auto' }}>
 
-      {lightbox && (
-        <div onClick={() => setLightbox(null)} style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.88)', zIndex: 1000,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
-        }}>
-          <img src={lightbox} alt=""
-            style={{ maxWidth: '100%', maxHeight: '90vh', borderRadius: 8 }} />
-          <div style={{ position: 'absolute', top: 16, right: 20,
-            color: '#fff', fontSize: 26, cursor: 'pointer' }}>✕</div>
-        </div>
+      {lightboxIdx !== null && (
+        <Lightbox
+          images={entry.images}
+          startIndex={lightboxIdx}
+          onClose={() => setLightboxIdx(null)}
+        />
       )}
 
       <button onClick={onBack} style={{
@@ -242,22 +482,43 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         </div>
       </div>
 
-      {/* Notes */}
+      {/* Notes with highlighting */}
       {entry.notes && (
         <div style={{
           background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10,
           padding: '18px 20px', marginBottom: 14,
           boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
         }}>
-          <div style={{ fontSize: 10, color: '#9ca3af', letterSpacing: 0.8,
-            fontWeight: 600, textTransform: 'uppercase', marginBottom: 12 }}>Review Notes</div>
-          <div style={{ lineHeight: 1.85, fontSize: 14, color: '#1f2937', whiteSpace: 'pre-wrap' }}>
-            {entry.notes}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ fontSize: 10, color: '#9ca3af', letterSpacing: 0.8,
+              fontWeight: 600, textTransform: 'uppercase' }}>Review Notes</div>
+            <button onClick={() => setShowViewHL(p => !p)} style={{
+              fontSize: 11, background: showViewHL ? '#fef9c3' : '#f3f4f6',
+              border: `1px solid ${showViewHL ? '#fde68a' : '#e5e7eb'}`,
+              borderRadius: 5, padding: '3px 10px', cursor: 'pointer',
+              color: showViewHL ? '#92400e' : '#6b7280', fontWeight: 600
+            }}>🖊 {showViewHL ? 'Done highlighting' : 'Highlight'}</button>
           </div>
+
+          {showViewHL && (
+            <HighlightToolbar onHighlight={applyViewHighlight} onRemove={removeViewHighlight} />
+          )}
+
+          <div ref={notesRef} style={{ lineHeight: 1.85, fontSize: 14, color: '#1f2937',
+            userSelect: showViewHL ? 'text' : 'auto' }}>
+            {renderHighlighted(entry.notes, viewHighlights)}
+          </div>
+
+          {showViewHL && (
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 10 }}>
+              Select text then tap a colour to highlight. Highlights save automatically.
+            </div>
+          )}
         </div>
       )}
 
-      {/* Images — horizontal scroll per entry */}
+      {/* Images */}
       {entry.images?.length > 0 && (
         <div style={{
           background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10,
@@ -265,20 +526,20 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         }}>
           <div style={{ fontSize: 10, color: '#9ca3af', letterSpacing: 0.8,
             fontWeight: 600, textTransform: 'uppercase', marginBottom: 14 }}>
-            Images ({entry.images.length}) — scroll horizontally · tap to expand
+            Images ({entry.images.length}) — tap to expand & swipe
           </div>
-          {/* Horizontal scroll strip */}
           <div style={{
             display: 'flex', gap: 10, overflowX: 'auto',
             WebkitOverflowScrolling: 'touch', paddingBottom: 8,
             scrollSnapType: 'x mandatory'
           }}>
             {entry.images.map((url, i) => (
-              <img key={i} src={url} alt="" onClick={() => setLightbox(url)}
+              <img key={i} src={url} alt=""
+                onClick={() => setLightboxIdx(i)}
                 style={{
-                  height: 200, width: 'auto', maxWidth: '85vw',
+                  height: 180, width: 'auto', maxWidth: '80vw',
                   flexShrink: 0, borderRadius: 8, border: '1px solid #e5e7eb',
-                  cursor: 'zoom-in', objectFit: 'contain', background: '#f9fafb',
+                  cursor: 'pointer', objectFit: 'contain', background: '#f9fafb',
                   scrollSnapAlign: 'start'
                 }} />
             ))}
