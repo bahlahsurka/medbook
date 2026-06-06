@@ -9,6 +9,8 @@ import DetailView from './components/DetailView';
 import Dashboard from './components/Dashboard';
 import ManageSystems from './components/ManageSystems';
 import ReviewQueue from './components/ReviewQueue';
+import FlashCards from './components/FlashCards';
+import QuickAdd from './components/QuickAdd';
 import Onboarding from './components/Onboarding';
 
 const ONBOARD_KEY = 'medbook_onboarded';
@@ -31,6 +33,9 @@ export default function App() {
   const [showManage, setManage]   = useState(false);
   const [showOnboard, setOnboard] = useState(() => !localStorage.getItem(ONBOARD_KEY));
 
+  const [selected2, setSelected2]   = useState(new Set()); // bulk select ids
+  const [bulkMode, setBulkMode]       = useState(false);
+  const [showQuickAdd, setQuickAdd]   = useState(false);
   const toastRef  = useRef();
   const importRef = useRef();
 
@@ -126,6 +131,16 @@ export default function App() {
     }));
     setSelected(updated);
   }, []);
+
+  const onQuickSaved = useCallback((saved) => {
+    const arr = Array.isArray(saved) ? saved : [saved];
+    setEntries(prev => {
+      const next = {...prev};
+      arr.forEach(e => { next[e.system] = [e, ...(next[e.system]||[])]; });
+      return next;
+    });
+    showToast('Entry saved ✓');
+  }, [showToast]);
 
   const onReviewed = useCallback((updated) => {
     setEntries(prev => ({
@@ -256,6 +271,18 @@ export default function App() {
 
       <input ref={importRef} type="file" accept=".json"
         style={{ display: 'none' }} onChange={importJSON} />
+
+      {/* Quick Add (mobile) */}
+      {showQuickAdd && (
+        <QuickAdd
+          userId={session.user.id}
+          activeSystem={activeSystem}
+          userSystems={userSystems}
+          color={color}
+          onSaved={onQuickSaved}
+          onClose={() => setQuickAdd(false)}
+        />
+      )}
 
       {/* Sidebar */}
       <div style={{
@@ -420,6 +447,11 @@ export default function App() {
                 </div>
               )}
 
+              {/* FLASHCARDS */}
+              {view === 'cards' && (
+                <FlashCards userId={session.user.id} />
+              )}
+
               {/* REVIEW QUEUE */}
               {view === 'review' && (
                 <ReviewQueue allEntries={entries} onReviewed={onReviewed} />
@@ -453,14 +485,43 @@ export default function App() {
 
               {/* ENTRY LIST */}
               {view === 'list' && (
-                <div style={{ maxWidth: 680, margin: '0 auto' }}>
+                <div style={{ maxWidth: 680, margin: '0 auto', position:'relative' }}>
+
+                  {/* Bulk action bar */}
+                  {sysEntries.length > 0 && (
+                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12, flexWrap:'wrap' }}>
+                      <button onClick={()=>{ setBulkMode(p=>!p); setSelected2(new Set()); }} style={{
+                        fontSize:12, background:bulkMode?'#eff6ff':'#f3f4f6',
+                        border:`1px solid ${bulkMode?'#bfdbfe':'#e5e7eb'}`,
+                        borderRadius:6, padding:'5px 12px', cursor:'pointer',
+                        color:bulkMode?'#2563eb':'#6b7280', fontWeight:600, fontFamily:'Inter,sans-serif'
+                      }}>{bulkMode?`✓ ${selected2.size} selected`:'☑ Select'}</button>
+
+                      {bulkMode && selected2.size > 0 && (<>
+                        <button onClick={()=>bulkPin(true)} style={bBtn('#d97706')}>📌 Pin</button>
+                        <button onClick={()=>bulkPin(false)} style={bBtn('#6b7280')}>Unpin</button>
+                        <select onChange={e=>{ if(e.target.value) bulkMove(e.target.value); e.target.value=''; }}
+                          defaultValue="" style={{ fontSize:12, border:'1px solid #e5e7eb', borderRadius:6,
+                            padding:'5px 10px', cursor:'pointer', color:'#374151', fontFamily:'Inter,sans-serif' }}>
+                          <option value="" disabled>Move to…</option>
+                          {userSystems.filter(s=>s.name!==activeSystem).map(s=>(
+                            <option key={s.name} value={s.name}>{s.name}</option>
+                          ))}
+                        </select>
+                        <button onClick={bulkDelete} style={bBtn('#dc2626')}>🗑 Delete</button>
+                      </>)}
+
+                      {bulkMode && selected2.size === 0 && (
+                        <span style={{fontSize:12,color:'#9ca3af'}}>Long-press or tap cards to select</span>
+                      )}
+                    </div>
+                  )}
+
                   {sysEntries.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '60px 20px' }}>
                       <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
                       <div style={{ fontSize: 14, color: '#6b7280' }}>
-                        {search
-                          ? 'No entries match your search'
-                          : `No entries yet for ${activeSystem}`}
+                        {search ? 'No entries match your search' : `No entries yet for ${activeSystem}`}
                       </div>
                       {!search && (
                         <button onClick={() => setView('add')} style={{
@@ -472,11 +533,42 @@ export default function App() {
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {sysEntries.map(entry => (
-                        <EntryCard key={entry.id} entry={entry} color={color}
-                          onClick={() => { setSelected(entry); setView('detail'); }} />
-                      ))}
+                      {sysEntries.map(entry => {
+                        const isSelected = selected2.has(entry.id);
+                        return (
+                          <div key={entry.id}
+                            onClick={() => {
+                              if (bulkMode) { toggleSelect(entry.id); }
+                              else { setSelected(entry); setView('detail'); }
+                            }}
+                            onContextMenu={e=>{ e.preventDefault(); setBulkMode(true); toggleSelect(entry.id); }}
+                            style={{ position:'relative', outline: isSelected?`2px solid ${color}`:'none',
+                              borderRadius:8, transition:'outline .1s' }}>
+                            {bulkMode && (
+                              <div style={{ position:'absolute', top:10, left:10, zIndex:10,
+                                width:20, height:20, borderRadius:4,
+                                background:isSelected?color:'#fff',
+                                border:`2px solid ${isSelected?color:'#d1d5db'}`,
+                                display:'flex', alignItems:'center', justifyContent:'center' }}>
+                                {isSelected && <span style={{color:'#fff',fontSize:12,fontWeight:700}}>✓</span>}
+                              </div>
+                            )}
+                            <EntryCard entry={entry} color={color} />
+                          </div>
+                        );
+                      })}
                     </div>
+                  )}
+
+                  {/* Mobile FAB */}
+                  {isMobile && !bulkMode && (
+                    <button onClick={()=>setQuickAdd(true)} style={{
+                      position:'fixed', bottom:24, right:20, width:56, height:56,
+                      borderRadius:'50%', background:color, color:'#fff',
+                      border:'none', fontSize:26, cursor:'pointer',
+                      boxShadow:'0 4px 16px rgba(0,0,0,.2)', zIndex:100,
+                      display:'flex', alignItems:'center', justifyContent:'center'
+                    }}>+</button>
                   )}
                 </div>
               )}
@@ -486,4 +578,12 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+function bBtn(color) {
+  return {
+    fontSize:12, background:`${color}10`, border:`1px solid ${color}30`,
+    color, borderRadius:6, padding:'5px 10px', cursor:'pointer',
+    fontWeight:600, fontFamily:'Inter,sans-serif'
+  };
 }

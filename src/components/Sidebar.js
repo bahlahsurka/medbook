@@ -28,6 +28,7 @@ export default function Sidebar({ open, entries, activeSystem, setActiveSystem,
         {[
           { id:'search', icon:'🔍', label:'Global Search' },
           { id:'review', icon:'🔁', label:'Review Queue', badge: dueCount > 0 ? dueCount : null },
+          { id:'cards',  icon:'🃏', label:'Flashcards' },
           { id:'stats',  icon:'📊', label:'Dashboard' },
         ].map(n => (
           <div key={n.id} onClick={() => setView(n.id)} style={{
