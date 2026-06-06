@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { supabase } from './lib/supabase';
 import { SYSTEMS, SYS_COLOR, loadUserSystems, saveUserSystems } from './lib/constants';
 import Auth from './components/Auth';
@@ -188,6 +188,74 @@ export default function App() {
     if (!list.find(s => s.name === activeSystem)) setAS(list[0]?.name || '');
     setManage(false);
     showToast('Systems updated ✓');
+  };
+
+  // ── Bulk select handlers ───────────────────────────────────────────────
+  const toggleSelect = useCallback((id) => {
+    setSelected2(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+
+  const bulkDelete = useCallback(async () => {
+    if (!window.confirm(`Delete ${selected2.size} entr${selected2.size === 1 ? 'y' : 'ies'}? Cannot be undone.`)) return;
+    const ids = [...selected2];
+    await supabase.from('entries').delete().in('id', ids);
+    setEntries(prev => {
+      const next = { ...prev };
+      Object.keys(next).forEach(sys => {
+        next[sys] = next[sys].filter(e => !ids.includes(e.id));
+      });
+      return next;
+    });
+    setBulkMode(false);
+    setSelected2(new Set());
+    showToast(`Deleted ${ids.length} entr${ids.length === 1 ? 'y' : 'ies'}`, 'warn');
+  }, [selected2, showToast]);
+
+  const bulkPin = useCallback(async (pin) => {
+    const ids = [...selected2];
+    await supabase.from('entries').update({ pinned: pin }).in('id', ids);
+    setEntries(prev => {
+      const next = { ...prev };
+      Object.keys(next).forEach(sys => {
+        next[sys] = next[sys].map(e => ids.includes(e.id) ? { ...e, pinned: pin } : e);
+      });
+      return next;
+    });
+    setBulkMode(false);
+    setSelected2(new Set());
+    showToast(`${pin ? 'Pinned' : 'Unpinned'} ${ids.length} entr${ids.length === 1 ? 'y' : 'ies'} ✓`);
+  }, [selected2, showToast]);
+
+  const bulkMove = useCallback(async (targetSystem) => {
+    const ids = [...selected2];
+    await supabase.from('entries').update({ system: targetSystem }).in('id', ids);
+    setEntries(prev => {
+      const next = { ...prev };
+      const moved = [];
+      Object.keys(next).forEach(sys => {
+        const keep = [];
+        next[sys].forEach(e => {
+          if (ids.includes(e.id)) moved.push({ ...e, system: targetSystem });
+          else keep.push(e);
+        });
+        next[sys] = keep;
+      });
+      if (!next[targetSystem]) next[targetSystem] = [];
+      next[targetSystem] = [...moved, ...next[targetSystem]];
+      return next;
+    });
+    setBulkMode(false);
+    setSelected2(new Set());
+    showToast(`Moved ${ids.length} entr${ids.length === 1 ? 'y' : 'ies'} to ${targetSystem} ✓`);
+  }, [selected2, showToast]);
+
+  const handleOnboardDone = () => {
+    localStorage.setItem(ONBOARD_KEY, '1');
+    setOnboard(false);
   };
 
   // Computed
@@ -533,30 +601,23 @@ export default function App() {
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {sysEntries.map(entry => {
-                        const isSelected = selected2.has(entry.id);
-                        return (
-                          <div key={entry.id}
-                            onClick={() => {
-                              if (bulkMode) { toggleSelect(entry.id); }
-                              else { setSelected(entry); setView('detail'); }
-                            }}
-                            onContextMenu={e=>{ e.preventDefault(); setBulkMode(true); toggleSelect(entry.id); }}
-                            style={{ position:'relative', outline: isSelected?`2px solid ${color}`:'none',
-                              borderRadius:8, transition:'outline .1s' }}>
-                            {bulkMode && (
-                              <div style={{ position:'absolute', top:10, left:10, zIndex:10,
-                                width:20, height:20, borderRadius:4,
-                                background:isSelected?color:'#fff',
-                                border:`2px solid ${isSelected?color:'#d1d5db'}`,
-                                display:'flex', alignItems:'center', justifyContent:'center' }}>
-                                {isSelected && <span style={{color:'#fff',fontSize:12,fontWeight:700}}>✓</span>}
-                              </div>
-                            )}
-                            <EntryCard entry={entry} color={color} />
-                          </div>
-                        );
-                      })}
+                      {sysEntries.map(entry => (
+                        <SelectableCard
+                          key={entry.id}
+                          entry={entry}
+                          color={color}
+                          bulkMode={bulkMode}
+                          isSelected={selected2.has(entry.id)}
+                          onTap={() => {
+                            if (bulkMode) toggleSelect(entry.id);
+                            else { setSelected(entry); setView('detail'); }
+                          }}
+                          onLongPress={() => {
+                            setBulkMode(true);
+                            toggleSelect(entry.id);
+                          }}
+                        />
+                      ))}
                     </div>
                   )}
 
@@ -576,6 +637,66 @@ export default function App() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Long-press selectable card wrapper
+function SelectableCard({ entry, color, bulkMode, isSelected, onTap, onLongPress }) {
+  const timer = React.useRef(null);
+  const moved = React.useRef(false);
+
+  const startPress = () => {
+    moved.current = false;
+    timer.current = setTimeout(() => {
+      if (!moved.current) onLongPress();
+    }, 500);
+  };
+
+  const endPress = (e) => {
+    clearTimeout(timer.current);
+    // If it was a short tap (no long press fired), handle as tap
+    // We detect long press via timeout so just clear here
+  };
+
+  const cancelPress = () => {
+    moved.current = true;
+    clearTimeout(timer.current);
+  };
+
+  return (
+    <div
+      style={{
+        position: 'relative',
+        outline: isSelected ? `2px solid ${color}` : 'none',
+        borderRadius: 8,
+        transition: 'outline .1s',
+        cursor: 'pointer',
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+      }}
+      onClick={onTap}
+      onContextMenu={e => { e.preventDefault(); onLongPress(); }}
+      onTouchStart={startPress}
+      onTouchEnd={endPress}
+      onTouchMove={cancelPress}
+      onMouseDown={startPress}
+      onMouseUp={endPress}
+      onMouseLeave={cancelPress}
+    >
+      {bulkMode && (
+        <div style={{
+          position: 'absolute', top: 10, left: 10, zIndex: 10,
+          width: 22, height: 22, borderRadius: 5,
+          background: isSelected ? color : '#fff',
+          border: `2px solid ${isSelected ? color : '#d1d5db'}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 1px 3px rgba(0,0,0,.15)'
+        }}>
+          {isSelected && <span style={{ color: '#fff', fontSize: 13, fontWeight: 700 }}>✓</span>}
+        </div>
+      )}
+      <EntryCard entry={entry} color={color} />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { DIFFICULTY, DIFF_COLOR } from '../lib/constants';
-import { HL_COLORS, HLToolbar, adjustHighlights } from '../lib/highlights';
+import { HL_COLORS, adjustHighlights } from '../lib/highlights';
 
 const DRAFT_KEY = 'medbook_draft_v1';
 function loadDraft(sys) {
@@ -195,7 +195,20 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
               borderRadius:5, padding:'4px 10px', cursor:'pointer',
               color:hlMode?'#92400e':'#6b7280', fontWeight:600, fontFamily:'Inter,sans-serif'
             }}>🖊 {hlMode?'Highlighting on':'Highlight text'}</button>
-            {hlMode && <HLToolbar onApply={applyHL} onRemove={removeHL} compact />}
+            {hlMode && (
+              <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
+                {HL_COLORS.map((c, i) => (
+                  <button key={i} onClick={() => applyHL(c)} title={c.label}
+                    style={{ width:24, height:24, borderRadius:5, border:'1px solid #e5e7eb',
+                      background:c.bg, cursor:'pointer', flexShrink:0 }} />
+                ))}
+                <button onClick={removeHL} style={{ fontSize:11, background:'#f3f4f6',
+                  border:'1px solid #e5e7eb', borderRadius:5, padding:'3px 10px',
+                  cursor:'pointer', color:'#6b7280', fontWeight:600, fontFamily:'Inter,sans-serif' }}>
+                  Remove
+                </button>
+              </div>
+            )}
             {highlights.length > 0 && (
               <span style={{ fontSize:11, color:'#9ca3af' }}>{highlights.length} highlight{highlights.length!==1?'s':''}</span>
             )}
