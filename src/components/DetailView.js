@@ -144,16 +144,30 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const exportPDF = ()=>{
     const win=window.open('','_blank');
     win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${entry.title}</title>
-    <style>body{font-family:sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#1f2937}
-    h1{font-size:20px;margin-bottom:8px}.meta{font-size:12px;color:#6b7280;margin-bottom:16px}
-    .notes{font-size:14px;line-height:1.8;white-space:pre-wrap;border-top:1px solid #e5e7eb;
-    padding-top:16px;margin-top:16px}img{max-width:100%;margin:10px 0;border-radius:6px;display:block}
-    @media print{body{padding:0}}</style></head><body>
-    <div class="meta">${entry.system}·${entry.difficulty}·${fmt(entry.created_at)}</div>
-    <h1>${entry.title}</h1><div class="notes">${entry.notes||''}</div>
+    <style>
+      body{font-family:sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#1f2937}
+      h1{font-size:20px;margin-bottom:8px}
+      .meta{font-size:12px;color:#6b7280;margin-bottom:16px}
+      .notes{font-size:14px;line-height:1.8;white-space:pre-wrap;border-top:1px solid #e5e7eb;padding-top:16px;margin-top:16px}
+      img{max-width:100%;margin:10px 0;border-radius:6px;display:block}
+      .back-btn{display:inline-block;margin-bottom:20px;padding:8px 16px;background:#f3f4f6;
+        border:1px solid #e5e7eb;border-radius:8px;font-size:13px;cursor:pointer;
+        color:#374151;font-weight:600;text-decoration:none;}
+      @media print{.back-btn{display:none}body{padding:0}}
+    </style></head><body>
+    <a class="back-btn" onclick="window.close()">← Close & Go Back</a>
+    <div class="meta">${entry.system} · ${entry.difficulty} · ${fmt(entry.created_at)}</div>
+    <h1>${entry.title}</h1>
+    <div class="notes">${entry.notes||''}</div>
     ${(entry.images||[]).map(u=>`<img src="${u}"/>`).join('')}
     </body></html>`);
-    win.document.close();win.focus();setTimeout(()=>win.print(),600);
+    win.document.close();
+    win.focus();
+    setTimeout(()=>{
+      win.print();
+      // Auto-close after print dialog on mobile
+      win.onafterprint = ()=>win.close();
+    }, 600);
   };
 
   const loadNewImgs = (files)=>{
