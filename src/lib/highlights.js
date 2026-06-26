@@ -14,8 +14,8 @@ export function buildHighlightParts(text, highlights) {
   sorted.forEach(h => {
     if (h.start >= h.end) return;
     const start = Math.max(h.start, cursor);
-    if (start > cursor) parts.push({ t:text.slice(cursor, start), hl:null });
-    if (start < h.end) { parts.push({ t:text.slice(start, h.end), hl:h.color }); cursor = h.end; }
+    if (start > cursor) parts.push({ t:text.slice(cursor,start), hl:null });
+    if (start < h.end) { parts.push({ t:text.slice(start,h.end), hl:h.color }); cursor = h.end; }
   });
   if (cursor < text.length) parts.push({ t:text.slice(cursor), hl:null });
   return parts;
@@ -28,4 +28,19 @@ export function adjustHighlights(oldText, newText, highlights) {
     if (h.end > newText.length) return false;
     return newText.slice(h.start, h.end) === oldText.slice(h.start, h.end);
   });
+}
+
+// Get selection offsets within a container element — works on desktop
+export function getSelectionOffsets(container) {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !container) return null;
+  const range = sel.getRangeAt(0);
+  if (!container.contains(range.commonAncestorContainer)) return null;
+  const pre = document.createRange();
+  pre.selectNodeContents(container);
+  pre.setEnd(range.startContainer, range.startOffset);
+  const start = pre.toString().length;
+  const end = start + range.toString().length;
+  if (start >= end) return null;
+  return { start, end };
 }
