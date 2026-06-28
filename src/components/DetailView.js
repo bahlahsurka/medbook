@@ -113,8 +113,9 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const [hlEditOn,setHEOn]    = useState(false);
   const [viewHL,setVHL]       = useState(entry.highlights||[]);
   const [hlViewOn,setHVOn]    = useState(false);
-  const notesRef  = useRef();
-  const editTaRef = useRef();
+  const notesRef    = useRef();
+  const editTaRef   = useRef();
+  const savedEditSel = useRef({ start:0, end:0 });
 
   const color = SYS_COLOR[entry.system]||'#2563eb';
   const dc    = DIFF_COLOR[entry.difficulty]||'#6b7280';
@@ -188,18 +189,24 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     return supabase.storage.from('entry-images').getPublicUrl(path).data.publicUrl;
   };
 
-  // Edit mode highlight (textarea selection)
-  const applyEditHL=(c)=>{
-    const ta=editTaRef.current;if(!ta)return;
-    const s=ta.selectionStart,e=ta.selectionEnd;
-    if(s===e){alert('Select text first');return;}
-    setEHL(p=>[...p,{start:s,end:e,color:c}]);
+  // Save edit textarea selection before focus lost (mobile fix)
+  const onEditTASelect = () => {
+    const ta = editTaRef.current; if (!ta) return;
+    if (ta.selectionStart !== ta.selectionEnd)
+      savedEditSel.current = { start: ta.selectionStart, end: ta.selectionEnd };
   };
-  const removeEditHL=()=>{
-    const ta=editTaRef.current;if(!ta)return;
-    const s=ta.selectionStart,e=ta.selectionEnd;
-    if(s===e){setEHL([]);return;}
-    setEHL(p=>p.filter(h=>!(h.start<e&&h.end>s)));
+
+  const applyEditHL = (c) => {
+    const { start, end } = savedEditSel.current;
+    if (start === end) { alert('Select text first'); return; }
+    setEHL(p => [...p, { start, end, color: c }]);
+    savedEditSel.current = { start:0, end:0 };
+  };
+  const removeEditHL = () => {
+    const { start, end } = savedEditSel.current;
+    if (start === end) { setEHL([]); return; }
+    setEHL(p => p.filter(h => !(h.start < end && h.end > start)));
+    savedEditSel.current = { start:0, end:0 };
   };
   const handleEditNotesChange=(val)=>{
     setEHL(prev=>adjustHighlights(editNotes,val,prev));
@@ -295,6 +302,8 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
           {hlEditOn&&<div style={{fontSize:11,color:'#9ca3af',marginBottom:6}}>Select text below, then tap a colour.</div>}
           <textarea ref={editTaRef} value={editNotes}
             onChange={e=>handleEditNotesChange(e.target.value)}
+            onSelect={onEditTASelect} onMouseUp={onEditTASelect}
+            onTouchEnd={onEditTASelect} onKeyUp={onEditTASelect}
             rows={8} style={{...inp,resize:'vertical',lineHeight:1.7}} />
         </F>
         {editImgs.length>0&&(

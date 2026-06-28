@@ -51,6 +51,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
   const [hlMode, setHlMode]   = useState(false);
 
   const fileRef = useRef(); const galRef = useRef(); const taRef = useRef();
+  const savedSel = useRef({ start:0, end:0 }); // saves selection before focus lost on mobile
 
   useEffect(() => {
     saveDraft(activeSystem, { title, notes, difficulty, systems, highlights });
@@ -76,21 +77,29 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
     return supabase.storage.from('entry-images').getPublicUrl(path).data.publicUrl;
   };
 
-  // Apply highlight from textarea selection
-  const applyHL = (c) => {
+  // Save selection whenever user selects text in textarea
+  const onTASelect = () => {
     const ta = taRef.current;
     if (!ta) return;
-    const s = ta.selectionStart, e = ta.selectionEnd;
-    if (s === e) { alert('Select some text first, then tap a colour.'); return; }
-    setHL(p => [...p, { start:s, end:e, color:c }]);
+    if (ta.selectionStart !== ta.selectionEnd) {
+      savedSel.current = { start: ta.selectionStart, end: ta.selectionEnd };
+    }
+  };
+
+  // Apply highlight using saved selection (works on mobile where focus is lost on colour tap)
+  const applyHL = (c) => {
+    const { start, end } = savedSel.current;
+    if (start === end) { alert('Select some text first, then tap a colour.'); return; }
+    setHL(p => [...p, { start, end, color: c }]);
+    // Reset saved selection
+    savedSel.current = { start: 0, end: 0 };
   };
 
   const removeHL = () => {
-    const ta = taRef.current;
-    if (!ta) return;
-    const s = ta.selectionStart, e = ta.selectionEnd;
-    if (s === e) { setHL([]); return; }
-    setHL(p => p.filter(h => !(h.start < e && h.end > s)));
+    const { start, end } = savedSel.current;
+    if (start === end) { setHL([]); return; }
+    setHL(p => p.filter(h => !(h.start < end && h.end > start)));
+    savedSel.current = { start: 0, end: 0 };
   };
 
   const handleNotesChange = (val) => {
@@ -222,6 +231,10 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
               ref={taRef}
               value={notes}
               onChange={e=>handleNotesChange(e.target.value)}
+              onSelect={onTASelect}
+              onMouseUp={onTASelect}
+              onTouchEnd={onTASelect}
+              onKeyUp={onTASelect}
               placeholder="Key concepts, mnemonics, clinical pearls…"
               rows={8}
               disabled={saving}
