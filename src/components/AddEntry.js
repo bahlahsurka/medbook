@@ -77,29 +77,54 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
     return supabase.storage.from('entry-images').getPublicUrl(path).data.publicUrl;
   };
 
-  // Save selection whenever user selects text in textarea
+  const [selLocked, setSelLocked] = useState(false); // true when selection is locked in
+
+  // Called on every selection change in textarea
   const onTASelect = () => {
-    const ta = taRef.current;
-    if (!ta) return;
+    const ta = taRef.current; if (!ta) return;
     if (ta.selectionStart !== ta.selectionEnd) {
       savedSel.current = { start: ta.selectionStart, end: ta.selectionEnd };
+      setSelLocked(false);
     }
   };
 
-  // Apply highlight using saved selection (works on mobile where focus is lost on colour tap)
+  // Lock the selection in (user taps this before tapping colour on mobile)
+  const lockSelection = () => {
+    const ta = taRef.current;
+    // Try live selection first
+    if (ta && ta.selectionStart !== ta.selectionEnd) {
+      savedSel.current = { start: ta.selectionStart, end: ta.selectionEnd };
+    }
+    if (savedSel.current.start === savedSel.current.end) {
+      alert('Select some text first.');
+      return;
+    }
+    setSelLocked(true);
+  };
+
   const applyHL = (c) => {
+    // On desktop, try live selection first
+    const ta = taRef.current;
+    if (ta && ta.selectionStart !== ta.selectionEnd) {
+      savedSel.current = { start: ta.selectionStart, end: ta.selectionEnd };
+    }
     const { start, end } = savedSel.current;
-    if (start === end) { alert('Select some text first, then tap a colour.'); return; }
+    if (start === end) { alert('Select text first, then tap Mark, then choose a colour.'); return; }
     setHL(p => [...p, { start, end, color: c }]);
-    // Reset saved selection
-    savedSel.current = { start: 0, end: 0 };
+    savedSel.current = { start:0, end:0 };
+    setSelLocked(false);
   };
 
   const removeHL = () => {
+    const ta = taRef.current;
+    if (ta && ta.selectionStart !== ta.selectionEnd) {
+      savedSel.current = { start: ta.selectionStart, end: ta.selectionEnd };
+    }
     const { start, end } = savedSel.current;
     if (start === end) { setHL([]); return; }
     setHL(p => p.filter(h => !(h.start < end && h.end > start)));
-    savedSel.current = { start: 0, end: 0 };
+    savedSel.current = { start:0, end:0 };
+    setSelLocked(false);
   };
 
   const handleNotesChange = (val) => {
@@ -201,27 +226,50 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
         <F label="REVIEW NOTES">
           {/* Highlight toolbar */}
           <div style={{display:'flex',alignItems:'center',gap:8,marginTop:8,marginBottom:6,flexWrap:'wrap'}}>
-            <button onClick={()=>setHlMode(p=>!p)} style={{
+            <button onClick={()=>{setHlMode(p=>!p);setSelLocked(false);savedSel.current={start:0,end:0};}} style={{
               fontSize:11,background:hlMode?'#fef9c3':'#f3f4f6',
               border:`1px solid ${hlMode?'#fde68a':'#e5e7eb'}`,
               borderRadius:5,padding:'4px 10px',cursor:'pointer',
               color:hlMode?'#92400e':'#6b7280',fontWeight:600,fontFamily:'Inter,sans-serif'
             }}>🖊 {hlMode?'Highlighting on':'Highlight'}</button>
-            {hlMode&&HL_COLORS.map((c,i)=>(
+
+            {hlMode && !selLocked && (
+              <button onClick={lockSelection} style={{
+                fontSize:11,background:'#2563eb',color:'#fff',
+                border:'none',borderRadius:5,padding:'4px 12px',
+                cursor:'pointer',fontWeight:600,fontFamily:'Inter,sans-serif'
+              }}>✓ Mark Selection</button>
+            )}
+
+            {hlMode && selLocked && (
+              <span style={{fontSize:11,color:'#16a34a',fontWeight:600,
+                background:'#f0fdf4',border:'1px solid #bbf7d0',
+                borderRadius:5,padding:'3px 10px'}}>
+                ✓ Selected — now tap a colour:
+              </span>
+            )}
+
+            {hlMode && HL_COLORS.map((c,i)=>(
               <button key={i} onClick={()=>applyHL(c)} title={c.label}
-                style={{width:24,height:24,borderRadius:5,border:'1px solid #e5e7eb',
-                  background:c.bg,cursor:'pointer',flexShrink:0}} />
+                style={{width:24,height:24,borderRadius:5,
+                  border:`2px solid ${selLocked?'#2563eb':'#e5e7eb'}`,
+                  background:c.bg,cursor:'pointer',flexShrink:0,
+                  opacity:selLocked?1:0.5}} />
             ))}
-            {hlMode&&<button onClick={removeHL} style={{fontSize:11,background:'#f3f4f6',
+
+            {hlMode && <button onClick={removeHL} style={{fontSize:11,background:'#f3f4f6',
               border:'1px solid #e5e7eb',borderRadius:5,padding:'3px 10px',
               cursor:'pointer',color:'#6b7280',fontWeight:600,fontFamily:'Inter,sans-serif'}}>
               Remove</button>}
+
             {highlights.length>0&&<span style={{fontSize:11,color:'#9ca3af'}}>
               {highlights.length} highlight{highlights.length!==1?'s':''}</span>}
           </div>
-          {hlMode&&<div style={{fontSize:11,color:'#9ca3af',marginBottom:6}}>
-            Select text in the box, then tap a colour button above.
-          </div>}
+          {hlMode && !selLocked && (
+            <div style={{fontSize:11,color:'#9ca3af',marginBottom:6}}>
+              1. Select text in the box below &nbsp;2. Tap <strong>✓ Mark Selection</strong> &nbsp;3. Tap a colour
+            </div>
+          )}
 
           {/* Textarea with highlight overlay */}
           <div style={{position:'relative'}}>

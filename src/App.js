@@ -13,6 +13,7 @@ import ReviewQueue from './components/ReviewQueue';
 import FlashCards from './components/FlashCards';
 import Onboarding from './components/Onboarding';
 import QuickAdd from './components/QuickAdd';
+import SystemReview from './components/SystemReview';
 
 const ONBOARD_KEY = 'medbook_onboarded';
 
@@ -301,6 +302,16 @@ export default function App() {
       {showManage && (
         <ManageSystems systems={userSystems} onSave={handleSaveSystems}
           onClose={()=>setManage(false)} userId={session.user.id} />
+      )}
+
+      {showSysReview && (
+        <SystemReview
+          system={activeSystem}
+          entries={entries[activeSystem] || []}
+          color={color}
+          onReviewed={onReviewed}
+          onClose={() => setSysReview(false)}
+        />
       )}
 
       {showQuickAdd && (

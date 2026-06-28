@@ -116,6 +116,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const notesRef    = useRef();
   const editTaRef   = useRef();
   const savedEditSel = useRef({ start:0, end:0 });
+  const [editSelLocked, setESL] = useState(false);
 
   const color = SYS_COLOR[entry.system]||'#2563eb';
   const dc    = DIFF_COLOR[entry.difficulty]||'#6b7280';
@@ -189,24 +190,40 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     return supabase.storage.from('entry-images').getPublicUrl(path).data.publicUrl;
   };
 
-  // Save edit textarea selection before focus lost (mobile fix)
   const onEditTASelect = () => {
     const ta = editTaRef.current; if (!ta) return;
-    if (ta.selectionStart !== ta.selectionEnd)
+    if (ta.selectionStart !== ta.selectionEnd) {
       savedEditSel.current = { start: ta.selectionStart, end: ta.selectionEnd };
+      setESL(false);
+    }
+  };
+
+  const lockEditSel = () => {
+    const ta = editTaRef.current;
+    if (ta && ta.selectionStart !== ta.selectionEnd)
+      savedEditSel.current = { start: ta.selectionStart, end: ta.selectionEnd };
+    if (savedEditSel.current.start === savedEditSel.current.end) { alert('Select text first.'); return; }
+    setESL(true);
   };
 
   const applyEditHL = (c) => {
+    const ta = editTaRef.current;
+    if (ta && ta.selectionStart !== ta.selectionEnd)
+      savedEditSel.current = { start: ta.selectionStart, end: ta.selectionEnd };
     const { start, end } = savedEditSel.current;
-    if (start === end) { alert('Select text first'); return; }
+    if (start === end) { alert('Select text, tap Mark Selection, then choose a colour.'); return; }
     setEHL(p => [...p, { start, end, color: c }]);
-    savedEditSel.current = { start:0, end:0 };
+    savedEditSel.current = { start:0, end:0 }; setESL(false);
   };
+
   const removeEditHL = () => {
+    const ta = editTaRef.current;
+    if (ta && ta.selectionStart !== ta.selectionEnd)
+      savedEditSel.current = { start: ta.selectionStart, end: ta.selectionEnd };
     const { start, end } = savedEditSel.current;
     if (start === end) { setEHL([]); return; }
     setEHL(p => p.filter(h => !(h.start < end && h.end > start)));
-    savedEditSel.current = { start:0, end:0 };
+    savedEditSel.current = { start:0, end:0 }; setESL(false);
   };
   const handleEditNotesChange=(val)=>{
     setEHL(prev=>adjustHighlights(editNotes,val,prev));
@@ -290,16 +307,37 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         </F>
         <F label="REVIEW NOTES">
           <div style={{display:'flex',alignItems:'center',gap:8,marginTop:8,marginBottom:6,flexWrap:'wrap'}}>
-            <button onClick={()=>setHEOn(p=>!p)} style={{
+            <button onClick={()=>{setHEOn(p=>!p);setESL(false);savedEditSel.current={start:0,end:0};}} style={{
               fontSize:11,background:hlEditOn?'#fef9c3':'#f3f4f6',
               border:`1px solid ${hlEditOn?'#fde68a':'#e5e7eb'}`,
               borderRadius:5,padding:'4px 10px',cursor:'pointer',
               color:hlEditOn?'#92400e':'#6b7280',fontWeight:600,fontFamily:'Inter,sans-serif'
             }}>🖊 {hlEditOn?'On':'Highlight'}</button>
-            {hlEditOn&&<HLToolbar onApply={applyEditHL} onRemove={removeEditHL} />}
+            {hlEditOn && !editSelLocked && (
+              <button onClick={lockEditSel} style={{fontSize:11,background:'#2563eb',color:'#fff',
+                border:'none',borderRadius:5,padding:'4px 12px',
+                cursor:'pointer',fontWeight:600,fontFamily:'Inter,sans-serif'}}>✓ Mark Selection</button>
+            )}
+            {hlEditOn && editSelLocked && (
+              <span style={{fontSize:11,color:'#16a34a',fontWeight:600,
+                background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:5,padding:'3px 10px'}}>
+                ✓ Selected — tap a colour:
+              </span>
+            )}
+            {hlEditOn && HL_COLORS.map((col,i)=>(
+              <button key={i} onClick={()=>applyEditHL(col)} title={col.label}
+                style={{width:24,height:24,borderRadius:5,
+                  border:`2px solid ${editSelLocked?'#2563eb':'#e5e7eb'}`,
+                  background:col.bg,cursor:'pointer',flexShrink:0,opacity:editSelLocked?1:0.5}} />
+            ))}
+            {hlEditOn && <button onClick={removeEditHL} style={{fontSize:11,background:'#f3f4f6',
+              border:'1px solid #e5e7eb',borderRadius:5,padding:'3px 10px',
+              cursor:'pointer',color:'#6b7280',fontWeight:600,fontFamily:'Inter,sans-serif'}}>Remove</button>}
             {editHL.length>0&&<span style={{fontSize:11,color:'#9ca3af'}}>{editHL.length} highlights</span>}
           </div>
-          {hlEditOn&&<div style={{fontSize:11,color:'#9ca3af',marginBottom:6}}>Select text below, then tap a colour.</div>}
+          {hlEditOn && !editSelLocked && <div style={{fontSize:11,color:'#9ca3af',marginBottom:6}}>
+            1. Select text below &nbsp;2. Tap <strong>✓ Mark Selection</strong> &nbsp;3. Tap a colour
+          </div>}
           <textarea ref={editTaRef} value={editNotes}
             onChange={e=>handleEditNotesChange(e.target.value)}
             onSelect={onEditTASelect} onMouseUp={onEditTASelect}
