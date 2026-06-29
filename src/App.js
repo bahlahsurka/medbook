@@ -36,6 +36,7 @@ export default function App() {
   const [showManage, setManage]     = useState(false);
   const [showOnboard, setOnboard]   = useState(false);
   const [showQuickAdd, setQuickAdd] = useState(false);
+  const [showSysReview, setSysReview] = useState(false);
   const [selected2, setSelected2]   = useState(new Set());
   const [bulkMode, setBulkMode]     = useState(false);
 
