@@ -1,32 +1,17 @@
 import { useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
-import { HL_COLORS, buildHighlightParts, adjustHighlights } from '../lib/highlights';
-
-function HLToolbar({ onApply, onRemove }) {
-  return (
-    <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap',marginBottom:8}}>
-      {HL_COLORS.map((c,i)=>(
-        <button key={i} onClick={()=>onApply(c)} title={c.label}
-          style={{width:24,height:24,borderRadius:5,border:'1px solid #e5e7eb',
-            background:c.bg,cursor:'pointer',flexShrink:0}} />
-      ))}
-      <button onClick={onRemove} style={{fontSize:11,background:'#f3f4f6',
-        border:'1px solid #e5e7eb',borderRadius:5,padding:'3px 10px',
-        cursor:'pointer',color:'#6b7280',fontWeight:600,fontFamily:'Inter,sans-serif'}}>
-        Remove
-      </button>
-    </div>
-  );
-}
+import { buildHighlightParts } from '../lib/highlights';
+import { useHighlight } from '../lib/useHighlight';
+import HLToolbar from './HLToolbar';
 
 function RenderedNotes({ text, highlights }) {
   const parts = buildHighlightParts(text, highlights);
   return (
     <span style={{whiteSpace:'pre-wrap'}}>
-      {parts.map((p,i)=>p.hl
-        ?<mark key={i} style={{background:p.hl.bg,color:p.hl.text,borderRadius:2,padding:'0 2px'}}>{p.t}</mark>
-        :<span key={i}>{p.t}</span>
+      {parts.map((p,i) => p.hl
+        ? <mark key={i} style={{background:p.hl.bg,color:p.hl.text,borderRadius:2,padding:'0 2px'}}>{p.t}</mark>
+        : <span key={i}>{p.t}</span>
       )}
     </span>
   );
@@ -35,20 +20,18 @@ function RenderedNotes({ text, highlights }) {
 function Lightbox({ images, start, onClose }) {
   const [idx, setIdx] = useState(start);
   const tx = useRef(null);
-  const prev = ()=>setIdx(i=>(i-1+images.length)%images.length);
-  const next = ()=>setIdx(i=>(i+1)%images.length);
+  const prev = () => setIdx(i=>(i-1+images.length)%images.length);
+  const next = () => setIdx(i=>(i+1)%images.length);
 
-  const downloadImage = async () => {
+  const download = async () => {
     try {
-      const res = await fetch(images[idx]);
+      const res  = await fetch(images[idx]);
       const blob = await res.blob();
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement('a');
-      a.href = url;
-      a.download = `medbook_image_${idx+1}.jpg`;
-      a.click();
+      a.href = url; a.download = `medbook_image_${idx+1}.jpg`; a.click();
       URL.revokeObjectURL(url);
-    } catch { window.open(images[idx], '_blank'); }
+    } catch { window.open(images[idx],'_blank'); }
   };
 
   return (
@@ -60,198 +43,141 @@ function Lightbox({ images, start, onClose }) {
         const dx=e.changedTouches[0].clientX-tx.current;
         if(dx<-50)next();else if(dx>50)prev();tx.current=null;
       }}>
-
-      {/* Close */}
       <button onClick={onClose} style={{position:'absolute',top:16,right:20,
         background:'rgba(255,255,255,.15)',border:'none',color:'#fff',fontSize:20,
         cursor:'pointer',width:40,height:40,borderRadius:'50%',
         display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
-
-      {/* Download */}
-      <button onClick={downloadImage} style={{position:'absolute',top:16,left:20,
+      <button onClick={download} style={{position:'absolute',top:16,left:20,
         background:'rgba(255,255,255,.15)',border:'none',color:'#fff',fontSize:12,
         cursor:'pointer',padding:'8px 14px',borderRadius:8,fontWeight:600,fontFamily:'Inter,sans-serif'}}>
         ⬇ Download
       </button>
-
-      {/* Counter */}
-      {images.length>1&&<div style={{position:'absolute',top:20,left:'50%',transform:'translateX(-50%)',
-        color:'#fff',fontSize:13,background:'rgba(0,0,0,.5)',padding:'4px 14px',borderRadius:20}}>
-        {idx+1}/{images.length}
-      </div>}
-
-      {images.length>1&&<>
+      {images.length>1 && <>
+        <div style={{position:'absolute',top:20,left:'50%',transform:'translateX(-50%)',
+          color:'#fff',fontSize:13,background:'rgba(0,0,0,.5)',padding:'4px 14px',borderRadius:20}}>
+          {idx+1}/{images.length}
+        </div>
         <button onClick={prev} style={{position:'absolute',left:12,background:'rgba(255,255,255,.15)',
-          border:'none',color:'#fff',fontSize:28,cursor:'pointer',width:44,height:44,borderRadius:'50%',
-          display:'flex',alignItems:'center',justifyContent:'center'}}>‹</button>
+          border:'none',color:'#fff',fontSize:28,cursor:'pointer',width:44,height:44,
+          borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center'}}>‹</button>
         <button onClick={next} style={{position:'absolute',right:12,background:'rgba(255,255,255,.15)',
-          border:'none',color:'#fff',fontSize:28,cursor:'pointer',width:44,height:44,borderRadius:'50%',
-          display:'flex',alignItems:'center',justifyContent:'center'}}>›</button>
+          border:'none',color:'#fff',fontSize:28,cursor:'pointer',width:44,height:44,
+          borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center'}}>›</button>
       </>}
-
       <img src={images[idx]} alt=""
         style={{maxWidth:'90vw',maxHeight:'85vh',borderRadius:8,objectFit:'contain',display:'block'}}
         onClick={e=>e.stopPropagation()} />
-
       <div onClick={onClose} style={{position:'absolute',inset:0,zIndex:-1}} />
     </div>
   );
 }
 
 export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId }) {
-  const [lb,setLb]            = useState(null);
-  const [editing,setEditing]  = useState(false);
+  const [lb,      setLb]      = useState(null);
+  const [editing, setEditing] = useState(false);
   const [deleting,setDel]     = useState(false);
-  const [editTitle,setET]     = useState(entry.title);
-  const [editNotes,setEN]     = useState(entry.notes||'');
-  const [editDiff,setED]      = useState(entry.difficulty||'Medium');
-  const [editImgs,setEI]      = useState(entry.images||[]);
-  const [editHL,setEHL]       = useState(entry.highlights||[]);
-  const [newImgs,setNI]       = useState([]);
-  const [saving,setSaving]    = useState(false);
-  const [err,setErr]          = useState('');
-  const [hlEditOn,setHEOn]    = useState(false);
-  const [viewHL,setVHL]       = useState(entry.highlights||[]);
-  const [hlViewOn,setHVOn]    = useState(false);
-  const notesRef    = useRef();
-  const editTaRef   = useRef();
-  const savedEditSel = useRef({ start:0, end:0 });
-  const [editSelLocked, setESL] = useState(false);
+
+  // Edit state
+  const [editTitle, setET]  = useState(entry.title);
+  const [editNotes, setEN]  = useState(entry.notes||'');
+  const [editDiff,  setED]  = useState(entry.difficulty||'Medium');
+  const [editImgs,  setEI]  = useState(entry.images||[]);
+  const [newImgs,   setNI]  = useState([]);
+  const [saving,    setSaving] = useState(false);
+  const [err,       setErr]   = useState('');
+  const [hlEditOn,  setHEOn]  = useState(false);
+
+  // View highlight state
+  const [viewHL,   setVHL]   = useState(entry.highlights||[]);
+  const [hlViewOn, setHVOn]  = useState(false);
+
+  const editTaRef = useRef();
+  const notesRef  = useRef();
+
+  // Highlight hooks
+  const editHl = useHighlight(editTaRef, entry.highlights||[]);
 
   const color = SYS_COLOR[entry.system]||'#2563eb';
   const dc    = DIFF_COLOR[entry.difficulty]||'#6b7280';
-  const fmt   = iso=>new Date(iso).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  const fmt   = iso => new Date(iso).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
 
-  const updateDB = async (fields) => {
-    const {data,error} = await supabase.from('entries').update(fields)
-      .eq('id',entry.id).select().single();
+  const updateDB = async fields => {
+    const {data,error} = await supabase.from('entries').update(fields).eq('id',entry.id).select().single();
     if (!error) onUpdated(data);
     return !error;
   };
 
-  const markReviewed = ()=>updateDB({
+  const markReviewed = () => updateDB({
     review_count:(entry.review_count||0)+1,
     last_reviewed:new Date().toISOString()
   });
+  const togglePin = () => updateDB({ pinned:!entry.pinned });
 
-  const togglePin = ()=>updateDB({pinned:!entry.pinned});
-
-  const deleteEntry = async()=>{
-    if(!window.confirm('Delete this entry?'))return;
+  const deleteEntry = async () => {
+    if (!window.confirm('Delete this entry?')) return;
     setDel(true);
     await supabase.from('entries').delete().eq('id',entry.id);
     onDeleted(entry.id,entry.system);
   };
 
-  const exportPDF = ()=>{
-    const win=window.open('','_blank');
+  const exportPDF = () => {
+    const win = window.open('','_blank');
     win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${entry.title}</title>
-    <style>
-      body{font-family:sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#1f2937}
-      h1{font-size:20px;margin-bottom:8px}
-      .meta{font-size:12px;color:#6b7280;margin-bottom:16px}
-      .notes{font-size:14px;line-height:1.8;white-space:pre-wrap;border-top:1px solid #e5e7eb;padding-top:16px;margin-top:16px}
-      img{max-width:100%;margin:10px 0;border-radius:6px;display:block}
-      .back-btn{display:inline-block;margin-bottom:20px;padding:8px 16px;background:#f3f4f6;
-        border:1px solid #e5e7eb;border-radius:8px;font-size:13px;cursor:pointer;
-        color:#374151;font-weight:600;text-decoration:none;}
-      @media print{.back-btn{display:none}body{padding:0}}
-    </style></head><body>
-    <a class="back-btn" onclick="window.close()">← Close & Go Back</a>
+    <style>body{font-family:sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#1f2937}
+    h1{font-size:20px;margin-bottom:8px}.meta{font-size:12px;color:#6b7280;margin-bottom:16px}
+    .notes{font-size:14px;line-height:1.8;white-space:pre-wrap;border-top:1px solid #e5e7eb;padding-top:16px;margin-top:16px}
+    img{max-width:100%;margin:10px 0;border-radius:6px;display:block}
+    .back{display:inline-block;margin-bottom:20px;padding:8px 16px;background:#f3f4f6;
+    border:1px solid #e5e7eb;border-radius:8px;font-size:13px;cursor:pointer;color:#374151;font-weight:600}
+    @media print{.back{display:none}body{padding:0}}</style></head><body>
+    <a class="back" onclick="window.close()">← Close & Go Back</a>
     <div class="meta">${entry.system} · ${entry.difficulty} · ${fmt(entry.created_at)}</div>
-    <h1>${entry.title}</h1>
-    <div class="notes">${entry.notes||''}</div>
+    <h1>${entry.title}</h1><div class="notes">${entry.notes||''}</div>
     ${(entry.images||[]).map(u=>`<img src="${u}"/>`).join('')}
     </body></html>`);
-    win.document.close();
-    win.focus();
-    setTimeout(()=>{
-      win.print();
-      // Auto-close after print dialog on mobile
-      win.onafterprint = ()=>win.close();
-    }, 600);
+    win.document.close(); win.focus();
+    setTimeout(()=>{ win.print(); win.onafterprint=()=>win.close(); },600);
   };
 
-  const loadNewImgs = (files)=>{
-    Array.from(files).forEach(f=>{
-      if(!f.type.startsWith('image/'))return;
-      const r=new FileReader();
-      r.onload=e=>setNI(p=>[...p,{preview:e.target.result,file:f}]);
+  const loadNewImgs = files => {
+    Array.from(files).forEach(f => {
+      if (!f.type.startsWith('image/')) return;
+      const r = new FileReader();
+      r.onload = e => setNI(p=>[...p,{preview:e.target.result,file:f}]);
       r.readAsDataURL(f);
     });
   };
 
-  const uploadImg = async(img)=>{
-    const ext=img.file.name.split('.').pop()||'jpg';
-    const path=`${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-    const{error}=await supabase.storage.from('entry-images')
-      .upload(path,img.file,{contentType:img.file.type});
-    if(error)throw error;
+  const uploadImg = async img => {
+    const ext = img.file.name.split('.').pop()||'jpg';
+    const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+    const {error} = await supabase.storage.from('entry-images').upload(path,img.file,{contentType:img.file.type});
+    if (error) throw error;
     return supabase.storage.from('entry-images').getPublicUrl(path).data.publicUrl;
   };
 
-  const onEditTASelect = () => {
-    const ta = editTaRef.current; if (!ta) return;
-    if (ta.selectionStart !== ta.selectionEnd) {
-      savedEditSel.current = { start: ta.selectionStart, end: ta.selectionEnd };
-      setESL(false);
-    }
-  };
-
-  const lockEditSel = () => {
-    const ta = editTaRef.current;
-    if (ta && ta.selectionStart !== ta.selectionEnd)
-      savedEditSel.current = { start: ta.selectionStart, end: ta.selectionEnd };
-    if (savedEditSel.current.start === savedEditSel.current.end) { alert('Select text first.'); return; }
-    setESL(true);
-  };
-
-  const applyEditHL = (c) => {
-    const ta = editTaRef.current;
-    if (ta && ta.selectionStart !== ta.selectionEnd)
-      savedEditSel.current = { start: ta.selectionStart, end: ta.selectionEnd };
-    const { start, end } = savedEditSel.current;
-    if (start === end) { alert('Select text, tap Mark Selection, then choose a colour.'); return; }
-    setEHL(p => [...p, { start, end, color: c }]);
-    savedEditSel.current = { start:0, end:0 }; setESL(false);
-  };
-
-  const removeEditHL = () => {
-    const ta = editTaRef.current;
-    if (ta && ta.selectionStart !== ta.selectionEnd)
-      savedEditSel.current = { start: ta.selectionStart, end: ta.selectionEnd };
-    const { start, end } = savedEditSel.current;
-    if (start === end) { setEHL([]); return; }
-    setEHL(p => p.filter(h => !(h.start < end && h.end > start)));
-    savedEditSel.current = { start:0, end:0 }; setESL(false);
-  };
-  const handleEditNotesChange=(val)=>{
-    setEHL(prev=>adjustHighlights(editNotes,val,prev));
-    setEN(val);
-  };
-
-  // View mode highlight (DOM selection)
-  const applyViewHL=(c)=>{
-    const sel=window.getSelection();
-    if(!sel||sel.isCollapsed||!notesRef.current)return;
-    const range=sel.getRangeAt(0);
-    if(!notesRef.current.contains(range.commonAncestorContainer))return;
-    const pre=document.createRange();
+  // View-mode DOM-based highlight
+  const applyViewHL = c => {
+    const sel = window.getSelection();
+    if (!sel||sel.isCollapsed||!notesRef.current) return;
+    const range = sel.getRangeAt(0);
+    if (!notesRef.current.contains(range.commonAncestorContainer)) return;
+    const pre = document.createRange();
     pre.selectNodeContents(notesRef.current);
     pre.setEnd(range.startContainer,range.startOffset);
-    const start=pre.toString().length;
-    const end=start+range.toString().length;
-    if(start>=end)return;
-    const newHl=[...viewHL,{start,end,color:c}];
-    setVHL(newHl);sel.removeAllRanges();
+    const start=pre.toString().length, end=start+range.toString().length;
+    if (start>=end) return;
+    const newHl = [...viewHL,{start,end,color:c}];
+    setVHL(newHl); sel.removeAllRanges();
     supabase.from('entries').update({highlights:newHl}).eq('id',entry.id).then(()=>{});
     onUpdated({...entry,highlights:newHl});
   };
-  const removeViewHL=()=>{
-    const sel=window.getSelection();let newHl=[];
-    if(sel&&!sel.isCollapsed&&notesRef.current){
+
+  const removeViewHL = () => {
+    const sel = window.getSelection(); let newHl = [];
+    if (sel&&!sel.isCollapsed&&notesRef.current) {
       const range=sel.getRangeAt(0);
-      if(notesRef.current.contains(range.commonAncestorContainer)){
+      if (notesRef.current.contains(range.commonAncestorContainer)) {
         const pre=document.createRange();
         pre.selectNodeContents(notesRef.current);
         pre.setEnd(range.startContainer,range.startOffset);
@@ -264,27 +190,30 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     onUpdated({...entry,highlights:newHl});
   };
 
-  const saveEdit=async()=>{
-    if(!editTitle.trim()){setErr('Title required');return;}
-    setSaving(true);setErr('');
-    try{
-      const newUrls=await Promise.all(newImgs.map(uploadImg));
-      const allImgs=[...editImgs,...newUrls];
-      const ok=await updateDB({title:editTitle.trim(),notes:editNotes.trim(),
-        difficulty:editDiff,images:allImgs,highlights:editHL});
-      if(ok){setVHL(editHL);setEditing(false);setNI([]);}
-    }catch(e){setErr(e.message);}
+  const saveEdit = async () => {
+    if (!editTitle.trim()) { setErr('Title required'); return; }
+    setSaving(true); setErr('');
+    try {
+      const newUrls = await Promise.all(newImgs.map(uploadImg));
+      const allImgs = [...editImgs,...newUrls];
+      const ok = await updateDB({
+        title:editTitle.trim(), notes:editNotes.trim(),
+        difficulty:editDiff, images:allImgs, highlights:editHl.highlights
+      });
+      if (ok) { setVHL(editHl.highlights); setEditing(false); setNI([]); }
+    } catch(e) { setErr(e.message); }
     setSaving(false);
   };
 
-  const cancelEdit=()=>{
-    setEditing(false);setET(entry.title);setEN(entry.notes||'');
-    setED(entry.difficulty||'Medium');setEI(entry.images||[]);
-    setEHL(entry.highlights||[]);setNI([]);setErr('');setHEOn(false);
+  const cancelEdit = () => {
+    setEditing(false); setET(entry.title); setEN(entry.notes||'');
+    setED(entry.difficulty||'Medium'); setEI(entry.images||[]);
+    editHl.setHighlights(entry.highlights||[]);
+    setNI([]); setErr(''); setHEOn(false);
   };
 
   // ── EDIT MODE ──────────────────────────────────────────────────────────
-  if(editing) return (
+  if (editing) return (
     <div style={{maxWidth:680,margin:'0 auto',fontFamily:'Inter,sans-serif'}}>
       <div style={{fontSize:15,fontWeight:700,color:'#111827',marginBottom:20}}>
         Editing — <span style={{color}}>{entry.system}</span>
@@ -307,44 +236,25 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         </F>
         <F label="REVIEW NOTES">
           <div style={{display:'flex',alignItems:'center',gap:8,marginTop:8,marginBottom:6,flexWrap:'wrap'}}>
-            <button onClick={()=>{setHEOn(p=>!p);setESL(false);savedEditSel.current={start:0,end:0};}} style={{
-              fontSize:11,background:hlEditOn?'#fef9c3':'#f3f4f6',
-              border:`1px solid ${hlEditOn?'#fde68a':'#e5e7eb'}`,
-              borderRadius:5,padding:'4px 10px',cursor:'pointer',
-              color:hlEditOn?'#92400e':'#6b7280',fontWeight:600,fontFamily:'Inter,sans-serif'
-            }}>🖊 {hlEditOn?'On':'Highlight'}</button>
-            {hlEditOn && !editSelLocked && (
-              <button onClick={lockEditSel} style={{fontSize:11,background:'#2563eb',color:'#fff',
-                border:'none',borderRadius:5,padding:'4px 12px',
-                cursor:'pointer',fontWeight:600,fontFamily:'Inter,sans-serif'}}>✓ Mark Selection</button>
-            )}
-            {hlEditOn && editSelLocked && (
-              <span style={{fontSize:11,color:'#16a34a',fontWeight:600,
-                background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:5,padding:'3px 10px'}}>
-                ✓ Selected — tap a colour:
-              </span>
-            )}
-            {hlEditOn && HL_COLORS.map((col,i)=>(
-              <button key={i} onClick={()=>applyEditHL(col)} title={col.label}
-                style={{width:24,height:24,borderRadius:5,
-                  border:`2px solid ${editSelLocked?'#2563eb':'#e5e7eb'}`,
-                  background:col.bg,cursor:'pointer',flexShrink:0,opacity:editSelLocked?1:0.5}} />
-            ))}
-            {hlEditOn && <button onClick={removeEditHL} style={{fontSize:11,background:'#f3f4f6',
-              border:'1px solid #e5e7eb',borderRadius:5,padding:'3px 10px',
-              cursor:'pointer',color:'#6b7280',fontWeight:600,fontFamily:'Inter,sans-serif'}}>Remove</button>}
-            {editHL.length>0&&<span style={{fontSize:11,color:'#9ca3af'}}>{editHL.length} highlights</span>}
+            <button
+              onMouseDown={e=>e.preventDefault()} onTouchStart={e=>e.preventDefault()}
+              onClick={()=>setHEOn(p=>!p)}
+              style={{fontSize:11,background:hlEditOn?'#fef9c3':'#f3f4f6',
+                border:`1px solid ${hlEditOn?'#fde68a':'#e5e7eb'}`,
+                borderRadius:5,padding:'4px 10px',cursor:'pointer',
+                color:hlEditOn?'#92400e':'#6b7280',fontWeight:600,fontFamily:'Inter,sans-serif'}}>
+              🖊 {hlEditOn?'On':'Highlight'}
+            </button>
+            {editHl.highlights.length>0 && <span style={{fontSize:11,color:'#9ca3af'}}>{editHl.highlights.length} highlights</span>}
           </div>
-          {hlEditOn && !editSelLocked && <div style={{fontSize:11,color:'#9ca3af',marginBottom:6}}>
-            1. Select text below &nbsp;2. Tap <strong>✓ Mark Selection</strong> &nbsp;3. Tap a colour
-          </div>}
+          {hlEditOn && <HLToolbar onApply={editHl.applyHL} onRemove={editHl.removeHL} hasSelection={editHl.hasSel} />}
           <textarea ref={editTaRef} value={editNotes}
-            onChange={e=>handleEditNotesChange(e.target.value)}
-            onSelect={onEditTASelect} onMouseUp={onEditTASelect}
-            onTouchEnd={onEditTASelect} onKeyUp={onEditTASelect}
+            onChange={e=>{ editHl.handleTextChange(editNotes,e.target.value); setEN(e.target.value); }}
+            onSelect={editHl.onSelChange} onMouseUp={editHl.onSelChange}
+            onKeyUp={editHl.onSelChange} onTouchEnd={editHl.onSelChange}
             rows={8} style={{...inp,resize:'vertical',lineHeight:1.7}} />
         </F>
-        {editImgs.length>0&&(
+        {editImgs.length>0 && (
           <F label="EXISTING IMAGES">
             <div style={{display:'flex',flexWrap:'wrap',gap:10,marginTop:8}}>
               {editImgs.map((url,i)=>(
@@ -367,7 +277,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             <input type="file" accept="image/*" multiple style={{display:'none'}}
               onChange={e=>loadNewImgs(e.target.files)} />
           </label>
-          {newImgs.length>0&&(
+          {newImgs.length>0 && (
             <div style={{display:'flex',flexWrap:'wrap',gap:10,marginTop:10}}>
               {newImgs.map((img,i)=>(
                 <div key={i} style={{position:'relative'}}>
@@ -381,12 +291,12 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             </div>
           )}
         </F>
-        {err&&<div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:8,padding:'10px 14px',fontSize:13,color:'#dc2626'}}>{err}</div>}
+        {err && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:8,padding:'10px 14px',fontSize:13,color:'#dc2626'}}>{err}</div>}
         <div style={{display:'flex',gap:10}}>
           <button onClick={saveEdit} disabled={saving} style={{
-            background:color,color:'#fff',border:'none',borderRadius:8,
-            padding:'11px 24px',fontSize:14,fontWeight:600,
-            cursor:saving?'not-allowed':'pointer',opacity:saving?.7:1,fontFamily:'Inter,sans-serif'}}>
+            background:color,color:'#fff',border:'none',borderRadius:8,padding:'11px 24px',
+            fontSize:14,fontWeight:600,cursor:saving?'not-allowed':'pointer',
+            opacity:saving?.7:1,fontFamily:'Inter,sans-serif'}}>
             {saving?'Saving…':'✓ Save Changes'}
           </button>
           <button onClick={cancelEdit} style={{background:'#f3f4f6',color:'#6b7280',
@@ -400,7 +310,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   // ── VIEW MODE ──────────────────────────────────────────────────────────
   return (
     <div style={{maxWidth:680,margin:'0 auto',fontFamily:'Inter,sans-serif'}}>
-      {lb!==null&&<Lightbox images={entry.images} start={lb} onClose={()=>setLb(null)} />}
+      {lb!==null && <Lightbox images={entry.images} start={lb} onClose={()=>setLb(null)} />}
 
       <button onClick={onBack} style={{background:'none',border:'none',color:'#6b7280',
         cursor:'pointer',fontSize:13,padding:0,marginBottom:16,
@@ -408,7 +318,6 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         ← Back to {entry.system}
       </button>
 
-      {/* Title card */}
       <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:10,
         padding:20,marginBottom:14,borderTop:`3px solid ${color}`,
         boxShadow:'0 1px 3px rgba(0,0,0,.06)'}}>
@@ -419,7 +328,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
           <span style={{fontSize:11,fontWeight:500,background:`${dc}12`,color:dc,
             borderRadius:4,padding:'2px 8px',border:`1px solid ${dc}25`}}>{entry.difficulty}</span>
           <span style={{fontSize:12,color:'#9ca3af'}}>{fmt(entry.created_at)}</span>
-          {entry.review_count>0&&(
+          {entry.review_count>0 && (
             <span style={{fontSize:12,color:'#16a34a',fontWeight:600}}>
               ✓ Reviewed {entry.review_count}×{entry.last_reviewed&&` · Last: ${fmt(entry.last_reviewed)}`}
             </span>
@@ -427,7 +336,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         </div>
         <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
           <AB color="#16a34a" bg="#f0fdf4" border="#bbf7d0" onClick={markReviewed}>✓ Reviewed</AB>
-          <AB color="#2563eb" bg="#eff6ff" border="#bfdbfe" onClick={()=>{setEditing(true);setEHL(entry.highlights||[]);}}>✎ Edit</AB>
+          <AB color="#2563eb" bg="#eff6ff" border="#bfdbfe" onClick={()=>setEditing(true)}>✎ Edit</AB>
           <AB color={entry.pinned?'#d97706':'#374151'} bg={entry.pinned?'#fffbeb':'#f9fafb'}
             border={entry.pinned?'#fde68a':'#e5e7eb'} onClick={togglePin}>
             {entry.pinned?'📌 Unpin':'📌 Pin'}
@@ -439,8 +348,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         </div>
       </div>
 
-      {/* Notes */}
-      {entry.notes&&(
+      {entry.notes && (
         <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:10,
           padding:'18px 20px',marginBottom:14,boxShadow:'0 1px 3px rgba(0,0,0,.04)'}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
@@ -448,20 +356,24 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             <div style={{fontSize:10,color:'#9ca3af',letterSpacing:.8,fontWeight:600,textTransform:'uppercase'}}>
               Review Notes
             </div>
-            <button onClick={()=>setHVOn(p=>!p)} style={{
-              fontSize:11,background:hlViewOn?'#fef9c3':'#f3f4f6',
-              border:`1px solid ${hlViewOn?'#fde68a':'#e5e7eb'}`,
-              borderRadius:5,padding:'3px 10px',cursor:'pointer',
-              color:hlViewOn?'#92400e':'#6b7280',fontWeight:600,fontFamily:'Inter,sans-serif'}}>
+            <button
+              onMouseDown={e=>e.preventDefault()} onTouchStart={e=>e.preventDefault()}
+              onClick={()=>setHVOn(p=>!p)}
+              style={{fontSize:11,background:hlViewOn?'#fef9c3':'#f3f4f6',
+                border:`1px solid ${hlViewOn?'#fde68a':'#e5e7eb'}`,
+                borderRadius:5,padding:'3px 10px',cursor:'pointer',
+                color:hlViewOn?'#92400e':'#6b7280',fontWeight:600,fontFamily:'Inter,sans-serif'}}>
               🖊 {hlViewOn?'Done':'Highlight'}
             </button>
           </div>
-          {hlViewOn&&<>
-            <HLToolbar onApply={applyViewHL} onRemove={removeViewHL} />
-            <div style={{fontSize:11,color:'#9ca3af',marginBottom:8}}>
-              Select text then tap a colour. Saves automatically.
-            </div>
-          </>}
+          {hlViewOn && (
+            <>
+              <HLToolbar onApply={applyViewHL} onRemove={removeViewHL} hasSelection={true} />
+              <div style={{fontSize:11,color:'#9ca3af',marginBottom:8}}>
+                Select text then tap a colour. Saves automatically.
+              </div>
+            </>
+          )}
           <div ref={notesRef} style={{lineHeight:1.85,fontSize:14,color:'#1f2937',
             userSelect:hlViewOn?'text':'auto'}}>
             <RenderedNotes text={entry.notes} highlights={viewHL} />
@@ -469,13 +381,12 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         </div>
       )}
 
-      {/* Images */}
-      {entry.images?.length>0&&(
+      {entry.images?.length>0 && (
         <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:10,
           padding:'18px 20px',boxShadow:'0 1px 3px rgba(0,0,0,.04)'}}>
           <div style={{fontSize:10,color:'#9ca3af',letterSpacing:.8,fontWeight:600,
             textTransform:'uppercase',marginBottom:14}}>
-            Images ({entry.images.length}) — scroll · tap to expand & download
+            Images ({entry.images.length}) — scroll · tap to expand
           </div>
           <div style={{display:'flex',gap:10,overflowX:'auto',
             WebkitOverflowScrolling:'touch',paddingBottom:8,scrollSnapType:'x mandatory'}}>

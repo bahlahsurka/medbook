@@ -8,16 +8,20 @@ export const HL_COLORS = [
 
 export function buildHighlightParts(text, highlights) {
   if (!text) return [];
-  if (!highlights || highlights.length === 0) return [{ t:text, hl:null }];
-  const sorted = [...highlights].sort((a,b) => a.start - b.start);
-  const parts = []; let cursor = 0;
+  if (!highlights || highlights.length === 0) return [{ t: text, hl: null }];
+  const sorted = [...highlights].sort((a, b) => a.start - b.start);
+  const parts = [];
+  let cursor = 0;
   sorted.forEach(h => {
     if (h.start >= h.end) return;
     const start = Math.max(h.start, cursor);
-    if (start > cursor) parts.push({ t:text.slice(cursor,start), hl:null });
-    if (start < h.end) { parts.push({ t:text.slice(start,h.end), hl:h.color }); cursor = h.end; }
+    if (start > cursor) parts.push({ t: text.slice(cursor, start), hl: null });
+    if (start < h.end) {
+      parts.push({ t: text.slice(start, h.end), hl: h.color });
+      cursor = h.end;
+    }
   });
-  if (cursor < text.length) parts.push({ t:text.slice(cursor), hl:null });
+  if (cursor < text.length) parts.push({ t: text.slice(cursor), hl: null });
   return parts;
 }
 
@@ -30,17 +34,11 @@ export function adjustHighlights(oldText, newText, highlights) {
   });
 }
 
-// Get selection offsets within a container element — works on desktop
-export function getSelectionOffsets(container) {
-  const sel = window.getSelection();
-  if (!sel || sel.isCollapsed || !container) return null;
-  const range = sel.getRangeAt(0);
-  if (!container.contains(range.commonAncestorContainer)) return null;
-  const pre = document.createRange();
-  pre.selectNodeContents(container);
-  pre.setEnd(range.startContainer, range.startOffset);
-  const start = pre.toString().length;
-  const end = start + range.toString().length;
-  if (start >= end) return null;
+// Get selection offsets from a textarea — works on all platforms
+export function getTextareaSelection(ta) {
+  if (!ta) return null;
+  const start = ta.selectionStart;
+  const end   = ta.selectionEnd;
+  if (start === end) return null;
   return { start, end };
 }

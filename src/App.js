@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { supabase } from './lib/supabase';
 import { loadSystems, saveSystems, DEFAULT_SYSTEMS } from './lib/systems';
 import { SYS_COLOR } from './lib/constants';
+import { useScrollRestore } from './lib/useScrollRestore';
 import Auth from './components/Auth';
 import Sidebar from './components/Sidebar';
 import EntryCard from './components/EntryCard';
@@ -18,30 +19,33 @@ import SystemReview from './components/SystemReview';
 const ONBOARD_KEY = 'medbook_onboarded';
 
 export default function App() {
-  const [session, setSession]       = useState(null);
-  const [authLoading, setAL]        = useState(true);
-  const [entries, setEntries]       = useState({});
-  const [fetching, setFetching]     = useState(false);
-  const [fetchErr, setFetchErr]     = useState('');
-  const [activeSystem, setAS]       = useState('Internal Medicine');
-  const [view, setView]             = useState('list');
-  const [selected, setSelected]     = useState(null);
-  const [sidebarOpen, setSB]        = useState(window.innerWidth > 768);
-  const [isMobile, setMobile]       = useState(window.innerWidth <= 768);
-  const [search, setSearch]         = useState('');
-  const [globalSearch, setGS]       = useState('');
-  const [toast, setToast]           = useState(null);
-  const [userSystems, setUS]        = useState(DEFAULT_SYSTEMS);
+  const [session, setSession]         = useState(null);
+  const [authLoading, setAL]          = useState(true);
+  const [entries, setEntries]         = useState({});
+  const [fetching, setFetching]       = useState(false);
+  const [fetchErr, setFetchErr]       = useState('');
+  const [activeSystem, setAS]         = useState('Internal Medicine');
+  const [view, setView]               = useState('list');
+  const [selected, setSelected]       = useState(null);
+  const [sidebarOpen, setSB]          = useState(window.innerWidth > 768);
+  const [isMobile, setMobile]         = useState(window.innerWidth <= 768);
+  const [search, setSearch]           = useState('');
+  const [globalSearch, setGS]         = useState('');
+  const [toast, setToast]             = useState(null);
+  const [userSystems, setUS]          = useState(DEFAULT_SYSTEMS);
   const [systemsLoaded, setSysLoaded] = useState(false);
-  const [showManage, setManage]     = useState(false);
-  const [showOnboard, setOnboard]   = useState(false);
-  const [showQuickAdd, setQuickAdd] = useState(false);
+  const [showManage, setManage]       = useState(false);
+  const [showOnboard, setOnboard]     = useState(false);
+  const [showQuickAdd, setQuickAdd]   = useState(false);
   const [showSysReview, setSysReview] = useState(false);
-  const [selected2, setSelected2]   = useState(new Set());
-  const [bulkMode, setBulkMode]     = useState(false);
+  const [selected2, setSelected2]     = useState(new Set());
+  const [bulkMode, setBulkMode]       = useState(false);
 
   const toastRef  = useRef();
   const importRef = useRef();
+
+  // Scroll restoration
+  const { scrollRef, saveScroll, restoreScroll } = useScrollRestore();
 
   // Resize
   useEffect(() => {
@@ -62,12 +66,11 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Load systems from Supabase when session available
+  // Load systems from Supabase
   useEffect(() => {
     if (!session) return;
     loadSystems(session.user.id).then(sys => {
-      setUS(sys);
-      setSysLoaded(true);
+      setUS(sys); setSysLoaded(true);
       if (!localStorage.getItem(ONBOARD_KEY)) setOnboard(true);
     });
   }, [session]);
@@ -97,13 +100,27 @@ export default function App() {
     if (session && systemsLoaded) loadEntries(session, userSystems);
   }, [session, systemsLoaded]);
 
-  const showToast = useCallback((msg, type='ok') => {
+  const showToast = useCallback((msg, type = 'ok') => {
     setToast({ msg, type });
     clearTimeout(toastRef.current);
     toastRef.current = setTimeout(() => setToast(null), 3500);
   }, []);
 
-  const navigate = useCallback((sys, v='list') => {
+  // Navigation — save scroll before leaving list, restore when returning
+  const openEntry = useCallback((entry) => {
+    saveScroll(activeSystem);
+    setSelected(entry);
+    setView('detail');
+  }, [activeSystem, saveScroll]);
+
+  const backToList = useCallback(() => {
+    setView('list');
+    setSelected(null);
+    // Restore scroll after list re-renders
+    setTimeout(() => restoreScroll(activeSystem), 50);
+  }, [activeSystem, restoreScroll]);
+
+  const navigate = useCallback((sys, v = 'list') => {
     setAS(sys); setView(v); setSearch('');
     setBulkMode(false); setSelected2(new Set());
     if (window.innerWidth <= 768) setSB(false);
@@ -129,9 +146,9 @@ export default function App() {
 
   const onDeleted = useCallback((id, system) => {
     setEntries(prev => ({ ...prev, [system]: (prev[system]||[]).filter(e=>e.id!==id) }));
-    setView('list'); setSelected(null);
+    backToList();
     showToast('Entry deleted', 'warn');
-  }, [showToast]);
+  }, [showToast, backToList]);
 
   const onUpdated = useCallback((updated) => {
     setEntries(prev => ({
@@ -193,25 +210,25 @@ export default function App() {
       Object.keys(next).forEach(sys => {
         const keep=[], mv=[];
         next[sys].forEach(e => ids.includes(e.id) ? mv.push({...e,system:targetSystem}) : keep.push(e));
-        next[sys] = keep; moved.push(...mv);
+        next[sys]=keep; moved.push(...mv);
       });
-      if (!next[targetSystem]) next[targetSystem] = [];
-      next[targetSystem] = [...moved, ...next[targetSystem]];
+      if (!next[targetSystem]) next[targetSystem]=[];
+      next[targetSystem]=[...moved,...next[targetSystem]];
       return next;
     });
     setBulkMode(false); setSelected2(new Set());
     showToast(`Moved to ${targetSystem} ✓`);
   }, [selected2, showToast]);
 
-  // Systems save — now writes to Supabase
+  // Systems
   const handleSaveSystems = useCallback(async (list) => {
     try {
       await saveSystems(session.user.id, list);
       setUS(list);
-      if (!list.find(s => s.name === activeSystem)) setAS(list[0]?.name || '');
+      if (!list.find(s=>s.name===activeSystem)) setAS(list[0]?.name||'');
       setManage(false);
-      showToast('Systems saved & synced ✓');
-    } catch(e) { showToast('Failed to save systems: ' + e.message, 'err'); }
+      showToast('Systems saved ✓');
+    } catch(e) { showToast('Failed: '+e.message, 'err'); }
   }, [session, activeSystem, showToast]);
 
   // Export / Import
@@ -231,7 +248,7 @@ export default function App() {
         const data = JSON.parse(ev.target.result);
         if (!Array.isArray(data)) throw new Error('Invalid format');
         const rows = data.map(({id,...rest})=>({...rest,user_id:session.user.id}));
-        const { error } = await supabase.from('entries').insert(rows);
+        const {error} = await supabase.from('entries').insert(rows);
         if (error) throw error;
         showToast(`Imported ${rows.length} entries ✓`);
         loadEntries(session, userSystems);
@@ -276,9 +293,7 @@ export default function App() {
   if (authLoading) return (
     <div style={{minHeight:'100vh',background:'#f9fafb',display:'flex',
       alignItems:'center',justifyContent:'center',fontFamily:'Inter,sans-serif'}}>
-      <div style={{textAlign:'center'}}>
-        <Spinner /> <div style={{fontSize:13,color:'#9ca3af',marginTop:12}}>Loading…</div>
-      </div>
+      <Spinner />
     </div>
   );
 
@@ -288,6 +303,7 @@ export default function App() {
     <div style={{display:'flex',height:'100vh',background:'#f3f4f6',
       overflow:'hidden',fontFamily:'Inter,sans-serif'}}>
 
+      {/* Toast */}
       {toast && (
         <div style={{position:'fixed',bottom:20,right:20,zIndex:999,
           background:toast.type==='err'?'#dc2626':toast.type==='warn'?'#d97706':'#16a34a',
@@ -299,35 +315,15 @@ export default function App() {
       )}
 
       {showOnboard && <Onboarding onDone={()=>{localStorage.setItem(ONBOARD_KEY,'1');setOnboard(false);}} />}
-
-      {showManage && (
-        <ManageSystems systems={userSystems} onSave={handleSaveSystems}
-          onClose={()=>setManage(false)} userId={session.user.id} />
-      )}
-
-      {showSysReview && (
-        <SystemReview
-          system={activeSystem}
-          entries={entries[activeSystem] || []}
-          color={color}
-          onReviewed={onReviewed}
-          onClose={() => setSysReview(false)}
-        />
-      )}
-
-      {showQuickAdd && (
-        <QuickAdd userId={session.user.id} activeSystem={activeSystem}
-          userSystems={userSystems} color={color}
-          onSaved={onSaved} onClose={()=>setQuickAdd(false)} />
-      )}
+      {showManage  && <ManageSystems systems={userSystems} onSave={handleSaveSystems} onClose={()=>setManage(false)} userId={session.user.id} />}
+      {showQuickAdd && <QuickAdd userId={session.user.id} activeSystem={activeSystem} userSystems={userSystems} color={color} onSaved={onSaved} onClose={()=>setQuickAdd(false)} />}
+      {showSysReview && <SystemReview system={activeSystem} entries={entries[activeSystem]||[]} color={color} onReviewed={onReviewed} onClose={()=>setSysReview(false)} />}
 
       {isMobile && sidebarOpen && (
-        <div onClick={()=>setSB(false)} style={{position:'fixed',inset:0,
-          background:'rgba(0,0,0,0.4)',zIndex:40}} />
+        <div onClick={()=>setSB(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',zIndex:40}} />
       )}
 
-      <input ref={importRef} type="file" accept=".json"
-        style={{display:'none'}} onChange={importJSON} />
+      <input ref={importRef} type="file" accept=".json" style={{display:'none'}} onChange={importJSON} />
 
       {/* Sidebar */}
       <div style={{
@@ -384,17 +380,31 @@ export default function App() {
                 color:'#111827',padding:'7px 12px',fontSize:13,outline:'none',
                 width:isMobile?'100%':260,flex:isMobile?1:'none'}} />
           )}
+
           {view==='list' && (
-            <button onClick={()=>setView('add')} style={{background:color,color:'#fff',
-              border:'none',borderRadius:7,padding:isMobile?'8px 14px':'8px 16px',
-              fontSize:13,fontWeight:600,cursor:'pointer',flexShrink:0}}>
-              {isMobile?'+':'+ Add Entry'}
-            </button>
+            <div style={{display:'flex',gap:8,flexShrink:0}}>
+              {(entries[activeSystem]||[]).length>0 && (
+                <button onClick={()=>setSysReview(true)} style={{
+                  background:'#f9fafb',color:'#374151',border:'1px solid #e5e7eb',
+                  borderRadius:7,padding:isMobile?'8px 10px':'8px 14px',
+                  fontSize:13,fontWeight:600,cursor:'pointer'}}>
+                  {isMobile?'🔁':'🔁 Review'}
+                </button>
+              )}
+              <button onClick={()=>setView('add')} style={{background:color,color:'#fff',
+                border:'none',borderRadius:7,padding:isMobile?'8px 14px':'8px 16px',
+                fontSize:13,fontWeight:600,cursor:'pointer'}}>
+                {isMobile?'+':'+ Add Entry'}
+              </button>
+            </div>
           )}
+
           {(view==='add'||view==='detail') && (
-            <button onClick={()=>setView('list')} style={{background:'#f3f4f6',color:'#6b7280',
-              border:'1px solid #e5e7eb',borderRadius:7,padding:'7px 14px',
-              fontSize:13,cursor:'pointer'}}>← Back</button>
+            <button onClick={()=>{ if(view==='detail') backToList(); else setView('list'); }}
+              style={{background:'#f3f4f6',color:'#6b7280',border:'1px solid #e5e7eb',
+                borderRadius:7,padding:'7px 14px',fontSize:13,cursor:'pointer'}}>
+              ← Back
+            </button>
           )}
         </div>
 
@@ -409,8 +419,8 @@ export default function App() {
           </div>
         )}
 
-        {/* Content */}
-        <div style={{flex:1,overflowY:'auto',padding:isMobile?'14px 12px':'20px'}}>
+        {/* Content — scrollRef attached here for scroll restoration */}
+        <div ref={scrollRef} style={{flex:1,overflowY:'auto',padding:isMobile?'14px 12px':'20px'}}>
 
           {fetching && (
             <div style={{textAlign:'center',paddingTop:80}}>
@@ -425,9 +435,7 @@ export default function App() {
               <div style={{fontSize:12,color:'#9ca3af',marginBottom:20}}>{fetchErr}</div>
               <button onClick={()=>loadEntries(session,userSystems)}
                 style={{background:'#2563eb',color:'#fff',border:'none',borderRadius:8,
-                  padding:'10px 24px',fontSize:14,fontWeight:600,cursor:'pointer'}}>
-                Retry
-              </button>
+                  padding:'10px 24px',fontSize:14,fontWeight:600,cursor:'pointer'}}>Retry</button>
             </div>
           )}
 
@@ -438,11 +446,10 @@ export default function App() {
                   {!globalSearch && <div style={{color:'#9ca3af',textAlign:'center',paddingTop:40,fontSize:14}}>Type to search all systems</div>}
                   {globalSearch && globalResults.length===0 && <div style={{color:'#9ca3af',textAlign:'center',paddingTop:40,fontSize:14}}>No results found</div>}
                   <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                    {globalResults.map(e => (
+                    {globalResults.map(e=>(
                       <EntryCard key={e.id} entry={e}
                         color={userSystems.find(s=>s.name===e.system)?.color||SYS_COLOR[e.system]||'#2563eb'}
-                        showSystem
-                        onClick={()=>{ setAS(e.system); setSelected(e); setView('detail'); if(isMobile)setSB(false); }} />
+                        showSystem onClick={()=>{ setAS(e.system); openEntry(e); if(isMobile)setSB(false); }} />
                     ))}
                   </div>
                 </div>
@@ -459,7 +466,7 @@ export default function App() {
               )}
 
               {view==='detail' && selected && (
-                <DetailView entry={selected} onBack={()=>setView('list')}
+                <DetailView entry={selected} onBack={backToList}
                   onDeleted={onDeleted} onUpdated={onUpdated} userId={session.user.id} />
               )}
 
@@ -467,21 +474,17 @@ export default function App() {
                 <div style={{maxWidth:680,margin:'0 auto',position:'relative'}}>
 
                   {/* Bulk toolbar */}
-                  {sysEntries.length > 0 && (
-                    <div style={{display:'flex',alignItems:'center',gap:8,
-                      marginBottom:12,flexWrap:'wrap'}}>
-                      <button
-                        onClick={()=>{ setBulkMode(p=>!p); setSelected2(new Set()); }}
+                  {sysEntries.length>0 && (
+                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
+                      <button onClick={()=>{ setBulkMode(p=>!p); setSelected2(new Set()); }}
                         style={{fontSize:12,
                           background:bulkMode?'#eff6ff':'#f3f4f6',
                           border:`1px solid ${bulkMode?'#bfdbfe':'#e5e7eb'}`,
                           borderRadius:6,padding:'5px 12px',cursor:'pointer',
-                          color:bulkMode?'#2563eb':'#6b7280',fontWeight:600,
-                          fontFamily:'Inter,sans-serif'}}>
+                          color:bulkMode?'#2563eb':'#6b7280',fontWeight:600,fontFamily:'Inter,sans-serif'}}>
                         {bulkMode?`☑ ${selected2.size} selected`:'☑ Select'}
                       </button>
-
-                      {bulkMode && selected2.size > 0 && (<>
+                      {bulkMode && selected2.size>0 && (<>
                         <button onClick={()=>bulkPin(true)} style={bb('#d97706')}>📌 Pin</button>
                         <button onClick={()=>bulkPin(false)} style={bb('#6b7280')}>Unpin</button>
                         <select onChange={e=>{if(e.target.value){bulkMove(e.target.value);e.target.value='';}}}
@@ -498,7 +501,7 @@ export default function App() {
                       </>)}
                       {bulkMode && selected2.size===0 && (
                         <span style={{fontSize:12,color:'#9ca3af'}}>
-                          {isMobile ? 'Tap cards to select' : 'Click cards or right-click to select'}
+                          {isMobile?'Tap cards to select':'Click or right-click to select'}
                         </span>
                       )}
                     </div>
@@ -520,7 +523,7 @@ export default function App() {
                     </div>
                   ) : (
                     <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                      {sysEntries.map(entry => (
+                      {sysEntries.map(entry=>(
                         <SelectableCard
                           key={entry.id}
                           entry={entry}
@@ -529,12 +532,9 @@ export default function App() {
                           isSelected={selected2.has(entry.id)}
                           onTap={()=>{
                             if (bulkMode) toggleSelect(entry.id);
-                            else { setSelected(entry); setView('detail'); }
+                            else openEntry(entry);
                           }}
-                          onLongPress={()=>{
-                            setBulkMode(true);
-                            toggleSelect(entry.id);
-                          }}
+                          onLongPress={()=>{ setBulkMode(true); toggleSelect(entry.id); }}
                         />
                       ))}
                     </div>
@@ -559,61 +559,31 @@ export default function App() {
   );
 }
 
-// Long-press selectable card
 function SelectableCard({ entry, color, bulkMode, isSelected, onTap, onLongPress }) {
-  const timer  = React.useRef(null);
-  const moved  = React.useRef(false);
-  const fired  = React.useRef(false);
+  const timer = React.useRef(null);
+  const moved = React.useRef(false);
+  const fired = React.useRef(false);
 
-  const startPress = (e) => {
-    moved.current = false;
-    fired.current = false;
-    timer.current = setTimeout(() => {
-      if (!moved.current) {
-        fired.current = true;
-        onLongPress();
-      }
-    }, 500);
+  const startPress = () => {
+    moved.current=false; fired.current=false;
+    timer.current=setTimeout(()=>{ if(!moved.current){fired.current=true;onLongPress();} },500);
   };
-
-  const endPress = (e) => {
-    clearTimeout(timer.current);
-    if (!fired.current && !moved.current) {
-      // short tap — but only fire onTap once (prevent double-fire on desktop)
-    }
-  };
-
-  const cancelPress = () => {
-    moved.current = true;
-    clearTimeout(timer.current);
-  };
+  const endPress = () => clearTimeout(timer.current);
+  const cancelPress = () => { moved.current=true; clearTimeout(timer.current); };
 
   return (
-    <div
-      style={{
-        position:'relative',
-        outline: isSelected ? `2px solid ${color}` : 'none',
-        borderRadius:8,
-        transition:'outline .1s',
-        WebkitUserSelect:'none',
-        userSelect:'none',
-      }}
+    <div style={{position:'relative',outline:isSelected?`2px solid ${color}`:'none',
+      borderRadius:8,transition:'outline .1s',WebkitUserSelect:'none',userSelect:'none',cursor:'pointer'}}
       onClick={onTap}
-      onContextMenu={e=>{ e.preventDefault(); onLongPress(); }}
-      onTouchStart={startPress}
-      onTouchEnd={endPress}
-      onTouchMove={cancelPress}
-    >
+      onContextMenu={e=>{e.preventDefault();onLongPress();}}
+      onTouchStart={startPress} onTouchEnd={endPress} onTouchMove={cancelPress}>
       {bulkMode && (
-        <div style={{
-          position:'absolute',top:10,left:10,zIndex:10,
-          width:22,height:22,borderRadius:5,
-          background:isSelected?color:'#fff',
+        <div style={{position:'absolute',top:10,left:10,zIndex:10,width:22,height:22,
+          borderRadius:5,background:isSelected?color:'#fff',
           border:`2px solid ${isSelected?color:'#d1d5db'}`,
           display:'flex',alignItems:'center',justifyContent:'center',
-          boxShadow:'0 1px 3px rgba(0,0,0,.15)',pointerEvents:'none'
-        }}>
-          {isSelected && <span style={{color:'#fff',fontSize:13,fontWeight:700}}>✓</span>}
+          boxShadow:'0 1px 3px rgba(0,0,0,.15)',pointerEvents:'none'}}>
+          {isSelected&&<span style={{color:'#fff',fontSize:13,fontWeight:700}}>✓</span>}
         </div>
       )}
       <EntryCard entry={entry} color={color} />
@@ -623,18 +593,14 @@ function SelectableCard({ entry, color, bulkMode, isSelected, onTap, onLongPress
 
 function Spinner() {
   return (
-    <div style={{width:32,height:32,border:'3px solid #e5e7eb',
-      borderTop:'3px solid #2563eb',borderRadius:'50%',
-      animation:'spin .8s linear infinite',margin:'0 auto'}}>
+    <div style={{width:32,height:32,border:'3px solid #e5e7eb',borderTop:'3px solid #2563eb',
+      borderRadius:'50%',animation:'spin .8s linear infinite',margin:'0 auto'}}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 }
 
 function bb(color) {
-  return {
-    fontSize:12,background:`${color}10`,border:`1px solid ${color}30`,
-    color,borderRadius:6,padding:'5px 10px',cursor:'pointer',
-    fontWeight:600,fontFamily:'Inter,sans-serif'
-  };
+  return {fontSize:12,background:`${color}10`,border:`1px solid ${color}30`,
+    color,borderRadius:6,padding:'5px 10px',cursor:'pointer',fontWeight:600,fontFamily:'Inter,sans-serif'};
 }
