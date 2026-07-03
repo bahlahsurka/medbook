@@ -1,8 +1,9 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { DIFFICULTY, DIFF_COLOR } from '../lib/constants';
 import { HL_COLORS, buildHighlightParts } from '../lib/highlights';
 import { useHighlight } from '../lib/useHighlight';
+import { useTheme } from '../lib/theme';
 import HLToolbar from './HLToolbar';
 
 const DRAFT_KEY = 'medbook_draft_v2';
@@ -10,15 +11,16 @@ const loadDraft = sys => { try { return JSON.parse(localStorage.getItem(DRAFT_KE
 const saveDraft = (sys,d) => { try { const o=JSON.parse(localStorage.getItem(DRAFT_KEY)||'{}'); o[sys]=d; localStorage.setItem(DRAFT_KEY,JSON.stringify(o)); } catch {} };
 const clearDraft = sys => { try { const o=JSON.parse(localStorage.getItem(DRAFT_KEY)||'{}'); delete o[sys]; localStorage.setItem(DRAFT_KEY,JSON.stringify(o)); } catch {} };
 
-// Overlay that renders highlight colours on top of the transparent textarea
-function HighlightOverlay({ text, highlights }) {
+// Overlay that renders highlight colours *behind* the textarea's own (always-opaque) text.
+const HighlightOverlay = React.forwardRef(function HighlightOverlay({ text, highlights }, ref) {
   const parts = buildHighlightParts(text + '\n', highlights);
   return (
-    <div aria-hidden="true" style={{
+    <div ref={ref} aria-hidden="true" style={{
       position:'absolute', inset:0, pointerEvents:'none',
       whiteSpace:'pre-wrap', wordBreak:'break-word', overflowWrap:'break-word',
       fontSize:14, lineHeight:'1.7', padding:'10px 12px',
       fontFamily:'Inter,sans-serif', boxSizing:'border-box',
+      border:'1px solid transparent',
       color:'transparent', overflow:'hidden'
     }}>
       {parts.map((p,i) => p.hl
@@ -27,9 +29,10 @@ function HighlightOverlay({ text, highlights }) {
       )}
     </div>
   );
-}
+});
 
 export default function AddEntry({ activeSystem, color, userId, onSaved, onCancel, userSystems }) {
+  const { t } = useTheme();
   const draft = loadDraft(activeSystem);
   const [title,     setTitle]   = useState(draft?.title     || '');
   const [notes,     setNotes]   = useState(draft?.notes     || '');
@@ -43,10 +46,23 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
   const [dragOver,  setDrag]    = useState(false);
   const [hlMode,    setHlMode]  = useState(false);
 
-  const fileRef = useRef(); const galRef = useRef(); const taRef = useRef();
+  const fileRef = useRef(); const galRef = useRef(); const taRef = useRef(); const overlayRef = useRef();
   const hl = useHighlight(taRef, draft?.highlights || []);
 
-  // Autosave draft
+  const inp = {
+    display:'block', width:'100%', marginTop:8, background:t.surface,
+    border:`1px solid ${t.borderStrong}`, borderRadius:8, color:t.text,
+    padding:'10px 12px', fontSize:14, outline:'none', boxSizing:'border-box',
+    fontFamily:'Inter,sans-serif'
+  };
+
+  const syncOverlayScroll = useCallback(() => {
+    if (overlayRef.current && taRef.current) {
+      overlayRef.current.scrollTop = taRef.current.scrollTop;
+      overlayRef.current.scrollLeft = taRef.current.scrollLeft;
+    }
+  }, []);
+
   useEffect(() => {
     saveDraft(activeSystem, { title, notes, difficulty, systems, highlights: hl.highlights });
   }, [title, notes, difficulty, systems, hl.highlights, activeSystem]);
@@ -94,12 +110,19 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
 
   const hasDraft = !!(draft?.title||draft?.notes);
 
+  const F = ({ label, children }) => (
+    <div>
+      <div style={{fontSize:10,color:t.text4,letterSpacing:.8,fontWeight:600,textTransform:'uppercase'}}>{label}</div>
+      {children}
+    </div>
+  );
+
   return (
     <div style={{maxWidth:680,margin:'0 auto',fontFamily:'Inter,sans-serif'}}>
       <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:20}}>
-        <div style={{fontSize:16,fontWeight:700,color:'#111827'}}>New Entry</div>
-        {hasDraft && <span style={{fontSize:11,background:'#fef9c3',color:'#92400e',
-          borderRadius:5,padding:'2px 8px',fontWeight:600,border:'1px solid #fde68a'}}>
+        <div style={{fontSize:16,fontWeight:700,color:t.text}}>New Entry</div>
+        {hasDraft && <span style={{fontSize:11,background:t.hlBtnBg,color:t.hlBtnText,
+          borderRadius:5,padding:'2px 8px',fontWeight:600,border:`1px solid ${t.hlBtnBorder}`}}>
           Draft restored</span>}
       </div>
 
@@ -120,28 +143,28 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
                 return (
                   <span key={s} onClick={()=>!saving&&toggleSys(s)} style={{
                     display:'flex',alignItems:'center',gap:5,fontSize:12,fontWeight:600,
-                    background:`${c}15`,color:c,border:`1px solid ${c}40`,
+                    background:`${c}1f`,color:c,border:`1px solid ${c}55`,
                     borderRadius:5,padding:'3px 10px',cursor:saving?'default':'pointer'
                   }}>{s}{!saving&&<span style={{fontSize:10}}>✕</span>}</span>
                 );
               })}
               {!saving && <button onClick={()=>setSysOpen(p=>!p)} style={{
-                fontSize:12,background:'#f3f4f6',border:'1px solid #e5e7eb',
+                fontSize:12,background:t.surface3,border:`1px solid ${t.border}`,
                 borderRadius:5,padding:'3px 12px',cursor:'pointer',
-                color:'#374151',fontWeight:600,fontFamily:'Inter,sans-serif'
+                color:t.text2,fontWeight:600,fontFamily:'Inter,sans-serif'
               }}>{sysOpen?'▲ Close':'+ Add System'}</button>}
             </div>
             {sysOpen && !saving && (
-              <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:10,
+              <div style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:10,
                 padding:12,display:'flex',flexWrap:'wrap',gap:6,
-                maxHeight:200,overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,.08)'}}>
+                maxHeight:200,overflowY:'auto',boxShadow:`0 4px 12px ${t.shadow}`}}>
                 {(userSystems||[]).map(s => {
                   const sel = systems.includes(s.name); const c = s.color||'#2563eb';
                   return (
                     <button key={s.name} onClick={()=>toggleSys(s.name)} style={{
                       fontSize:12,fontWeight:sel?600:400,
-                      background:sel?`${c}15`:'#f9fafb',color:sel?c:'#374151',
-                      border:`1px solid ${sel?c+'50':'#e5e7eb'}`,
+                      background:sel?`${c}1f`:t.surface2,color:sel?c:t.text2,
+                      border:`1px solid ${sel?c+'66':t.border}`,
                       borderRadius:5,padding:'5px 12px',cursor:'pointer',fontFamily:'Inter,sans-serif'
                     }}>{s.name}</button>
                   );
@@ -156,10 +179,10 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
             {DIFFICULTY.map(d => (
               <button key={d} onClick={()=>!saving&&setDiff(d)} style={{
                 padding:'7px 16px',borderRadius:6,
-                border:`1px solid ${difficulty===d?DIFF_COLOR[d]:'#e5e7eb'}`,
+                border:`1px solid ${difficulty===d?DIFF_COLOR[d]:t.border}`,
                 cursor:saving?'default':'pointer',fontSize:13,fontWeight:600,
-                background:difficulty===d?`${DIFF_COLOR[d]}12`:'#fff',
-                color:difficulty===d?DIFF_COLOR[d]:'#6b7280',fontFamily:'Inter,sans-serif'
+                background:difficulty===d?`${DIFF_COLOR[d]}1f`:t.surface,
+                color:difficulty===d?DIFF_COLOR[d]:t.text3,fontFamily:'Inter,sans-serif'
               }}>{d}</button>
             ))}
           </div>
@@ -172,13 +195,13 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
               onTouchStart={e=>e.preventDefault()}
               onClick={()=>setHlMode(p=>!p)}
               style={{
-                fontSize:11,background:hlMode?'#fef9c3':'#f3f4f6',
-                border:`1px solid ${hlMode?'#fde68a':'#e5e7eb'}`,
+                fontSize:11,background:hlMode?t.hlBtnBg:t.surface3,
+                border:`1px solid ${hlMode?t.hlBtnBorder:t.border}`,
                 borderRadius:5,padding:'4px 10px',cursor:'pointer',
-                color:hlMode?'#92400e':'#6b7280',fontWeight:600,fontFamily:'Inter,sans-serif'
+                color:hlMode?t.hlBtnText:t.text3,fontWeight:600,fontFamily:'Inter,sans-serif'
               }}>🖊 {hlMode?'Highlighting on':'Highlight'}</button>
             {hl.highlights.length>0 && (
-              <span style={{fontSize:11,color:'#9ca3af'}}>
+              <span style={{fontSize:11,color:t.text4}}>
                 {hl.highlights.length} highlight{hl.highlights.length!==1?'s':''}
               </span>
             )}
@@ -194,7 +217,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
 
           <div style={{position:'relative'}}>
             {hl.highlights.length > 0 && (
-              <HighlightOverlay text={notes} highlights={hl.highlights} />
+              <HighlightOverlay ref={overlayRef} text={notes} highlights={hl.highlights} />
             )}
             <textarea
               ref={taRef}
@@ -204,15 +227,16 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
               onMouseUp={hl.onSelChange}
               onKeyUp={hl.onSelChange}
               onTouchEnd={hl.onSelChange}
+              onScroll={syncOverlayScroll}
               placeholder="Key concepts, mnemonics, clinical pearls…"
               rows={8}
               disabled={saving}
               style={{
                 ...inp, resize:'vertical', lineHeight:'1.7',
                 position:'relative', zIndex:1,
-                background: hl.highlights.length > 0 ? 'transparent' : '#fff',
-                caretColor: '#111827',
-                color: hl.highlights.length > 0 ? 'rgba(17,24,39,0.85)' : '#111827',
+                background: hl.highlights.length > 0 ? 'transparent' : t.surface,
+                caretColor: t.text,
+                color: t.text,
               }}
             />
           </div>
@@ -224,17 +248,17 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
               onDragLeave={()=>setDrag(false)}
               onDrop={e=>{e.preventDefault();setDrag(false);loadFiles(e.dataTransfer.files);}}
               onClick={()=>!saving&&fileRef.current?.click()}
-              style={{flex:1,minWidth:120,border:`2px dashed ${dragOver?color:'#d1d5db'}`,
+              style={{flex:1,minWidth:120,border:`2px dashed ${dragOver?color:t.borderStrong}`,
                 borderRadius:8,padding:'20px 14px',textAlign:'center',
-                cursor:saving?'default':'pointer',background:dragOver?`${color}08`:'#f9fafb'}}>
+                cursor:saving?'default':'pointer',background:dragOver?`${color}12`:t.surface2}}>
               <div style={{fontSize:22,marginBottom:4}}>🖼️</div>
-              <div style={{fontSize:12,color:'#6b7280'}}>Drag & Drop</div>
+              <div style={{fontSize:12,color:t.text3}}>Drag & Drop</div>
             </div>
             <div onClick={()=>!saving&&galRef.current?.click()}
-              style={{flex:1,minWidth:120,border:'2px dashed #d1d5db',borderRadius:8,
-                padding:'20px 14px',textAlign:'center',cursor:saving?'default':'pointer',background:'#f9fafb'}}>
+              style={{flex:1,minWidth:120,border:`2px dashed ${t.borderStrong}`,borderRadius:8,
+                padding:'20px 14px',textAlign:'center',cursor:saving?'default':'pointer',background:t.surface2}}>
               <div style={{fontSize:22,marginBottom:4}}>📷</div>
-              <div style={{fontSize:12,color:'#6b7280'}}>From Gallery</div>
+              <div style={{fontSize:12,color:t.text3}}>From Gallery</div>
             </div>
           </div>
           <input ref={fileRef} type="file" accept="image/*" multiple style={{display:'none'}}
@@ -246,7 +270,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
               {images.map((img,i) => (
                 <div key={i} style={{position:'relative'}}>
                   <img src={img.preview} alt="" style={{width:100,height:76,objectFit:'cover',
-                    borderRadius:7,border:'1px solid #e5e7eb'}} />
+                    borderRadius:7,border:`1px solid ${t.border}`}} />
                   {!saving && <button onClick={()=>setImages(p=>p.filter((_,j)=>j!==i))} style={{
                     position:'absolute',top:-7,right:-7,background:'#dc2626',border:'none',
                     borderRadius:'50%',width:20,height:20,fontSize:10,color:'#fff',
@@ -255,16 +279,16 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
               ))}
             </div>
           )}
-          <div style={{fontSize:11,color:'#9ca3af',marginTop:8}}>
+          <div style={{fontSize:11,color:t.text4,marginTop:8}}>
             ℹ️ Text & highlights auto-saved as draft. Re-add images if you switch apps.
           </div>
         </F>
 
         {err && (
-          <div style={{background:'#fef2f2',border:'1px solid #fecaca',
-            borderRadius:8,padding:'12px 16px',fontSize:13,color:'#dc2626'}}>
+          <div style={{background:t.dangerBg,border:`1px solid ${t.dangerBorder}`,
+            borderRadius:8,padding:'12px 16px',fontSize:13,color:t.danger}}>
             <strong>Error:</strong> {err}
-            <div style={{marginTop:6,fontSize:12,color:'#b91c1c'}}>Your text is saved as a draft.</div>
+            <div style={{marginTop:6,fontSize:12,color:t.danger}}>Your text is saved as a draft.</div>
           </div>
         )}
 
@@ -285,7 +309,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
           </button>
           {!saving && (
             <button onClick={()=>{clearDraft(activeSystem);onCancel();}} style={{
-              background:'#f3f4f6',color:'#6b7280',border:'1px solid #e5e7eb',
+              background:t.surface3,color:t.text3,border:`1px solid ${t.border}`,
               borderRadius:8,padding:'12px 20px',fontSize:14,
               cursor:'pointer',fontFamily:'Inter,sans-serif'}}>Cancel</button>
           )}
@@ -294,19 +318,3 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
     </div>
   );
 }
-
-function F({ label, children }) {
-  return (
-    <div>
-      <div style={{fontSize:10,color:'#9ca3af',letterSpacing:.8,fontWeight:600,textTransform:'uppercase'}}>{label}</div>
-      {children}
-    </div>
-  );
-}
-
-const inp = {
-  display:'block', width:'100%', marginTop:8, background:'#fff',
-  border:'1px solid #d1d5db', borderRadius:8, color:'#111827',
-  padding:'10px 12px', fontSize:14, outline:'none', boxSizing:'border-box',
-  fontFamily:'Inter,sans-serif'
-};

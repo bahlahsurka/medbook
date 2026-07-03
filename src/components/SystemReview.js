@@ -1,6 +1,62 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR } from '../lib/constants';
+import { buildHighlightParts } from '../lib/highlights';
+import { useTheme } from '../lib/theme';
+
+// Renders notes with the same highlight colours the entry has in its system view
+function RenderedNotes({ text, highlights }) {
+  const parts = buildHighlightParts(text, highlights);
+  return (
+    <span style={{whiteSpace:'pre-wrap'}}>
+      {parts.map((p,i) => p.hl
+        ? <mark key={i} style={{background:p.hl.bg,color:p.hl.text,borderRadius:2,padding:'0 2px'}}>{p.t}</mark>
+        : <span key={i}>{p.t}</span>
+      )}
+    </span>
+  );
+}
+
+// Swipeable / arrow-navigable lightbox — matches the one in DetailView.js
+function Lightbox({ images, start, onClose }) {
+  const [idx, setIdx] = useState(start);
+  const tx = useRef(null);
+  const prev = () => setIdx(i => (i - 1 + images.length) % images.length);
+  const next = () => setIdx(i => (i + 1) % images.length);
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.92)', zIndex:400,
+      display:'flex', alignItems:'center', justifyContent:'center' }}
+      onTouchStart={e => { tx.current = e.touches[0].clientX; }}
+      onTouchEnd={e => {
+        if (!tx.current) return;
+        const dx = e.changedTouches[0].clientX - tx.current;
+        if (dx < -50) next(); else if (dx > 50) prev();
+        tx.current = null;
+      }}>
+      <button onClick={onClose} style={{ position:'absolute', top:16, right:20,
+        background:'rgba(255,255,255,.15)', border:'none', color:'#fff', fontSize:20,
+        cursor:'pointer', width:40, height:40, borderRadius:'50%',
+        display:'flex', alignItems:'center', justifyContent:'center' }}>✕</button>
+      {images.length > 1 && <>
+        <div style={{ position:'absolute', top:20, left:'50%', transform:'translateX(-50%)',
+          color:'#fff', fontSize:13, background:'rgba(0,0,0,.5)', padding:'4px 14px', borderRadius:20 }}>
+          {idx + 1}/{images.length}
+        </div>
+        <button onClick={prev} style={{ position:'absolute', left:12, background:'rgba(255,255,255,.15)',
+          border:'none', color:'#fff', fontSize:28, cursor:'pointer', width:44, height:44,
+          borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center' }}>‹</button>
+        <button onClick={next} style={{ position:'absolute', right:12, background:'rgba(255,255,255,.15)',
+          border:'none', color:'#fff', fontSize:28, cursor:'pointer', width:44, height:44,
+          borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center' }}>›</button>
+      </>}
+      <img src={images[idx]} alt=""
+        style={{ maxWidth:'90vw', maxHeight:'88vh', borderRadius:8, objectFit:'contain', display:'block' }}
+        onClick={e => e.stopPropagation()} />
+      <div onClick={onClose} style={{ position:'absolute', inset:0, zIndex:-1 }} />
+    </div>
+  );
+}
 
 const RATINGS = [
   { key:'again', label:'Again',  color:'#dc2626', bg:'#fef2f2', hint:'<1 day'  },
@@ -28,6 +84,7 @@ function calcNext(entry, rating) {
 }
 
 export default function SystemReview({ system, entries, color, onReviewed, onClose }) {
+  const { t, isDark } = useTheme();
   const now = new Date();
 
   // Shuffle entries
@@ -44,7 +101,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
   const [done, setDone]     = useState(false);
   const [ended, setEnded]   = useState(false);
   const [reviewed, setReviewed] = useState(0);
-  const [lightbox, setLightbox] = useState(null);
+  const [lightboxIdx, setLightboxIdx] = useState(null); // index into card.images, or null
 
   const card  = queue[idx];
   const total = queue.length;
@@ -67,126 +124,121 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
   };
 
   if (total === 0) return (
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',zIndex:300,
+    <div style={{position:'fixed',inset:0,background:t.overlay,zIndex:300,
       display:'flex',alignItems:'center',justifyContent:'center',padding:16,fontFamily:'Inter,sans-serif'}}>
-      <div style={{background:'#fff',borderRadius:14,padding:32,maxWidth:440,width:'100%',textAlign:'center'}}>
+      <div style={{background:t.surface,borderRadius:14,padding:32,maxWidth:440,width:'100%',textAlign:'center',boxShadow:`0 8px 32px ${t.shadowStrong}`}}>
         <div style={{fontSize:40,marginBottom:12}}>📋</div>
-        <div style={{fontSize:16,fontWeight:700,color:'#111827',marginBottom:8}}>No entries in {system}</div>
-        <div style={{fontSize:14,color:'#6b7280',marginBottom:20}}>Add some entries first.</div>
-        <button onClick={onClose} style={B('#f3f4f6','#374151')}>Close</button>
+        <div style={{fontSize:16,fontWeight:700,color:t.text,marginBottom:8}}>No entries in {system}</div>
+        <div style={{fontSize:14,color:t.text3,marginBottom:20}}>Add some entries first.</div>
+        <button onClick={onClose} style={B(t.surface3,t.text2)}>Close</button>
       </div>
     </div>
   );
 
   if (done || ended) return (
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',zIndex:300,
+    <div style={{position:'fixed',inset:0,background:t.overlay,zIndex:300,
       display:'flex',alignItems:'center',justifyContent:'center',padding:16,fontFamily:'Inter,sans-serif'}}>
-      <div style={{background:'#fff',borderRadius:14,padding:32,maxWidth:440,width:'100%',textAlign:'center'}}>
+      <div style={{background:t.surface,borderRadius:14,padding:32,maxWidth:440,width:'100%',textAlign:'center',boxShadow:`0 8px 32px ${t.shadowStrong}`}}>
         <div style={{fontSize:40,marginBottom:12}}>{done?'✅':'⏸️'}</div>
-        <div style={{fontSize:16,fontWeight:700,color:'#111827',marginBottom:8}}>
+        <div style={{fontSize:16,fontWeight:700,color:t.text,marginBottom:8}}>
           {done?'Session complete!':'Session ended'}
         </div>
-        <div style={{fontSize:14,color:'#6b7280',marginBottom:20}}>
+        <div style={{fontSize:14,color:t.text3,marginBottom:20}}>
           Reviewed <strong>{reviewed}</strong> of <strong>{total}</strong> {system} cards.
         </div>
         <div style={{display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap'}}>
           {!done && (
-            <button onClick={()=>setEnded(false)} style={B('#2563eb')}>Resume</button>
+            <button onClick={()=>setEnded(false)} style={B(t.accent)}>Resume</button>
           )}
-          <button onClick={onClose} style={B('#f3f4f6','#374151')}>Back to {system}</button>
+          <button onClick={onClose} style={B(t.surface3,t.text2)}>Back to {system}</button>
         </div>
       </div>
     </div>
   );
 
   return (
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',zIndex:300,
+    <div style={{position:'fixed',inset:0,background:t.overlay,zIndex:300,
       display:'flex',alignItems:'center',justifyContent:'center',padding:16,fontFamily:'Inter,sans-serif'}}>
 
-      {lightbox && (
-        <div onClick={()=>setLightbox(null)} style={{position:'fixed',inset:0,
-          background:'rgba(0,0,0,.9)',zIndex:400,display:'flex',
-          alignItems:'center',justifyContent:'center'}}>
-          <img src={lightbox} alt="" style={{maxWidth:'90vw',maxHeight:'88vh',borderRadius:8}} />
-          <div onClick={()=>setLightbox(null)} style={{position:'absolute',top:16,right:20,
-            color:'#fff',fontSize:26,cursor:'pointer'}}>✕</div>
-        </div>
+      {lightboxIdx !== null && card?.images?.length > 0 && (
+        <Lightbox images={card.images} start={lightboxIdx} onClose={()=>setLightboxIdx(null)} />
       )}
 
-      <div style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:580,
+      <div style={{background:t.surface,borderRadius:14,width:'100%',maxWidth:580,
         maxHeight:'92vh',display:'flex',flexDirection:'column',
-        boxShadow:'0 8px 32px rgba(0,0,0,.2)'}}>
+        boxShadow:`0 8px 32px ${t.shadowStrong}`}}>
 
         {/* Header */}
-        <div style={{padding:'16px 20px',borderBottom:'1px solid #e5e7eb',
+        <div style={{padding:'16px 20px',borderBottom:`1px solid ${t.border}`,
           display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
           <div>
-            <div style={{fontSize:14,fontWeight:700,color:'#111827'}}>
+            <div style={{fontSize:14,fontWeight:700,color:t.text}}>
               Reviewing — <span style={{color}}>{system}</span>
             </div>
-            <div style={{fontSize:11,color:'#9ca3af',marginTop:2}}>
+            <div style={{fontSize:11,color:t.text4,marginTop:2}}>
               {idx+1} / {total} · {reviewed} reviewed · {progress}% done
             </div>
           </div>
-          <button onClick={()=>setEnded(true)} style={{fontSize:12,background:'#fef2f2',
-            border:'1px solid #fecaca',color:'#dc2626',borderRadius:6,
+          <button onClick={()=>setEnded(true)} style={{fontSize:12,background:t.dangerBg,
+            border:`1px solid ${t.dangerBorder}`,color:t.danger,borderRadius:6,
             padding:'5px 12px',cursor:'pointer',fontWeight:600,fontFamily:'Inter,sans-serif'}}>
             End
           </button>
         </div>
 
         {/* Progress bar */}
-        <div style={{height:3,background:'#e5e7eb',flexShrink:0}}>
+        <div style={{height:3,background:t.surface3,flexShrink:0}}>
           <div style={{height:'100%',background:color,width:`${progress}%`,transition:'width .3s'}} />
         </div>
 
         {/* Card */}
         <div style={{flex:1,overflowY:'auto',padding:20}}>
           <div style={{display:'flex',gap:8,marginBottom:14,flexWrap:'wrap'}}>
-            <span style={{fontSize:11,fontWeight:600,background:`${dc}12`,color:dc,
-              border:`1px solid ${dc}25`,borderRadius:4,padding:'2px 8px'}}>
+            <span style={{fontSize:11,fontWeight:600,background:`${dc}1f`,color:dc,
+              border:`1px solid ${dc}44`,borderRadius:4,padding:'2px 8px'}}>
               {card.difficulty}
             </span>
             {card.review_count>0 && (
-              <span style={{fontSize:11,color:'#9ca3af'}}>Reviewed {card.review_count}×</span>
+              <span style={{fontSize:11,color:t.text4}}>Reviewed {card.review_count}×</span>
             )}
             {card.next_review && new Date(card.next_review)<=now && (
               <span style={{fontSize:11,color:'#dc2626',fontWeight:600}}>Due</span>
             )}
             {!card.next_review && (
-              <span style={{fontSize:11,color:'#2563eb',fontWeight:600}}>New</span>
+              <span style={{fontSize:11,color:t.accent,fontWeight:600}}>New</span>
             )}
           </div>
 
-          <div style={{fontSize:17,fontWeight:700,color:'#111827',lineHeight:1.4,marginBottom:20}}>
+          <div style={{fontSize:17,fontWeight:700,color:t.text,lineHeight:1.4,marginBottom:20}}>
             {card.title}
           </div>
 
           {!flipped ? (
             <button onClick={()=>setFlipped(true)} style={{width:'100%',
-              background:'#f9fafb',border:'2px dashed #d1d5db',borderRadius:10,
-              padding:16,fontSize:14,color:'#6b7280',cursor:'pointer',
+              background:t.surface2,border:`2px dashed ${t.borderStrong}`,borderRadius:10,
+              padding:16,fontSize:14,color:t.text3,cursor:'pointer',
               fontWeight:600,fontFamily:'Inter,sans-serif'}}>
               Tap to reveal notes
             </button>
           ) : (
             <div>
-              <div style={{height:1,background:'#e5e7eb',marginBottom:16}} />
+              <div style={{height:1,background:t.border,marginBottom:16}} />
               {card.notes ? (
-                <div style={{fontSize:14,color:'#1f2937',lineHeight:1.8,
+                <div style={{fontSize:14,color:t.text2,lineHeight:1.8,
                   whiteSpace:'pre-wrap',marginBottom:16}}>
-                  {card.notes}
+                  <RenderedNotes text={card.notes} highlights={card.highlights} />
                 </div>
               ) : (
-                <div style={{fontSize:13,color:'#9ca3af',marginBottom:16}}>No notes.</div>
+                <div style={{fontSize:13,color:t.text4,marginBottom:16}}>No notes.</div>
               )}
               {card.images?.length>0 && (
                 <div style={{display:'flex',gap:8,overflowX:'auto',
-                  WebkitOverflowScrolling:'touch',paddingBottom:4}}>
+                  WebkitOverflowScrolling:'touch',paddingBottom:4,scrollSnapType:'x mandatory'}}>
                   {card.images.map((url,i)=>(
-                    <img key={i} src={url} alt="" onClick={()=>setLightbox(url)}
+                    <img key={i} src={url} alt="" onClick={()=>setLightboxIdx(i)}
                       style={{height:80,width:'auto',borderRadius:6,
-                        border:'1px solid #e5e7eb',cursor:'zoom-in',flexShrink:0}} />
+                        border:`1px solid ${t.border}`,cursor:'zoom-in',flexShrink:0,
+                        scrollSnapAlign:'start'}} />
                   ))}
                 </div>
               )}
@@ -195,17 +247,17 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
         </div>
 
         {/* Rating */}
-        <div style={{padding:'14px 20px 20px',borderTop:'1px solid #e5e7eb',flexShrink:0}}>
+        <div style={{padding:'14px 20px 20px',borderTop:`1px solid ${t.border}`,flexShrink:0}}>
           {flipped ? (
             <>
-              <div style={{fontSize:11,color:'#9ca3af',fontWeight:600,
+              <div style={{fontSize:11,color:t.text4,fontWeight:600,
                 textAlign:'center',marginBottom:10,letterSpacing:.5}}>
                 HOW WELL DID YOU KNOW THIS?
               </div>
               <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}}>
                 {RATINGS.map(r=>(
                   <button key={r.key} onClick={()=>rate(r.key)} style={{
-                    background:r.bg,border:`1px solid ${r.color}30`,
+                    background:isDark?`${r.color}1f`:r.bg,border:`1px solid ${r.color}40`,
                     borderRadius:10,padding:'12px 6px',cursor:'pointer',
                     fontFamily:'Inter,sans-serif'}}>
                     <div style={{fontSize:13,fontWeight:700,color:r.color}}>{r.label}</div>
@@ -217,7 +269,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
           ) : (
             <div style={{textAlign:'center'}}>
               <button onClick={skip} style={{background:'none',border:'none',
-                color:'#9ca3af',fontSize:12,cursor:'pointer',
+                color:t.text4,fontSize:12,cursor:'pointer',
                 textDecoration:'underline',fontFamily:'Inter,sans-serif'}}>
                 Skip this card
               </button>

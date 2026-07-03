@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
 import { buildHighlightParts } from '../lib/highlights';
 import { useHighlight } from '../lib/useHighlight';
+import { useTheme } from '../lib/theme';
 import HLToolbar from './HLToolbar';
 
 function RenderedNotes({ text, highlights }) {
@@ -73,6 +74,10 @@ function Lightbox({ images, start, onClose }) {
 }
 
 export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId }) {
+  const { t, isDark } = useTheme();
+  const inp={display:'block',width:'100%',marginTop:8,background:t.surface,
+    border:`1px solid ${t.borderStrong}`,borderRadius:8,color:t.text,padding:'10px 12px',
+    fontSize:14,outline:'none',boxSizing:'border-box',fontFamily:'Inter,sans-serif'};
   const [lb,      setLb]      = useState(null);
   const [editing, setEditing] = useState(false);
   const [deleting,setDel]     = useState(false);
@@ -215,7 +220,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   // ── EDIT MODE ──────────────────────────────────────────────────────────
   if (editing) return (
     <div style={{maxWidth:680,margin:'0 auto',fontFamily:'Inter,sans-serif'}}>
-      <div style={{fontSize:15,fontWeight:700,color:'#111827',marginBottom:20}}>
+      <div style={{fontSize:15,fontWeight:700,color:t.text,marginBottom:20}}>
         Editing — <span style={{color}}>{entry.system}</span>
       </div>
       <div style={{display:'flex',flexDirection:'column',gap:16}}>
@@ -227,10 +232,10 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             {DIFFICULTY.map(d=>(
               <button key={d} onClick={()=>setED(d)} style={{
                 padding:'7px 16px',borderRadius:6,
-                border:`1px solid ${editDiff===d?DIFF_COLOR[d]:'#e5e7eb'}`,
+                border:`1px solid ${editDiff===d?DIFF_COLOR[d]:t.border}`,
                 cursor:'pointer',fontSize:13,fontWeight:600,fontFamily:'Inter,sans-serif',
-                background:editDiff===d?`${DIFF_COLOR[d]}12`:'#fff',
-                color:editDiff===d?DIFF_COLOR[d]:'#6b7280'}}>{d}</button>
+                background:editDiff===d?`${DIFF_COLOR[d]}1f`:t.surface,
+                color:editDiff===d?DIFF_COLOR[d]:t.text3}}>{d}</button>
             ))}
           </div>
         </F>
@@ -239,13 +244,13 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             <button
               onMouseDown={e=>e.preventDefault()} onTouchStart={e=>e.preventDefault()}
               onClick={()=>setHEOn(p=>!p)}
-              style={{fontSize:11,background:hlEditOn?'#fef9c3':'#f3f4f6',
-                border:`1px solid ${hlEditOn?'#fde68a':'#e5e7eb'}`,
+              style={{fontSize:11,background:hlEditOn?t.hlBtnBg:t.surface3,
+                border:`1px solid ${hlEditOn?t.hlBtnBorder:t.border}`,
                 borderRadius:5,padding:'4px 10px',cursor:'pointer',
-                color:hlEditOn?'#92400e':'#6b7280',fontWeight:600,fontFamily:'Inter,sans-serif'}}>
+                color:hlEditOn?t.hlBtnText:t.text3,fontWeight:600,fontFamily:'Inter,sans-serif'}}>
               🖊 {hlEditOn?'On':'Highlight'}
             </button>
-            {editHl.highlights.length>0 && <span style={{fontSize:11,color:'#9ca3af'}}>{editHl.highlights.length} highlights</span>}
+            {editHl.highlights.length>0 && <span style={{fontSize:11,color:t.text4}}>{editHl.highlights.length} highlights</span>}
           </div>
           {hlEditOn && <HLToolbar onApply={editHl.applyHL} onRemove={editHl.removeHL} hasSelection={editHl.hasSel} />}
           <textarea ref={editTaRef} value={editNotes}
@@ -259,7 +264,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             <div style={{display:'flex',flexWrap:'wrap',gap:10,marginTop:8}}>
               {editImgs.map((url,i)=>(
                 <div key={i} style={{position:'relative'}}>
-                  <img src={url} alt="" style={{width:100,height:76,objectFit:'cover',borderRadius:7,border:'1px solid #e5e7eb'}} />
+                  <img src={url} alt="" style={{width:100,height:76,objectFit:'cover',borderRadius:7,border:`1px solid ${t.border}`}} />
                   <button onClick={()=>setEI(p=>p.filter((_,j)=>j!==i))} style={{
                     position:'absolute',top:-7,right:-7,background:'#dc2626',border:'none',
                     borderRadius:'50%',width:20,height:20,fontSize:10,color:'#fff',
@@ -270,9 +275,9 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
           </F>
         )}
         <F label="ADD MORE IMAGES">
-          <label style={{display:'inline-block',marginTop:8,background:'#f3f4f6',
-            border:'1px solid #e5e7eb',borderRadius:7,padding:'8px 16px',
-            fontSize:13,cursor:'pointer',fontWeight:500,color:'#374151',fontFamily:'Inter,sans-serif'}}>
+          <label style={{display:'inline-block',marginTop:8,background:t.surface3,
+            border:`1px solid ${t.border}`,borderRadius:7,padding:'8px 16px',
+            fontSize:13,cursor:'pointer',fontWeight:500,color:t.text2,fontFamily:'Inter,sans-serif'}}>
             📷 Choose images
             <input type="file" accept="image/*" multiple style={{display:'none'}}
               onChange={e=>loadNewImgs(e.target.files)} />
@@ -281,7 +286,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             <div style={{display:'flex',flexWrap:'wrap',gap:10,marginTop:10}}>
               {newImgs.map((img,i)=>(
                 <div key={i} style={{position:'relative'}}>
-                  <img src={img.preview} alt="" style={{width:100,height:76,objectFit:'cover',borderRadius:7,border:'1px solid #e5e7eb'}} />
+                  <img src={img.preview} alt="" style={{width:100,height:76,objectFit:'cover',borderRadius:7,border:`1px solid ${t.border}`}} />
                   <button onClick={()=>setNI(p=>p.filter((_,j)=>j!==i))} style={{
                     position:'absolute',top:-7,right:-7,background:'#dc2626',border:'none',
                     borderRadius:'50%',width:20,height:20,fontSize:10,color:'#fff',
@@ -291,7 +296,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             </div>
           )}
         </F>
-        {err && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:8,padding:'10px 14px',fontSize:13,color:'#dc2626'}}>{err}</div>}
+        {err && <div style={{background:t.dangerBg,border:`1px solid ${t.dangerBorder}`,borderRadius:8,padding:'10px 14px',fontSize:13,color:t.danger}}>{err}</div>}
         <div style={{display:'flex',gap:10}}>
           <button onClick={saveEdit} disabled={saving} style={{
             background:color,color:'#fff',border:'none',borderRadius:8,padding:'11px 24px',
@@ -299,8 +304,8 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             opacity:saving?.7:1,fontFamily:'Inter,sans-serif'}}>
             {saving?'Saving…':'✓ Save Changes'}
           </button>
-          <button onClick={cancelEdit} style={{background:'#f3f4f6',color:'#6b7280',
-            border:'1px solid #e5e7eb',borderRadius:8,padding:'11px 20px',
+          <button onClick={cancelEdit} style={{background:t.surface3,color:t.text3,
+            border:`1px solid ${t.border}`,borderRadius:8,padding:'11px 20px',
             fontSize:14,cursor:'pointer',fontFamily:'Inter,sans-serif'}}>Cancel</button>
         </div>
       </div>
@@ -312,22 +317,22 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     <div style={{maxWidth:680,margin:'0 auto',fontFamily:'Inter,sans-serif'}}>
       {lb!==null && <Lightbox images={entry.images} start={lb} onClose={()=>setLb(null)} />}
 
-      <button onClick={onBack} style={{background:'none',border:'none',color:'#6b7280',
+      <button onClick={onBack} style={{background:'none',border:'none',color:t.text3,
         cursor:'pointer',fontSize:13,padding:0,marginBottom:16,
         display:'flex',alignItems:'center',gap:4,fontWeight:500,fontFamily:'Inter,sans-serif'}}>
         ← Back to {entry.system}
       </button>
 
-      <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:10,
+      <div style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:10,
         padding:20,marginBottom:14,borderTop:`3px solid ${color}`,
-        boxShadow:'0 1px 3px rgba(0,0,0,.06)'}}>
-        <div style={{fontSize:18,fontWeight:700,color:'#111827',lineHeight:1.4,marginBottom:12}}>
+        boxShadow:`0 1px 3px ${t.shadow}`}}>
+        <div style={{fontSize:18,fontWeight:700,color:t.text,lineHeight:1.4,marginBottom:12}}>
           {entry.title}{entry.pinned&&' 📌'}
         </div>
         <div style={{display:'flex',flexWrap:'wrap',gap:8,alignItems:'center',marginBottom:16}}>
-          <span style={{fontSize:11,fontWeight:500,background:`${dc}12`,color:dc,
-            borderRadius:4,padding:'2px 8px',border:`1px solid ${dc}25`}}>{entry.difficulty}</span>
-          <span style={{fontSize:12,color:'#9ca3af'}}>{fmt(entry.created_at)}</span>
+          <span style={{fontSize:11,fontWeight:500,background:`${dc}1f`,color:dc,
+            borderRadius:4,padding:'2px 8px',border:`1px solid ${dc}44`}}>{entry.difficulty}</span>
+          <span style={{fontSize:12,color:t.text4}}>{fmt(entry.created_at)}</span>
           {entry.review_count>0 && (
             <span style={{fontSize:12,color:'#16a34a',fontWeight:600}}>
               ✓ Reviewed {entry.review_count}×{entry.last_reviewed&&` · Last: ${fmt(entry.last_reviewed)}`}
@@ -337,11 +342,11 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
           <AB color="#16a34a" bg="#f0fdf4" border="#bbf7d0" onClick={markReviewed}>✓ Reviewed</AB>
           <AB color="#2563eb" bg="#eff6ff" border="#bfdbfe" onClick={()=>setEditing(true)}>✎ Edit</AB>
-          <AB color={entry.pinned?'#d97706':'#374151'} bg={entry.pinned?'#fffbeb':'#f9fafb'}
-            border={entry.pinned?'#fde68a':'#e5e7eb'} onClick={togglePin}>
+          <AB color={entry.pinned?'#d97706':t.text2} bg={entry.pinned?'#fffbeb':t.surface2}
+            border={entry.pinned?'#fde68a':t.border} onClick={togglePin}>
             {entry.pinned?'📌 Unpin':'📌 Pin'}
           </AB>
-          <AB color="#374151" bg="#f9fafb" border="#e5e7eb" onClick={exportPDF}>⬇ PDF</AB>
+          <AB color={t.text2} bg={t.surface2} border={t.border} onClick={exportPDF}>⬇ PDF</AB>
           <AB color="#dc2626" bg="#fef2f2" border="#fecaca" onClick={deleteEntry} disabled={deleting}>
             {deleting?'…':'Delete'}
           </AB>
@@ -349,32 +354,32 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
       </div>
 
       {entry.notes && (
-        <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:10,
-          padding:'18px 20px',marginBottom:14,boxShadow:'0 1px 3px rgba(0,0,0,.04)'}}>
+        <div style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:10,
+          padding:'18px 20px',marginBottom:14,boxShadow:`0 1px 3px ${t.shadow}`}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
             marginBottom:12,flexWrap:'wrap',gap:8}}>
-            <div style={{fontSize:10,color:'#9ca3af',letterSpacing:.8,fontWeight:600,textTransform:'uppercase'}}>
+            <div style={{fontSize:10,color:t.text4,letterSpacing:.8,fontWeight:600,textTransform:'uppercase'}}>
               Review Notes
             </div>
             <button
               onMouseDown={e=>e.preventDefault()} onTouchStart={e=>e.preventDefault()}
               onClick={()=>setHVOn(p=>!p)}
-              style={{fontSize:11,background:hlViewOn?'#fef9c3':'#f3f4f6',
-                border:`1px solid ${hlViewOn?'#fde68a':'#e5e7eb'}`,
+              style={{fontSize:11,background:hlViewOn?t.hlBtnBg:t.surface3,
+                border:`1px solid ${hlViewOn?t.hlBtnBorder:t.border}`,
                 borderRadius:5,padding:'3px 10px',cursor:'pointer',
-                color:hlViewOn?'#92400e':'#6b7280',fontWeight:600,fontFamily:'Inter,sans-serif'}}>
+                color:hlViewOn?t.hlBtnText:t.text3,fontWeight:600,fontFamily:'Inter,sans-serif'}}>
               🖊 {hlViewOn?'Done':'Highlight'}
             </button>
           </div>
           {hlViewOn && (
             <>
               <HLToolbar onApply={applyViewHL} onRemove={removeViewHL} hasSelection={true} />
-              <div style={{fontSize:11,color:'#9ca3af',marginBottom:8}}>
+              <div style={{fontSize:11,color:t.text4,marginBottom:8}}>
                 Select text then tap a colour. Saves automatically.
               </div>
             </>
           )}
-          <div ref={notesRef} style={{lineHeight:1.85,fontSize:14,color:'#1f2937',
+          <div ref={notesRef} style={{lineHeight:1.85,fontSize:14,color:t.text2,
             userSelect:hlViewOn?'text':'auto'}}>
             <RenderedNotes text={entry.notes} highlights={viewHL} />
           </div>
@@ -382,9 +387,9 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
       )}
 
       {entry.images?.length>0 && (
-        <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:10,
-          padding:'18px 20px',boxShadow:'0 1px 3px rgba(0,0,0,.04)'}}>
-          <div style={{fontSize:10,color:'#9ca3af',letterSpacing:.8,fontWeight:600,
+        <div style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:10,
+          padding:'18px 20px',boxShadow:`0 1px 3px ${t.shadow}`}}>
+          <div style={{fontSize:10,color:t.text4,letterSpacing:.8,fontWeight:600,
             textTransform:'uppercase',marginBottom:14}}>
             Images ({entry.images.length}) — scroll · tap to expand
           </div>
@@ -393,8 +398,8 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             {entry.images.map((url,i)=>(
               <img key={i} src={url} alt="" onClick={()=>setLb(i)}
                 style={{height:180,width:'auto',maxWidth:'80vw',flexShrink:0,
-                  borderRadius:8,border:'1px solid #e5e7eb',cursor:'pointer',
-                  objectFit:'contain',background:'#f9fafb',scrollSnapAlign:'start'}} />
+                  borderRadius:8,border:`1px solid ${t.border}`,cursor:'pointer',
+                  objectFit:'contain',background:t.surface2,scrollSnapAlign:'start'}} />
             ))}
           </div>
         </div>
@@ -404,17 +409,19 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
 }
 
 function AB({onClick,children,color,bg,border,disabled}) {
-  return <button onClick={onClick} disabled={disabled} style={{background:bg,
-    border:`1px solid ${border}`,color,borderRadius:7,padding:'8px 16px',fontSize:13,
+  const { isDark } = useTheme();
+  const b  = isDark ? `${color}22` : bg;
+  const bd = isDark ? `${color}55` : border;
+  return <button onClick={onClick} disabled={disabled} style={{background:b,
+    border:`1px solid ${bd}`,color,borderRadius:7,padding:'8px 16px',fontSize:13,
     cursor:disabled?'not-allowed':'pointer',fontWeight:600,fontFamily:'Inter,sans-serif',
     opacity:disabled?.6:1}}>{children}</button>;
 }
 function F({label,children}) {
+  const { t } = useTheme();
   return <div>
-    <div style={{fontSize:10,color:'#9ca3af',letterSpacing:.8,fontWeight:600,textTransform:'uppercase'}}>{label}</div>
+    <div style={{fontSize:10,color:t.text4,letterSpacing:.8,fontWeight:600,textTransform:'uppercase'}}>{label}</div>
     {children}
   </div>;
 }
-const inp={display:'block',width:'100%',marginTop:8,background:'#fff',
-  border:'1px solid #d1d5db',borderRadius:8,color:'#111827',padding:'10px 12px',
-  fontSize:14,outline:'none',boxSizing:'border-box',fontFamily:'Inter,sans-serif'};
+

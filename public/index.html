@@ -14,6 +14,15 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script>
+      // Apply saved theme before first paint to prevent a white flash in dark mode.
+      (function () {
+        try {
+          var saved = localStorage.getItem('medbook_theme');
+          window.__MEDBOOK_DARK__ = saved === 'dark';
+        } catch (e) { window.__MEDBOOK_DARK__ = false; }
+      })();
+    </script>
     <style>
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
       body {
@@ -22,16 +31,30 @@
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
         -webkit-font-smoothing: antialiased;
         overscroll-behavior: none;
+        transition: background .2s ease, color .2s ease;
+      }
+      body.medbook-dark {
+        background: #0d0f13;
+        color: #f1f3f5;
       }
       ::-webkit-scrollbar { width: 5px; }
       ::-webkit-scrollbar-track { background: #f3f4f6; }
       ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+      body.medbook-dark ::-webkit-scrollbar-track { background: #181b21; }
+      body.medbook-dark ::-webkit-scrollbar-thumb { background: #3a404b; }
       input, textarea, button, select { font-family: inherit; }
     </style>
+    <script>
+      // Paint body dark immediately if needed (before React mounts).
+      if (window.__MEDBOOK_DARK__) {
+        document.documentElement.style.background = '#0d0f13';
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
     <script>
+      if (window.__MEDBOOK_DARK__) document.body.classList.add('medbook-dark');
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').catch(() => {});

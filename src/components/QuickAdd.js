@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { DIFFICULTY, DIFF_COLOR } from '../lib/constants';
+import { useTheme } from '../lib/theme';
 
 export default function QuickAdd({ userId, activeSystem, userSystems, color, onSaved, onClose }) {
+  const { t } = useTheme();
   const [title, setTitle]   = useState('');
   const [notes, setNotes]   = useState('');
   const [system, setSystem] = useState(activeSystem);
@@ -27,60 +29,53 @@ export default function QuickAdd({ userId, activeSystem, userSystems, color, onS
   const sys = userSystems.find(s => s.name === system);
   const sysColor = sys?.color || color;
 
+  const inp = { width:'100%', border:`1px solid ${t.borderStrong}`, borderRadius:8,
+    padding:'12px', fontSize:15, outline:'none', boxSizing:'border-box',
+    fontFamily:'Inter,sans-serif', color:t.text, background:t.surface2 };
+
   return (
     <div style={{ position:'fixed', inset:0, zIndex:200,
       display:'flex', flexDirection:'column', justifyContent:'flex-end',
-      background:'rgba(0,0,0,0.4)', fontFamily:'Inter,sans-serif' }}
+      background:t.overlay, fontFamily:'Inter,sans-serif' }}
       onClick={e => { if(e.target===e.currentTarget) onClose(); }}>
 
-      <div style={{ background:'#fff', borderRadius:'16px 16px 0 0',
+      <div style={{ background:t.surface, borderRadius:'16px 16px 0 0',
         padding:'20px 16px 32px', maxHeight:'85vh', overflowY:'auto' }}>
 
-        {/* Handle */}
-        <div style={{ width:40, height:4, background:'#e5e7eb', borderRadius:4,
+        <div style={{ width:40, height:4, background:t.border, borderRadius:4,
           margin:'0 auto 20px' }} />
 
-        <div style={{ fontSize:15, fontWeight:700, color:'#111827', marginBottom:16 }}>
+        <div style={{ fontSize:15, fontWeight:700, color:t.text, marginBottom:16 }}>
           Quick Add
         </div>
 
         <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
           <input value={title} onChange={e=>setTitle(e.target.value)}
-            placeholder="Title *" autoFocus
-            style={{ width:'100%', border:'1px solid #d1d5db', borderRadius:8,
-              padding:'12px', fontSize:15, outline:'none', boxSizing:'border-box',
-              fontFamily:'Inter,sans-serif', color:'#111827' }} />
+            placeholder="Title *" autoFocus style={inp} />
 
-          {/* System picker */}
           <select value={system} onChange={e=>setSystem(e.target.value)}
-            style={{ width:'100%', border:'1px solid #d1d5db', borderRadius:8,
-              padding:'11px 12px', fontSize:14, outline:'none', background:'#fff',
-              color:'#111827', fontFamily:'Inter,sans-serif', boxSizing:'border-box' }}>
+            style={{ ...inp, padding:'11px 12px', fontSize:14 }}>
             {userSystems.map(s => (
               <option key={s.name} value={s.name}>{s.name}</option>
             ))}
           </select>
 
-          {/* Difficulty */}
           <div style={{ display:'flex', gap:8 }}>
             {DIFFICULTY.map(d => (
               <button key={d} onClick={()=>setDiff(d)} style={{
-                flex:1, padding:'9px 4px', borderRadius:6, border:`1px solid ${diff===d?DIFF_COLOR[d]:'#e5e7eb'}`,
-                background:diff===d?`${DIFF_COLOR[d]}12`:'#fff',
-                color:diff===d?DIFF_COLOR[d]:'#6b7280',
+                flex:1, padding:'9px 4px', borderRadius:6, border:`1px solid ${diff===d?DIFF_COLOR[d]:t.border}`,
+                background:diff===d?`${DIFF_COLOR[d]}12`:t.surface,
+                color:diff===d?DIFF_COLOR[d]:t.text3,
                 fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'Inter,sans-serif'
               }}>{d}</button>
             ))}
           </div>
 
           <textarea value={notes} onChange={e=>setNotes(e.target.value)}
-            placeholder="Notes (optional)"
-            rows={4}
-            style={{ width:'100%', border:'1px solid #d1d5db', borderRadius:8,
-              padding:'12px', fontSize:14, outline:'none', resize:'none',
-              boxSizing:'border-box', fontFamily:'Inter,sans-serif', color:'#111827', lineHeight:1.6 }} />
+            placeholder="Notes (optional)" rows={4}
+            style={{ ...inp, fontSize:14, resize:'none', lineHeight:1.6 }} />
 
-          {err && <div style={{ fontSize:13, color:'#dc2626' }}>{err}</div>}
+          {err && <div style={{ fontSize:13, color:t.danger }}>{err}</div>}
 
           <button onClick={save} disabled={saving} style={{
             background:saving?'#93c5fd':sysColor, color:'#fff', border:'none',

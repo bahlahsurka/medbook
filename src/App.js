@@ -3,6 +3,7 @@ import { supabase } from './lib/supabase';
 import { loadSystems, saveSystems, DEFAULT_SYSTEMS } from './lib/systems';
 import { SYS_COLOR } from './lib/constants';
 import { useScrollRestore } from './lib/useScrollRestore';
+import { useTheme } from './lib/theme';
 import Auth from './components/Auth';
 import Sidebar from './components/Sidebar';
 import EntryCard from './components/EntryCard';
@@ -19,6 +20,7 @@ import SystemReview from './components/SystemReview';
 const ONBOARD_KEY = 'medbook_onboarded';
 
 export default function App() {
+  const { t } = useTheme();
   const [session, setSession]         = useState(null);
   const [authLoading, setAL]          = useState(true);
   const [entries, setEntries]         = useState({});
@@ -291,7 +293,7 @@ export default function App() {
     || SYS_COLOR[activeSystem] || '#2563eb';
 
   if (authLoading) return (
-    <div style={{minHeight:'100vh',background:'#f9fafb',display:'flex',
+    <div style={{minHeight:'100vh',background:t.appBg,display:'flex',
       alignItems:'center',justifyContent:'center',fontFamily:'Inter,sans-serif'}}>
       <Spinner />
     </div>
@@ -300,7 +302,7 @@ export default function App() {
   if (!session) return <Auth />;
 
   return (
-    <div style={{display:'flex',height:'100vh',background:'#f3f4f6',
+    <div style={{display:'flex',height:'100vh',background:t.bg,
       overflow:'hidden',fontFamily:'Inter,sans-serif'}}>
 
       {/* Toast */}
@@ -320,7 +322,7 @@ export default function App() {
       {showSysReview && <SystemReview system={activeSystem} entries={entries[activeSystem]||[]} color={color} onReviewed={onReviewed} onClose={()=>setSysReview(false)} />}
 
       {isMobile && sidebarOpen && (
-        <div onClick={()=>setSB(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',zIndex:40}} />
+        <div onClick={()=>setSB(false)} style={{position:'fixed',inset:0,background:t.overlay,zIndex:40}} />
       )}
 
       <input ref={importRef} type="file" accept=".json" style={{display:'none'}} onChange={importJSON} />
@@ -347,21 +349,21 @@ export default function App() {
 
         {/* Header */}
         <div style={{display:'flex',alignItems:'center',gap:10,padding:'12px 16px',
-          borderBottom:'1px solid #e5e7eb',background:'#fff',flexShrink:0,
-          boxShadow:'0 1px 2px rgba(0,0,0,.05)'}}>
+          borderBottom:`1px solid ${t.border}`,background:t.surface,flexShrink:0,
+          boxShadow:`0 1px 2px ${t.shadow}`}}>
           <button onClick={()=>setSB(p=>!p)} style={{background:'none',border:'none',
-            color:'#6b7280',cursor:'pointer',fontSize:18,padding:'2px 4px',flexShrink:0}}>☰</button>
+            color:t.text3,cursor:'pointer',fontSize:18,padding:'2px 4px',flexShrink:0}}>☰</button>
 
-          {view==='stats'  && <span style={{fontWeight:700,color:'#111827',fontSize:14}}>Dashboard</span>}
-          {view==='search' && <span style={{fontWeight:700,color:'#111827',fontSize:14}}>Global Search</span>}
-          {view==='review' && <span style={{fontWeight:700,color:'#111827',fontSize:14}}>Review Queue</span>}
-          {view==='cards'  && <span style={{fontWeight:700,color:'#111827',fontSize:14}}>Flashcards</span>}
+          {view==='stats'  && <span style={{fontWeight:700,color:t.text,fontSize:14}}>Dashboard</span>}
+          {view==='search' && <span style={{fontWeight:700,color:t.text,fontSize:14}}>Global Search</span>}
+          {view==='review' && <span style={{fontWeight:700,color:t.text,fontSize:14}}>Review Queue</span>}
+          {view==='cards'  && <span style={{fontWeight:700,color:t.text,fontSize:14}}>Flashcards</span>}
           {['list','add','detail'].includes(view) && (
             <>
               <div style={{width:7,height:7,borderRadius:'50%',background:color,flexShrink:0}} />
-              <span style={{fontSize:14,fontWeight:700,color:'#111827',
+              <span style={{fontSize:14,fontWeight:700,color:t.text,
                 overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{activeSystem}</span>
-              {view==='list' && <span style={{fontSize:11,color:'#9ca3af',flexShrink:0}}>{sysEntries.length}</span>}
+              {view==='list' && <span style={{fontSize:11,color:t.text4,flexShrink:0}}>{sysEntries.length}</span>}
             </>
           )}
 
@@ -370,14 +372,14 @@ export default function App() {
           {view==='list' && !isMobile && (
             <input value={search} onChange={e=>setSearch(e.target.value)}
               placeholder="Search notes…"
-              style={{background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:7,
-                color:'#111827',padding:'7px 12px',fontSize:13,width:180,outline:'none'}} />
+              style={{background:t.surface2,border:`1px solid ${t.border}`,borderRadius:7,
+                color:t.text,padding:'7px 12px',fontSize:13,width:180,outline:'none'}} />
           )}
           {view==='search' && (
             <input value={globalSearch} onChange={e=>setGS(e.target.value)}
               placeholder="Search all systems…" autoFocus
-              style={{background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:7,
-                color:'#111827',padding:'7px 12px',fontSize:13,outline:'none',
+              style={{background:t.surface2,border:`1px solid ${t.border}`,borderRadius:7,
+                color:t.text,padding:'7px 12px',fontSize:13,outline:'none',
                 width:isMobile?'100%':260,flex:isMobile?1:'none'}} />
           )}
 
@@ -385,7 +387,7 @@ export default function App() {
             <div style={{display:'flex',gap:8,flexShrink:0}}>
               {(entries[activeSystem]||[]).length>0 && (
                 <button onClick={()=>setSysReview(true)} style={{
-                  background:'#f9fafb',color:'#374151',border:'1px solid #e5e7eb',
+                  background:t.surface2,color:t.text2,border:`1px solid ${t.border}`,
                   borderRadius:7,padding:isMobile?'8px 10px':'8px 14px',
                   fontSize:13,fontWeight:600,cursor:'pointer'}}>
                   {isMobile?'🔁':'🔁 Review'}
@@ -401,7 +403,7 @@ export default function App() {
 
           {(view==='add'||view==='detail') && (
             <button onClick={()=>{ if(view==='detail') backToList(); else setView('list'); }}
-              style={{background:'#f3f4f6',color:'#6b7280',border:'1px solid #e5e7eb',
+              style={{background:t.surface3,color:t.text3,border:`1px solid ${t.border}`,
                 borderRadius:7,padding:'7px 14px',fontSize:13,cursor:'pointer'}}>
               ← Back
             </button>
@@ -410,11 +412,11 @@ export default function App() {
 
         {/* Mobile search */}
         {isMobile && view==='list' && (
-          <div style={{padding:'8px 12px',background:'#fff',borderBottom:'1px solid #e5e7eb'}}>
+          <div style={{padding:'8px 12px',background:t.surface,borderBottom:`1px solid ${t.border}`}}>
             <input value={search} onChange={e=>setSearch(e.target.value)}
               placeholder={`Search ${activeSystem}…`}
-              style={{width:'100%',background:'#f9fafb',border:'1px solid #e5e7eb',
-                borderRadius:7,color:'#111827',padding:'8px 12px',
+              style={{width:'100%',background:t.surface2,border:`1px solid ${t.border}`,
+                borderRadius:7,color:t.text,padding:'8px 12px',
                 fontSize:13,outline:'none',boxSizing:'border-box'}} />
           </div>
         )}
@@ -424,17 +426,17 @@ export default function App() {
 
           {fetching && (
             <div style={{textAlign:'center',paddingTop:80}}>
-              <Spinner />
-              <div style={{fontSize:13,color:'#6b7280',marginTop:16}}>Loading your notebook…</div>
+              <Spinner track={t.spinnerTrack} accent={t.accent} />
+              <div style={{fontSize:13,color:t.text3,marginTop:16}}>Loading your notebook…</div>
             </div>
           )}
 
           {!fetching && fetchErr && (
             <div style={{textAlign:'center',paddingTop:60}}>
               <div style={{fontSize:14,color:'#dc2626',marginBottom:8}}>Could not load entries</div>
-              <div style={{fontSize:12,color:'#9ca3af',marginBottom:20}}>{fetchErr}</div>
+              <div style={{fontSize:12,color:t.text4,marginBottom:20}}>{fetchErr}</div>
               <button onClick={()=>loadEntries(session,userSystems)}
-                style={{background:'#2563eb',color:'#fff',border:'none',borderRadius:8,
+                style={{background:t.accent,color:'#fff',border:'none',borderRadius:8,
                   padding:'10px 24px',fontSize:14,fontWeight:600,cursor:'pointer'}}>Retry</button>
             </div>
           )}
@@ -443,8 +445,8 @@ export default function App() {
             <>
               {view==='search' && (
                 <div style={{maxWidth:680,margin:'0 auto'}}>
-                  {!globalSearch && <div style={{color:'#9ca3af',textAlign:'center',paddingTop:40,fontSize:14}}>Type to search all systems</div>}
-                  {globalSearch && globalResults.length===0 && <div style={{color:'#9ca3af',textAlign:'center',paddingTop:40,fontSize:14}}>No results found</div>}
+                  {!globalSearch && <div style={{color:t.text4,textAlign:'center',paddingTop:40,fontSize:14}}>Type to search all systems</div>}
+                  {globalSearch && globalResults.length===0 && <div style={{color:t.text4,textAlign:'center',paddingTop:40,fontSize:14}}>No results found</div>}
                   <div style={{display:'flex',flexDirection:'column',gap:8}}>
                     {globalResults.map(e=>(
                       <EntryCard key={e.id} entry={e}
@@ -478,10 +480,10 @@ export default function App() {
                     <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
                       <button onClick={()=>{ setBulkMode(p=>!p); setSelected2(new Set()); }}
                         style={{fontSize:12,
-                          background:bulkMode?'#eff6ff':'#f3f4f6',
-                          border:`1px solid ${bulkMode?'#bfdbfe':'#e5e7eb'}`,
+                          background:bulkMode?t.navActiveBg:t.surface3,
+                          border:`1px solid ${bulkMode?t.navActiveBorder:t.border}`,
                           borderRadius:6,padding:'5px 12px',cursor:'pointer',
-                          color:bulkMode?'#2563eb':'#6b7280',fontWeight:600,fontFamily:'Inter,sans-serif'}}>
+                          color:bulkMode?t.navActiveText:t.text3,fontWeight:600,fontFamily:'Inter,sans-serif'}}>
                         {bulkMode?`☑ ${selected2.size} selected`:'☑ Select'}
                       </button>
                       {bulkMode && selected2.size>0 && (<>
@@ -489,9 +491,9 @@ export default function App() {
                         <button onClick={()=>bulkPin(false)} style={bb('#6b7280')}>Unpin</button>
                         <select onChange={e=>{if(e.target.value){bulkMove(e.target.value);e.target.value='';}}}
                           defaultValue=""
-                          style={{fontSize:12,border:'1px solid #e5e7eb',borderRadius:6,
-                            padding:'5px 10px',cursor:'pointer',color:'#374151',
-                            fontFamily:'Inter,sans-serif',background:'#fff'}}>
+                          style={{fontSize:12,border:`1px solid ${t.border}`,borderRadius:6,
+                            padding:'5px 10px',cursor:'pointer',color:t.text2,
+                            fontFamily:'Inter,sans-serif',background:t.surface}}>
                           <option value="" disabled>Move to…</option>
                           {userSystems.filter(s=>s.name!==activeSystem).map(s=>(
                             <option key={s.name} value={s.name}>{s.name}</option>
@@ -500,7 +502,7 @@ export default function App() {
                         <button onClick={bulkDelete} style={bb('#dc2626')}>🗑 Delete</button>
                       </>)}
                       {bulkMode && selected2.size===0 && (
-                        <span style={{fontSize:12,color:'#9ca3af'}}>
+                        <span style={{fontSize:12,color:t.text4}}>
                           {isMobile?'Tap cards to select':'Click or right-click to select'}
                         </span>
                       )}
@@ -510,7 +512,7 @@ export default function App() {
                   {sysEntries.length===0 ? (
                     <div style={{textAlign:'center',padding:'60px 20px'}}>
                       <div style={{fontSize:40,marginBottom:12}}>📋</div>
-                      <div style={{fontSize:14,color:'#6b7280'}}>
+                      <div style={{fontSize:14,color:t.text3}}>
                         {search?'No entries match your search':`No entries yet for ${activeSystem}`}
                       </div>
                       {!search && (
@@ -579,8 +581,8 @@ function SelectableCard({ entry, color, bulkMode, isSelected, onTap, onLongPress
       onTouchStart={startPress} onTouchEnd={endPress} onTouchMove={cancelPress}>
       {bulkMode && (
         <div style={{position:'absolute',top:10,left:10,zIndex:10,width:22,height:22,
-          borderRadius:5,background:isSelected?color:'#fff',
-          border:`2px solid ${isSelected?color:'#d1d5db'}`,
+          borderRadius:5,background:isSelected?color:t.surface,
+          border:`2px solid ${isSelected?color:t.borderStrong}`,
           display:'flex',alignItems:'center',justifyContent:'center',
           boxShadow:'0 1px 3px rgba(0,0,0,.15)',pointerEvents:'none'}}>
           {isSelected&&<span style={{color:'#fff',fontSize:13,fontWeight:700}}>✓</span>}
@@ -591,9 +593,9 @@ function SelectableCard({ entry, color, bulkMode, isSelected, onTap, onLongPress
   );
 }
 
-function Spinner() {
+function Spinner({ track='#e5e7eb', accent='#2563eb' }) {
   return (
-    <div style={{width:32,height:32,border:'3px solid #e5e7eb',borderTop:'3px solid #2563eb',
+    <div style={{width:32,height:32,border:`3px solid ${track}`,borderTop:`3px solid ${accent}`,
       borderRadius:'50%',animation:'spin .8s linear infinite',margin:'0 auto'}}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
