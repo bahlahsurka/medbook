@@ -6,6 +6,27 @@ export const HL_COLORS = [
   { bg:'#fed7aa', text:'#7c2d12', label:'Orange' },
 ];
 
+// Dark-mode equivalents, keyed by each colour's light background.
+// In dark mode the note text is near-white, so pale pastel highlights make it
+// unreadable ("white/opaque/shabby"). These use translucent dark-friendly tints
+// with light text instead, so the highlight reads cleanly on a dark surface.
+const HL_DARK = {
+  '#fef08a': { bg:'rgba(250,204,21,0.30)', text:'#fef9c3' },
+  '#bbf7d0': { bg:'rgba(34,197,94,0.30)',  text:'#dcfce7' },
+  '#bfdbfe': { bg:'rgba(96,165,250,0.32)', text:'#dbeafe' },
+  '#fbcfe8': { bg:'rgba(244,114,182,0.30)',text:'#fce7f3' },
+  '#fed7aa': { bg:'rgba(251,146,60,0.30)', text:'#ffedd5' },
+};
+
+// Resolve a stored highlight colour to the right {bg,text} for the active theme.
+// Stored highlights keep their original light-mode object, so we map at render time
+// (no data migration needed).
+export function resolveHL(color, isDark) {
+  if (!color) return null;
+  if (isDark && HL_DARK[color.bg]) return HL_DARK[color.bg];
+  return { bg: color.bg, text: color.text };
+}
+
 export function buildHighlightParts(text, highlights) {
   if (!text) return [];
   if (!highlights || highlights.length === 0) return [{ t: text, hl: null }];

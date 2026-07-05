@@ -1,22 +1,45 @@
-import { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
-import { buildHighlightParts } from '../lib/highlights';
+import { buildHighlightParts, resolveHL } from '../lib/highlights';
 import { useHighlight } from '../lib/useHighlight';
 import { useTheme } from '../lib/theme';
 import HLToolbar from './HLToolbar';
 
 function RenderedNotes({ text, highlights }) {
+  const { isDark } = useTheme();
   const parts = buildHighlightParts(text, highlights);
   return (
     <span style={{whiteSpace:'pre-wrap'}}>
-      {parts.map((p,i) => p.hl
-        ? <mark key={i} style={{background:p.hl.bg,color:p.hl.text,borderRadius:2,padding:'0 2px'}}>{p.t}</mark>
-        : <span key={i}>{p.t}</span>
-      )}
+      {parts.map((p,i) => {
+        if (!p.hl) return <span key={i}>{p.t}</span>;
+        const c = resolveHL(p.hl, isDark);
+        return <mark key={i} style={{background:c.bg,color:c.text,borderRadius:2,padding:'0 2px'}}>{p.t}</mark>;
+      })}
     </span>
   );
 }
+
+// Same always-opaque-text overlay used in AddEntry, so edit-mode highlighting
+// shows clean colour bands in both themes instead of washed-out text.
+const EditHighlightOverlay = React.forwardRef(function EditHighlightOverlay({ text, highlights, isDark }, ref) {
+  const parts = buildHighlightParts(text + '\n', highlights);
+  return (
+    <div ref={ref} aria-hidden="true" style={{
+      position:'absolute', inset:0, pointerEvents:'none',
+      whiteSpace:'pre-wrap', wordBreak:'break-word', overflowWrap:'break-word',
+      fontSize:14, lineHeight:'1.7', padding:'10px 12px',
+      fontFamily:'Inter,sans-serif', boxSizing:'border-box',
+      border:'1px solid transparent', color:'transparent', overflow:'hidden'
+    }}>
+      {parts.map((p,i) => {
+        if (!p.hl) return <span key={i}>{p.t}</span>;
+        const c = resolveHL(p.hl, isDark);
+        return <mark key={i} style={{background:c.bg,color:'transparent',borderRadius:2,padding:'0 1px'}}>{p.t}</mark>;
+      })}
+    </div>
+  );
+});
 
 function Lightbox({ images, start, onClose }) {
   const [idx, setIdx] = useState(start);
@@ -97,7 +120,15 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const [hlViewOn, setHVOn]  = useState(false);
 
   const editTaRef = useRef();
+  const editOverlayRef = useRef();
   const notesRef  = useRef();
+
+  const syncEditOverlay = useCallback(() => {
+    if (editOverlayRef.current && editTaRef.current) {
+      editOverlayRef.current.scrollTop = editTaRef.current.scrollTop;
+      editOverlayRef.current.scrollLeft = editTaRef.current.scrollLeft;
+    }
+  }, []);
 
   // Highlight hooks
   const editHl = useHighlight(editTaRef, entry.highlights||[]);
@@ -253,11 +284,21 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             {editHl.highlights.length>0 && <span style={{fontSize:11,color:t.text4}}>{editHl.highlights.length} highlights</span>}
           </div>
           {hlEditOn && <HLToolbar onApply={editHl.applyHL} onRemove={editHl.removeHL} hasSelection={editHl.hasSel} />}
-          <textarea ref={editTaRef} value={editNotes}
-            onChange={e=>{ editHl.handleTextChange(editNotes,e.target.value); setEN(e.target.value); }}
-            onSelect={editHl.onSelChange} onMouseUp={editHl.onSelChange}
-            onKeyUp={editHl.onSelChange} onTouchEnd={editHl.onSelChange}
-            rows={8} style={{...inp,resize:'vertical',lineHeight:1.7}} />
+          <div style={{position:'relative'}}>
+            {editHl.highlights.length>0 && (
+              <EditHighlightOverlay ref={editOverlayRef} text={editNotes}
+                highlights={editHl.highlights} isDark={isDark} />
+            )}
+            <textarea ref={editTaRef} value={editNotes}
+              onChange={e=>{ editHl.handleTextChange(editNotes,e.target.value); setEN(e.target.value); }}
+              onSelect={editHl.onSelChange} onMouseUp={editHl.onSelChange}
+              onKeyUp={editHl.onSelChange} onTouchEnd={editHl.onSelChange}
+              onScroll={syncEditOverlay}
+              rows={8} style={{...inp,resize:'vertical',lineHeight:'1.7',
+                position:'relative',zIndex:1,
+                background: editHl.highlights.length>0 ? 'transparent' : t.surface,
+                caretColor:t.text, color:t.text}} />
+          </div>
         </F>
         {editImgs.length>0 && (
           <F label="EXISTING IMAGES">

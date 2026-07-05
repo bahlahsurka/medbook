@@ -1,18 +1,19 @@
 import { useState, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
-import { SYS_COLOR, DIFF_COLOR } from '../lib/constants';
-import { buildHighlightParts } from '../lib/highlights';
+import { DIFF_COLOR } from '../lib/constants';
+import { buildHighlightParts, resolveHL } from '../lib/highlights';
 import { useTheme } from '../lib/theme';
 
 // Renders notes with the same highlight colours the entry has in its system view
-function RenderedNotes({ text, highlights }) {
+function RenderedNotes({ text, highlights, isDark }) {
   const parts = buildHighlightParts(text, highlights);
   return (
     <span style={{whiteSpace:'pre-wrap'}}>
-      {parts.map((p,i) => p.hl
-        ? <mark key={i} style={{background:p.hl.bg,color:p.hl.text,borderRadius:2,padding:'0 2px'}}>{p.t}</mark>
-        : <span key={i}>{p.t}</span>
-      )}
+      {parts.map((p,i) => {
+        if (!p.hl) return <span key={i}>{p.t}</span>;
+        const c = resolveHL(p.hl, isDark);
+        return <mark key={i} style={{background:c.bg,color:c.text,borderRadius:2,padding:'0 2px'}}>{p.t}</mark>;
+      })}
     </span>
   );
 }
@@ -87,14 +88,38 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
   const { t, isDark } = useTheme();
   const now = new Date();
 
-  // Shuffle entries
+  const [reviewAll, setReviewAll] = useState(false);
+
+  // Deterministic queue — no random shuffle, so ordering reflects scheduling and
+  // never "jumbles". Default session = cards that are actually due + brand-new cards,
+  // ordered by urgency. Rating a card pushes its next_review into the future, so it
+  // leaves the queue until it's due again (that's how difficulty rating "matters").
   const queue = useMemo(() => {
-    const shuffle = arr => [...arr].sort(()=>Math.random()-0.5);
-    const due  = shuffle(entries.filter(e => e.next_review && new Date(e.next_review)<=now));
-    const newE = shuffle(entries.filter(e => !e.next_review));
-    const rest = shuffle(entries.filter(e => e.next_review && new Date(e.next_review)>now));
-    return [...due, ...newE, ...rest];
-  }, [entries]);
+    const due = entries
+      .filter(e => e.next_review && new Date(e.next_review) <= now)
+      .sort((a,b) => new Date(a.next_review) - new Date(b.next_review)); // most overdue first
+    const fresh = entries
+      .filter(e => !e.next_review)
+      .sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+    if (reviewAll) {
+      // Full re-drill: every card, soonest-scheduled first, new cards first. Still deterministic.
+      const scheduled = entries
+        .filter(e => e.next_review && new Date(e.next_review) > now)
+        .sort((a,b) => new Date(a.next_review) - new Date(b.next_review));
+      return [...due, ...fresh, ...scheduled];
+    }
+    return [...due, ...fresh];
+  }, [entries, reviewAll]);
+
+  // How many cards are scheduled for later (used in the "all caught up" state)
+  const upcoming = useMemo(() =>
+    entries.filter(e => e.next_review && new Date(e.next_review) > now), [entries]);
+  const nextDue = useMemo(() => {
+    if (upcoming.length === 0) return null;
+    return upcoming
+      .map(e => new Date(e.next_review))
+      .sort((a,b) => a - b)[0];
+  }, [upcoming]);
 
   const [idx, setIdx]       = useState(0);
   const [flipped, setFlipped] = useState(false);
@@ -111,7 +136,12 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
   const rate = async (rating) => {
     if (!card) return;
     const updates = calcNext(card, rating);
-    await supabase.from('entries').update(updates).eq('id', card.id);
+    const { error } = await supabase.from('entries').update(updates).eq('id', card.id);
+    if (error) {
+      // Surface the failure instead of silently losing the review (e.g. missing DB columns).
+      alert(`Couldn't save this review: ${error.message}\n\nIf this mentions a missing column, run the SM-2 migration in Supabase.`);
+      return; // don't advance — let the user retry after fixing
+    }
     onReviewed({ ...card, ...updates });
     setReviewed(p => p+1);
     if (idx+1 >= total) setDone(true);
@@ -123,7 +153,8 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
     else { setIdx(p=>p+1); setFlipped(false); }
   };
 
-  if (total === 0) return (
+  // No entries at all in this system
+  if (entries.length === 0) return (
     <div style={{position:'fixed',inset:0,background:t.overlay,zIndex:300,
       display:'flex',alignItems:'center',justifyContent:'center',padding:16,fontFamily:'Inter,sans-serif'}}>
       <div style={{background:t.surface,borderRadius:14,padding:32,maxWidth:440,width:'100%',textAlign:'center',boxShadow:`0 8px 32px ${t.shadowStrong}`}}>
@@ -131,6 +162,29 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
         <div style={{fontSize:16,fontWeight:700,color:t.text,marginBottom:8}}>No entries in {system}</div>
         <div style={{fontSize:14,color:t.text3,marginBottom:20}}>Add some entries first.</div>
         <button onClick={onClose} style={B(t.surface3,t.text2)}>Close</button>
+      </div>
+    </div>
+  );
+
+  // Entries exist but none are due right now — scheduling is working as intended.
+  if (total === 0) return (
+    <div style={{position:'fixed',inset:0,background:t.overlay,zIndex:300,
+      display:'flex',alignItems:'center',justifyContent:'center',padding:16,fontFamily:'Inter,sans-serif'}}>
+      <div style={{background:t.surface,borderRadius:14,padding:32,maxWidth:440,width:'100%',textAlign:'center',boxShadow:`0 8px 32px ${t.shadowStrong}`}}>
+        <div style={{fontSize:40,marginBottom:12}}>✅</div>
+        <div style={{fontSize:16,fontWeight:700,color:t.text,marginBottom:8}}>All caught up in {system}</div>
+        <div style={{fontSize:14,color:t.text3,marginBottom:6}}>
+          Nothing due right now — {upcoming.length} card{upcoming.length!==1?'s':''} scheduled for later.
+        </div>
+        {nextDue && (
+          <div style={{fontSize:12,color:t.text4,marginBottom:20}}>
+            Next due {nextDue.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}
+          </div>
+        )}
+        <div style={{display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap'}}>
+          <button onClick={()=>setReviewAll(true)} style={B(t.accent)}>Review all anyway</button>
+          <button onClick={onClose} style={B(t.surface3,t.text2)}>Close</button>
+        </div>
       </div>
     </div>
   );
@@ -226,7 +280,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
               {card.notes ? (
                 <div style={{fontSize:14,color:t.text2,lineHeight:1.8,
                   whiteSpace:'pre-wrap',marginBottom:16}}>
-                  <RenderedNotes text={card.notes} highlights={card.highlights} />
+                  <RenderedNotes text={card.notes} highlights={card.highlights} isDark={isDark} />
                 </div>
               ) : (
                 <div style={{fontSize:13,color:t.text4,marginBottom:16}}>No notes.</div>

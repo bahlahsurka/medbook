@@ -1,18 +1,19 @@
 import { useState, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR } from '../lib/constants';
-import { buildHighlightParts } from '../lib/highlights';
+import { buildHighlightParts, resolveHL } from '../lib/highlights';
 import { useTheme } from '../lib/theme';
 
 // Renders notes with the same highlight colours the entry has in its system view
-function RenderedNotes({ text, highlights }) {
+function RenderedNotes({ text, highlights, isDark }) {
   const parts = buildHighlightParts(text, highlights);
   return (
     <span style={{whiteSpace:'pre-wrap'}}>
-      {parts.map((p,i) => p.hl
-        ? <mark key={i} style={{background:p.hl.bg,color:p.hl.text,borderRadius:2,padding:'0 2px'}}>{p.t}</mark>
-        : <span key={i}>{p.t}</span>
-      )}
+      {parts.map((p,i) => {
+        if (!p.hl) return <span key={i}>{p.t}</span>;
+        const c = resolveHL(p.hl, isDark);
+        return <mark key={i} style={{background:c.bg,color:c.text,borderRadius:2,padding:'0 2px'}}>{p.t}</mark>;
+      })}
     </span>
   );
 }
@@ -83,25 +84,20 @@ function calcNext(entry, rating) {
   };
 }
 
-// Fisher-Yates shuffle
-function shuffle(arr) {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
 export default function ReviewQueue({ allEntries, onReviewed }) {
   const { t, isDark } = useTheme();
   const now = new Date();
 
-  // Build shuffled queue — due cards first, then new cards, all randomised within group
+  // Deterministic queue — due cards first (most overdue first), then new cards
+  // (oldest first). No random shuffle, so order is stable and reflects scheduling.
   const initialQueue = useMemo(() => {
     const all = Object.values(allEntries).flat();
-    const due  = shuffle(all.filter(e => e.next_review && new Date(e.next_review) <= now));
-    const newE = shuffle(all.filter(e => !e.next_review));
+    const due = all
+      .filter(e => e.next_review && new Date(e.next_review) <= now)
+      .sort((a,b) => new Date(a.next_review) - new Date(b.next_review));
+    const newE = all
+      .filter(e => !e.next_review)
+      .sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
     return [...due, ...newE];
   }, [allEntries]);
 
@@ -124,7 +120,11 @@ export default function ReviewQueue({ allEntries, onReviewed }) {
   const rate = async (rating) => {
     if (!card) return;
     const updates = calcNext(card, rating);
-    await supabase.from('entries').update(updates).eq('id', card.id);
+    const { error } = await supabase.from('entries').update(updates).eq('id', card.id);
+    if (error) {
+      alert(`Couldn't save this review: ${error.message}\n\nIf this mentions a missing column, run the SM-2 migration in Supabase.`);
+      return;
+    }
     onReviewed({ ...card, ...updates });
     setSess(p => p + 1);
     if (idx + 1 >= total) setDone(true);
@@ -206,9 +206,9 @@ export default function ReviewQueue({ allEntries, onReviewed }) {
 
       {/* Stats row */}
       <div style={{ display:'flex', gap:12, marginBottom:14, flexWrap:'wrap' }}>
-        <Pill label={`${dueCount} due`} color="#dc2626" t={t} />
-        <Pill label={`${sessionDone} reviewed`} color="#16a34a" t={t} />
-        <Pill label={`${progress}% done`} color={t.accent} t={t} />
+        <Pill label={`${dueCount} due`} color="#dc2626" />
+        <Pill label={`${sessionDone} reviewed`} color="#16a34a" />
+        <Pill label={`${progress}% done`} color={t.accent} />
       </div>
 
       {/* Progress bar */}
@@ -257,7 +257,7 @@ export default function ReviewQueue({ allEntries, onReviewed }) {
               <div style={{ fontSize:14, color:t.text2, lineHeight:1.8,
                 whiteSpace:'pre-wrap', marginBottom:16,
                 maxHeight:260, overflowY:'auto' }}>
-                <RenderedNotes text={card.notes} highlights={card.highlights} />
+                <RenderedNotes text={card.notes} highlights={card.highlights} isDark={isDark} />
               </div>
             ) : (
               <div style={{ fontSize:13, color:t.text4, marginBottom:16 }}>No notes for this entry.</div>
@@ -312,7 +312,7 @@ export default function ReviewQueue({ allEntries, onReviewed }) {
   );
 }
 
-function Pill({ label, color, t }) {
+function Pill({ label, color }) {
   return (
     <span style={{ fontSize:11, fontWeight:600, background:`${color}1f`, color,
       border:`1px solid ${color}44`, borderRadius:20, padding:'3px 10px' }}>

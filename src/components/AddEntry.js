@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { DIFFICULTY, DIFF_COLOR } from '../lib/constants';
-import { HL_COLORS, buildHighlightParts } from '../lib/highlights';
+import { buildHighlightParts, resolveHL } from '../lib/highlights';
 import { useHighlight } from '../lib/useHighlight';
 import { useTheme } from '../lib/theme';
 import HLToolbar from './HLToolbar';
@@ -12,7 +12,20 @@ const saveDraft = (sys,d) => { try { const o=JSON.parse(localStorage.getItem(DRA
 const clearDraft = sys => { try { const o=JSON.parse(localStorage.getItem(DRAFT_KEY)||'{}'); delete o[sys]; localStorage.setItem(DRAFT_KEY,JSON.stringify(o)); } catch {} };
 
 // Overlay that renders highlight colours *behind* the textarea's own (always-opaque) text.
-const HighlightOverlay = React.forwardRef(function HighlightOverlay({ text, highlights }, ref) {
+// Stable field-label wrapper. MUST live at module scope — if it were defined
+// inside the component it would be a new function every render, remounting the
+// inputs on each keystroke and stealing focus.
+function F({ label, children }) {
+  const { t } = useTheme();
+  return (
+    <div>
+      <div style={{fontSize:10,color:t.text4,letterSpacing:.8,fontWeight:600,textTransform:'uppercase'}}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+const HighlightOverlay = React.forwardRef(function HighlightOverlay({ text, highlights, isDark }, ref) {
   const parts = buildHighlightParts(text + '\n', highlights);
   return (
     <div ref={ref} aria-hidden="true" style={{
@@ -23,16 +36,18 @@ const HighlightOverlay = React.forwardRef(function HighlightOverlay({ text, high
       border:'1px solid transparent',
       color:'transparent', overflow:'hidden'
     }}>
-      {parts.map((p,i) => p.hl
-        ? <mark key={i} style={{background:p.hl.bg,color:'transparent',borderRadius:2,padding:'0 1px'}}>{p.t}</mark>
-        : <span key={i}>{p.t}</span>
-      )}
+      {parts.map((p,i) => {
+        if (!p.hl) return <span key={i}>{p.t}</span>;
+        const c = resolveHL(p.hl, isDark);
+        // color stays transparent — the real (always-opaque) textarea text shows through.
+        return <mark key={i} style={{background:c.bg,color:'transparent',borderRadius:2,padding:'0 1px'}}>{p.t}</mark>;
+      })}
     </div>
   );
 });
 
 export default function AddEntry({ activeSystem, color, userId, onSaved, onCancel, userSystems }) {
-  const { t } = useTheme();
+  const { t, isDark } = useTheme();
   const draft = loadDraft(activeSystem);
   const [title,     setTitle]   = useState(draft?.title     || '');
   const [notes,     setNotes]   = useState(draft?.notes     || '');
@@ -109,13 +124,6 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
   };
 
   const hasDraft = !!(draft?.title||draft?.notes);
-
-  const F = ({ label, children }) => (
-    <div>
-      <div style={{fontSize:10,color:t.text4,letterSpacing:.8,fontWeight:600,textTransform:'uppercase'}}>{label}</div>
-      {children}
-    </div>
-  );
 
   return (
     <div style={{maxWidth:680,margin:'0 auto',fontFamily:'Inter,sans-serif'}}>
@@ -217,7 +225,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
 
           <div style={{position:'relative'}}>
             {hl.highlights.length > 0 && (
-              <HighlightOverlay ref={overlayRef} text={notes} highlights={hl.highlights} />
+              <HighlightOverlay ref={overlayRef} text={notes} highlights={hl.highlights} isDark={isDark} />
             )}
             <textarea
               ref={taRef}
