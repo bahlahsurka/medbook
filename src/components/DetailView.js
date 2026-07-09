@@ -1,10 +1,33 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
 import { buildHighlightParts, resolveHL } from '../lib/highlights';
-import { useHighlight } from '../lib/useHighlight';
+import { useHighlight, clearRange } from '../lib/useHighlight';
 import { useTheme } from '../lib/theme';
 import HLToolbar from './HLToolbar';
+import HLPopover from './HLPopover';
+
+
+// --- helpers -------------------------------------------------------------
+
+// Escape text before injecting into the print/PDF window. Without this, a note
+// containing "<", ">" or "&" (e.g. "CD4 < 200", "T&C") corrupts the output.
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Convert a Supabase public URL back to its storage object path ("<uid>/<file>"),
+// so deleted entries don't leave orphaned images in the bucket.
+function storagePathFromUrl(url) {
+  try {
+    const marker = '/entry-images/';
+    const i = String(url).indexOf(marker);
+    if (i === -1) return null;
+    return decodeURIComponent(String(url).slice(i + marker.length).split('?')[0]);
+  } catch { return null; }
+}
 
 function RenderedNotes({ text, highlights }) {
   const { isDark } = useTheme();
@@ -96,7 +119,7 @@ function Lightbox({ images, start, onClose }) {
   );
 }
 
-export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId }) {
+export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId, color: colorProp }) {
   const { t, isDark } = useTheme();
   const inp={display:'block',width:'100%',marginTop:8,background:t.surface,
     border:`1px solid ${t.borderStrong}`,borderRadius:8,color:t.text,padding:'10px 12px',
@@ -130,10 +153,111 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     }
   }, []);
 
+  // --- Selection tracking for the floating highlight bar ---------------------
+  // We need three things: whether a valid selection exists, its character offsets
+  // (for the highlight math) and its on-screen rect (to place the popover).
+  const [selRect, setSelRect] = useState(null);
+  const [selRange, setSelRange] = useState(null); // { start, end }
+  const pointerDown = useRef(false);
+
+  // Read the current selection, but only if it lies inside the notes element.
+  const readSelection = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !notesRef.current) return null;
+    const range = sel.getRangeAt(0);
+    if (!notesRef.current.contains(range.commonAncestorContainer)) return null;
+    const pre = document.createRange();
+    pre.selectNodeContents(notesRef.current);
+    pre.setEnd(range.startContainer, range.startOffset);
+    const start = pre.toString().length;
+    const end   = start + range.toString().length;
+    if (start >= end) return null;
+    const r = range.getBoundingClientRect();
+    if (!r || (r.width === 0 && r.height === 0)) return null;
+    return { start, end, rect: r, text: range.toString() };
+  }, []);
+
+  const clearSelState = useCallback(() => {
+    setSelRect(null); setSelRange(null);
+  }, []);
+
+  useEffect(() => {
+    if (!hlViewOn) { clearSelState(); return; }
+
+    const sync = () => {
+      // While the user is still dragging, don't pop the bar up under their finger.
+      if (pointerDown.current) return;
+      const s = readSelection();
+      if (!s) { clearSelState(); return; }
+      setSelRange({ start: s.start, end: s.end });
+      setSelRect(s.rect);
+    };
+
+    const onDown = () => { pointerDown.current = true; };
+    const onUp   = () => { pointerDown.current = false; sync(); };
+    // The notes live in a scrolling container, so a fixed-position popover must
+    // be repositioned as the page moves. `true` = capture, to catch inner scrolls.
+    const onScrollOrResize = () => {
+      const s = readSelection();
+      setSelRect(s ? s.rect : null);
+    };
+
+    document.addEventListener('selectionchange', sync);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchstart', onDown, { passive: true });
+    document.addEventListener('touchend', onUp);
+    window.addEventListener('scroll', onScrollOrResize, true);
+    window.addEventListener('resize', onScrollOrResize);
+    sync();
+
+    return () => {
+      document.removeEventListener('selectionchange', sync);
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('touchstart', onDown);
+      document.removeEventListener('touchend', onUp);
+      window.removeEventListener('scroll', onScrollOrResize, true);
+      window.removeEventListener('resize', onScrollOrResize);
+    };
+  }, [hlViewOn, readSelection, clearSelState]);
+
+  // Does the current selection overlap any existing highlight?
+  const selHasHighlight = !!selRange && viewHL.some(h => h.start < selRange.end && h.end > selRange.start);
+  // The static toolbar needs to know whether a usable selection exists.
+  const viewHasSel = !!selRange;
+
+  const copySelection = async () => {
+    const s = readSelection();
+    if (!s) return;
+    try {
+      await navigator.clipboard.writeText(s.text);
+    } catch {
+      // Clipboard API needs a secure context; fall back to the legacy path.
+      const ta = document.createElement('textarea');
+      ta.value = s.text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch {}
+      ta.remove();
+    }
+    window.getSelection()?.removeAllRanges();
+    clearSelState();
+  };
+
+  // Remove every highlight in view mode — explicit and confirmed.
+  const clearAllViewHL = () => {
+    if (viewHL.length === 0) return;
+    if (!window.confirm(`Remove all ${viewHL.length} highlight${viewHL.length!==1?'s':''}?`)) return;
+    setVHL([]);
+    supabase.from('entries').update({highlights:[]}).eq('id',entry.id).then(()=>{});
+    onUpdated({...entry,highlights:[]});
+  };
+
   // Highlight hooks
   const editHl = useHighlight(editTaRef, entry.highlights||[]);
 
-  const color = SYS_COLOR[entry.system]||'#2563eb';
+  // colorProp comes from App (knows user's custom systems); SYS_COLOR is only a fallback.
+  const color = colorProp || SYS_COLOR[entry.system] || '#2563eb';
   const dc    = DIFF_COLOR[entry.difficulty]||'#6b7280';
   const fmt   = iso => new Date(iso).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
 
@@ -143,22 +267,37 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     return !error;
   };
 
-  const markReviewed = () => updateDB({
-    review_count:(entry.review_count||0)+1,
-    last_reviewed:new Date().toISOString()
-  });
+  // Marking reviewed must also advance the SM-2 schedule, otherwise the entry
+  // stays permanently "due" and the review queue never lets it go.
+  const markReviewed = () => {
+    const interval = Math.max(1, Math.round((entry.review_interval || 1) * (entry.ease_factor || 2.5)));
+    const next = new Date();
+    next.setDate(next.getDate() + interval);
+    return updateDB({
+      review_count:(entry.review_count||0)+1,
+      last_reviewed:new Date().toISOString(),
+      review_interval: interval,
+      ease_factor: entry.ease_factor || 2.5,
+      next_review: next.toISOString(),
+    });
+  };
   const togglePin = () => updateDB({ pinned:!entry.pinned });
 
   const deleteEntry = async () => {
     if (!window.confirm('Delete this entry?')) return;
     setDel(true);
-    await supabase.from('entries').delete().eq('id',entry.id);
+    const { error } = await supabase.from('entries').delete().eq('id',entry.id);
+    if (error) { setDel(false); setErr(`Delete failed: ${error.message}`); return; }
+    // Clean up the entry's images so they don't linger in Storage forever.
+    const paths = (entry.images||[]).map(storagePathFromUrl).filter(Boolean);
+    if (paths.length) await supabase.storage.from('entry-images').remove(paths);
     onDeleted(entry.id,entry.system);
   };
 
   const exportPDF = () => {
     const win = window.open('','_blank');
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${entry.title}</title>
+    if (!win) { setErr('Pop-up blocked — allow pop-ups to export a PDF.'); return; }
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(entry.title)}</title>
     <style>body{font-family:sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#1f2937}
     h1{font-size:20px;margin-bottom:8px}.meta{font-size:12px;color:#6b7280;margin-bottom:16px}
     .notes{font-size:14px;line-height:1.8;white-space:pre-wrap;border-top:1px solid #e5e7eb;padding-top:16px;margin-top:16px}
@@ -167,9 +306,9 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     border:1px solid #e5e7eb;border-radius:8px;font-size:13px;cursor:pointer;color:#374151;font-weight:600}
     @media print{.back{display:none}body{padding:0}}</style></head><body>
     <a class="back" onclick="window.close()">← Close & Go Back</a>
-    <div class="meta">${entry.system} · ${entry.difficulty} · ${fmt(entry.created_at)}</div>
-    <h1>${entry.title}</h1><div class="notes">${entry.notes||''}</div>
-    ${(entry.images||[]).map(u=>`<img src="${u}"/>`).join('')}
+    <div class="meta">${esc(entry.system)} · ${esc(entry.difficulty)} · ${esc(fmt(entry.created_at))}</div>
+    <h1>${esc(entry.title)}</h1><div class="notes">${esc(entry.notes||'')}</div>
+    ${(entry.images||[]).map(u=>`<img src="${esc(u)}"/>`).join('')}
     </body></html>`);
     win.document.close(); win.focus();
     setTimeout(()=>{ win.print(); win.onafterprint=()=>win.close(); },600);
@@ -194,34 +333,26 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
 
   // View-mode DOM-based highlight
   const applyViewHL = c => {
-    const sel = window.getSelection();
-    if (!sel||sel.isCollapsed||!notesRef.current) return;
-    const range = sel.getRangeAt(0);
-    if (!notesRef.current.contains(range.commonAncestorContainer)) return;
-    const pre = document.createRange();
-    pre.selectNodeContents(notesRef.current);
-    pre.setEnd(range.startContainer,range.startOffset);
-    const start=pre.toString().length, end=start+range.toString().length;
-    if (start>=end) return;
-    const newHl = [...viewHL,{start,end,color:c}];
-    setVHL(newHl); sel.removeAllRanges();
+    const s = readSelection();
+    if (!s) return;
+    const newHl = [...clearRange(viewHL, s.start, s.end), { start: s.start, end: s.end, color: c }]
+      .sort((a, b) => a.start - b.start);
+    setVHL(newHl);
+    window.getSelection()?.removeAllRanges();
+    clearSelState();
     supabase.from('entries').update({highlights:newHl}).eq('id',entry.id).then(()=>{});
     onUpdated({...entry,highlights:newHl});
   };
 
   const removeViewHL = () => {
-    const sel = window.getSelection(); let newHl = [];
-    if (sel&&!sel.isCollapsed&&notesRef.current) {
-      const range=sel.getRangeAt(0);
-      if (notesRef.current.contains(range.commonAncestorContainer)) {
-        const pre=document.createRange();
-        pre.selectNodeContents(notesRef.current);
-        pre.setEnd(range.startContainer,range.startOffset);
-        const start=pre.toString().length,end=start+range.toString().length;
-        newHl=viewHL.filter(h=>!(h.start<end&&h.end>start));
-      }
-    }
+    // Requires a real selection inside the notes. Previously, clicking Remove with
+    // nothing selected silently deleted EVERY highlight and saved that to the DB.
+    const s = readSelection();
+    if (!s) return;
+    const newHl = clearRange(viewHL, s.start, s.end);
     setVHL(newHl);
+    window.getSelection()?.removeAllRanges();
+    clearSelState();
     supabase.from('entries').update({highlights:newHl}).eq('id',entry.id).then(()=>{});
     onUpdated({...entry,highlights:newHl});
   };
@@ -283,7 +414,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             </button>
             {editHl.highlights.length>0 && <span style={{fontSize:11,color:t.text4}}>{editHl.highlights.length} highlights</span>}
           </div>
-          {hlEditOn && <HLToolbar onApply={editHl.applyHL} onRemove={editHl.removeHL} hasSelection={editHl.hasSel} />}
+          {hlEditOn && <HLToolbar onApply={editHl.applyHL} onRemove={editHl.removeHL} onClearAll={editHl.clearAllHL} hasSelection={editHl.hasSel} />}
           <div style={{position:'relative'}}>
             {editHl.highlights.length>0 && (
               <EditHighlightOverlay ref={editOverlayRef} text={editNotes}
@@ -358,6 +489,18 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     <div style={{maxWidth:680,margin:'0 auto',fontFamily:'Inter,sans-serif'}}>
       {lb!==null && <Lightbox images={entry.images} start={lb} onClose={()=>setLb(null)} />}
 
+      {/* Floating highlight bar — only in view mode, only while Highlight is on,
+          and never on top of the fullscreen lightbox. */}
+      {hlViewOn && lb===null && selRect && (
+        <HLPopover
+          rect={selRect}
+          onApply={applyViewHL}
+          onRemove={removeViewHL}
+          onCopy={copySelection}
+          hasHighlightInSelection={selHasHighlight}
+        />
+      )}
+
       <button onClick={onBack} style={{background:'none',border:'none',color:t.text3,
         cursor:'pointer',fontSize:13,padding:0,marginBottom:16,
         display:'flex',alignItems:'center',gap:4,fontWeight:500,fontFamily:'Inter,sans-serif'}}>
@@ -414,9 +557,16 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
           </div>
           {hlViewOn && (
             <>
-              <HLToolbar onApply={applyViewHL} onRemove={removeViewHL} hasSelection={true} />
+              {/* Static toolbar — always available, and the reliable path on mobile
+                  where the OS selection bubble can crowd the floating bar. */}
+              <HLToolbar
+                onApply={applyViewHL}
+                onRemove={removeViewHL}
+                onClearAll={clearAllViewHL}
+                hasSelection={viewHasSel}
+              />
               <div style={{fontSize:11,color:t.text4,marginBottom:8}}>
-                Select text then tap a colour. Saves automatically.
+                Select text, then tap a colour here — or use the bar that pops up above your selection.
               </div>
             </>
           )}

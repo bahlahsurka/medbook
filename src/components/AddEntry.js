@@ -219,6 +219,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
             <HLToolbar
               onApply={hl.applyHL}
               onRemove={hl.removeHL}
+              onClearAll={hl.clearAllHL}
               hasSelection={hl.hasSel}
             />
           )}

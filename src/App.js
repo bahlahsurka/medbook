@@ -19,6 +19,16 @@ import SystemReview from './components/SystemReview';
 
 const ONBOARD_KEY = 'medbook_onboarded';
 
+// Convert a Supabase public image URL back to its storage object path.
+function storagePathFromUrl(url) {
+  try {
+    const marker = '/entry-images/';
+    const i = String(url).indexOf(marker);
+    if (i === -1) return null;
+    return decodeURIComponent(String(url).slice(i + marker.length).split('?')[0]);
+  } catch { return null; }
+}
+
 export default function App() {
   const { t } = useTheme();
   const [session, setSession]         = useState(null);
@@ -179,7 +189,14 @@ export default function App() {
   const bulkDelete = useCallback(async () => {
     if (!window.confirm(`Delete ${selected2.size} entr${selected2.size===1?'y':'ies'}?`)) return;
     const ids = [...selected2];
-    await supabase.from('entries').delete().in('id', ids);
+    // Collect image paths before the rows disappear, so Storage can be cleaned up.
+    const imgs = Object.values(entries).flat()
+      .filter(e => ids.includes(e.id))
+      .flatMap(e => e.images || []);
+    const { error } = await supabase.from('entries').delete().in('id', ids);
+    if (error) { showToast('Delete failed: '+error.message, 'err'); return; }
+    const paths = imgs.map(storagePathFromUrl).filter(Boolean);
+    if (paths.length) await supabase.storage.from('entry-images').remove(paths);
     setEntries(prev => {
       const next = { ...prev };
       Object.keys(next).forEach(sys => { next[sys] = next[sys].filter(e=>!ids.includes(e.id)); });
@@ -187,11 +204,12 @@ export default function App() {
     });
     setBulkMode(false); setSelected2(new Set());
     showToast(`Deleted ${ids.length} entr${ids.length===1?'y':'ies'}`, 'warn');
-  }, [selected2, showToast]);
+  }, [selected2, entries, showToast]);
 
   const bulkPin = useCallback(async (pin) => {
     const ids = [...selected2];
-    await supabase.from('entries').update({ pinned: pin }).in('id', ids);
+    const { error } = await supabase.from('entries').update({ pinned: pin }).in('id', ids);
+    if (error) { showToast('Failed: '+error.message, 'err'); return; }
     setEntries(prev => {
       const next = { ...prev };
       Object.keys(next).forEach(sys => {
@@ -205,7 +223,8 @@ export default function App() {
 
   const bulkMove = useCallback(async (targetSystem) => {
     const ids = [...selected2];
-    await supabase.from('entries').update({ system: targetSystem }).in('id', ids);
+    const { error } = await supabase.from('entries').update({ system: targetSystem }).in('id', ids);
+    if (error) { showToast('Move failed: '+error.message, 'err'); return; }
     setEntries(prev => {
       const next = { ...prev };
       const moved = [];
@@ -237,9 +256,12 @@ export default function App() {
   const exportJSON = () => {
     const blob = new Blob([JSON.stringify(Object.values(entries).flat(),null,2)],{type:'application/json'});
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    a.href = url;
     a.download = `medbook_backup_${new Date().toISOString().slice(0,10)}.json`;
-    a.click(); showToast('Exported ✓');
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    showToast('Exported ✓');
   };
 
   const importJSON = async (e) => {
@@ -469,7 +491,9 @@ export default function App() {
 
               {view==='detail' && selected && (
                 <DetailView entry={selected} onBack={backToList}
-                  onDeleted={onDeleted} onUpdated={onUpdated} userId={session.user.id} />
+                  onDeleted={onDeleted} onUpdated={onUpdated} userId={session.user.id}
+                  color={userSystems.find(s=>s.name===selected.system)?.color
+                    || SYS_COLOR[selected.system] || '#2563eb'} />
               )}
 
               {view==='list' && (
@@ -562,6 +586,7 @@ export default function App() {
 }
 
 function SelectableCard({ entry, color, bulkMode, isSelected, onTap, onLongPress }) {
+  const { t } = useTheme();
   const timer = React.useRef(null);
   const moved = React.useRef(false);
   const fired = React.useRef(false);
@@ -573,11 +598,18 @@ function SelectableCard({ entry, color, bulkMode, isSelected, onTap, onLongPress
   const endPress = () => clearTimeout(timer.current);
   const cancelPress = () => { moved.current=true; clearTimeout(timer.current); };
 
+  // After a long-press the browser still fires a click, which used to immediately
+  // toggle the selection back off — making long-press look broken on mobile.
+  const handleClick = () => {
+    if (fired.current) { fired.current=false; return; }
+    onTap();
+  };
+
   return (
     <div style={{position:'relative',outline:isSelected?`2px solid ${color}`:'none',
       borderRadius:8,transition:'outline .1s',WebkitUserSelect:'none',userSelect:'none',cursor:'pointer'}}
-      onClick={onTap}
-      onContextMenu={e=>{e.preventDefault();onLongPress();}}
+      onClick={handleClick}
+      onContextMenu={e=>{e.preventDefault();fired.current=true;onLongPress();}}
       onTouchStart={startPress} onTouchEnd={endPress} onTouchMove={cancelPress}>
       {bulkMode && (
         <div style={{position:'absolute',top:10,left:10,zIndex:10,width:22,height:22,
