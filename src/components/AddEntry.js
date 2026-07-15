@@ -30,7 +30,7 @@ const HighlightOverlay = React.forwardRef(function HighlightOverlay({ text, high
   return (
     <div ref={ref} aria-hidden="true" style={{
       position:'absolute', inset:0, pointerEvents:'none',
-      whiteSpace:'pre-wrap', wordBreak:'break-word', overflowWrap:'break-word',
+      whiteSpace:'pre-wrap', wordBreak:'normal', overflowWrap:'break-word',
       fontSize:14, lineHeight:'1.7', padding:'10px 12px',
       fontFamily:'Inter,sans-serif', boxSizing:'border-box',
       border:'1px solid transparent',
@@ -119,7 +119,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
       if (error) throw new Error(`Save failed: ${error.message}`);
       setSS('Saved ✓');
       clearDraft(activeSystem);
-      setTimeout(() => onSaved(data), 350);
+      onSaved(data);
     } catch(e) { setErr(e.message); setSaving(false); setSS(''); }
   };
 
@@ -224,7 +224,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
             />
           )}
 
-          <div style={{position:'relative'}}>
+          <div style={{position:'relative', marginTop:8}}>
             {hl.highlights.length > 0 && (
               <HighlightOverlay ref={overlayRef} text={notes} highlights={hl.highlights} isDark={isDark} />
             )}
@@ -241,7 +241,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
               rows={8}
               disabled={saving}
               style={{
-                ...inp, resize:'vertical', lineHeight:'1.7',
+                ...inp, resize:'vertical', lineHeight:'1.7', marginTop:0,
                 position:'relative', zIndex:1,
                 background: hl.highlights.length > 0 ? 'transparent' : t.surface,
                 caretColor: t.text,

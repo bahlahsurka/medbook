@@ -50,7 +50,7 @@ const EditHighlightOverlay = React.forwardRef(function EditHighlightOverlay({ te
   return (
     <div ref={ref} aria-hidden="true" style={{
       position:'absolute', inset:0, pointerEvents:'none',
-      whiteSpace:'pre-wrap', wordBreak:'break-word', overflowWrap:'break-word',
+      whiteSpace:'pre-wrap', wordBreak:'normal', overflowWrap:'break-word',
       fontSize:14, lineHeight:'1.7', padding:'10px 12px',
       fontFamily:'Inter,sans-serif', boxSizing:'border-box',
       border:'1px solid transparent', color:'transparent', overflow:'hidden'
@@ -415,7 +415,9 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             {editHl.highlights.length>0 && <span style={{fontSize:11,color:t.text4}}>{editHl.highlights.length} highlights</span>}
           </div>
           {hlEditOn && <HLToolbar onApply={editHl.applyHL} onRemove={editHl.removeHL} onClearAll={editHl.clearAllHL} hasSelection={editHl.hasSel} />}
-          <div style={{position:'relative'}}>
+          {/* marginTop lives on the WRAPPER, not the textarea — otherwise the
+              textarea's own margin pushes its text 8px below the overlay bands. */}
+          <div style={{position:'relative', marginTop:8}}>
             {editHl.highlights.length>0 && (
               <EditHighlightOverlay ref={editOverlayRef} text={editNotes}
                 highlights={editHl.highlights} isDark={isDark} />
@@ -426,6 +428,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
               onKeyUp={editHl.onSelChange} onTouchEnd={editHl.onSelChange}
               onScroll={syncEditOverlay}
               rows={8} style={{...inp,resize:'vertical',lineHeight:'1.7',
+                marginTop:0,
                 position:'relative',zIndex:1,
                 background: editHl.highlights.length>0 ? 'transparent' : t.surface,
                 caretColor:t.text, color:t.text}} />
@@ -570,7 +573,9 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
               </div>
             </>
           )}
-          <div ref={notesRef} style={{lineHeight:1.85,fontSize:14,color:t.text2,
+          <div ref={notesRef}
+            data-selectable={hlViewOn ? 'true' : 'false'}
+            style={{lineHeight:1.85,fontSize:14,color:t.text2,
             userSelect:hlViewOn?'text':'auto'}}>
             <RenderedNotes text={entry.notes} highlights={viewHL} />
           </div>

@@ -26,6 +26,7 @@
     </script>
     <style>
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html { overscroll-behavior-y: none; }
       body {
         background: #f9fafb;
         color: #111827;
@@ -44,6 +45,40 @@
       body.medbook-dark ::-webkit-scrollbar-track { background: #181b21; }
       body.medbook-dark ::-webkit-scrollbar-thumb { background: #3a404b; }
       input, textarea, button, select { font-family: inherit; }
+
+      /* ===== Native (Capacitor) only — scoped to body.cap-native ===== */
+
+      /* Kill accidental pull-to-refresh and rubber-band reload. */
+      body.cap-native, body.cap-native #root {
+        overscroll-behavior: none;
+        overflow: hidden;
+      }
+
+      /* Suppress the OS "Copy / Select All" callout EXCEPT where the user is meant
+         to select — the notes area opts back in via [data-selectable]. This is the
+         fix for the highlight bubble hijack on tablet/phone. */
+      body.cap-native {
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      body.cap-native [data-selectable="true"] {
+        -webkit-touch-callout: default;
+        -webkit-user-select: text;
+        user-select: text;
+      }
+      /* Inputs and textareas must always be editable/selectable. */
+      body.cap-native input,
+      body.cap-native textarea,
+      body.cap-native [contenteditable="true"] {
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-touch-callout: default;
+      }
+
+      /* No long-press image save / drag, no tap highlight flash. */
+      body.cap-native img { -webkit-touch-callout: none; -webkit-user-drag: none; }
+      body.cap-native { -webkit-tap-highlight-color: transparent; }
     </style>
     <script>
       // Paint body dark immediately if needed (before React mounts).
@@ -56,7 +91,12 @@
     <div id="root"></div>
     <script>
       if (window.__MEDBOOK_DARK__) document.body.classList.add('medbook-dark');
-      if ('serviceWorker' in navigator) {
+      // Mark the body as native ASAP so the Capacitor-only CSS applies before paint.
+      if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
+        document.body.classList.add('cap-native');
+      } else if ('serviceWorker' in navigator) {
+        // Only register the service worker on the web — inside the native app the
+        // assets are bundled, and a SW there just causes stale-cache headaches.
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').catch(() => {});
         });

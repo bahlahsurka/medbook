@@ -45,7 +45,11 @@ export function useHighlight(taRef, initialHighlights = []) {
     if (ta) {
       requestAnimationFrame(() => {
         ta.focus();
-        ta.setSelectionRange(sel.start, sel.end);
+        // Collapse the selection (don't re-select). Re-selecting kept the OS
+        // "Copy / Select all" bubble up and left the text visibly highlighted-blue
+        // after applying a colour — which looked like the tool was stuck.
+        const end = sel.end;
+        ta.setSelectionRange(end, end);
       });
     }
   }, [taRef]);

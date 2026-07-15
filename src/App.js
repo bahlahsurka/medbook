@@ -3,6 +3,7 @@ import { supabase } from './lib/supabase';
 import { loadSystems, saveSystems, DEFAULT_SYSTEMS } from './lib/systems';
 import { SYS_COLOR } from './lib/constants';
 import { useScrollRestore } from './lib/useScrollRestore';
+import { useDebouncedValue } from './lib/useDebouncedValue';
 import { useTheme } from './lib/theme';
 import Auth from './components/Auth';
 import Sidebar from './components/Sidebar';
@@ -128,8 +129,8 @@ export default function App() {
   const backToList = useCallback(() => {
     setView('list');
     setSelected(null);
-    // Restore scroll after list re-renders
-    setTimeout(() => restoreScroll(activeSystem), 50);
+    // restoreScroll already waits for layout via requestAnimationFrame — no timer needed.
+    restoreScroll(activeSystem);
   }, [activeSystem, restoreScroll]);
 
   const navigate = useCallback((sys, v = 'list') => {
@@ -143,6 +144,7 @@ export default function App() {
     setBulkMode(false); setSelected2(new Set());
     if (window.innerWidth <= 768) setSB(false);
   }, []);
+
 
   // Entry handlers
   const onSaved = useCallback((saved) => {
@@ -184,6 +186,12 @@ export default function App() {
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  }, []);
+
+  // Stable callback so memoised cards don't re-render: enter bulk mode + select.
+  const startBulk = useCallback((id) => {
+    setBulkMode(true);
+    setSelected2(prev => new Set(prev).add(id));
   }, []);
 
   const bulkDelete = useCallback(async () => {
@@ -282,11 +290,16 @@ export default function App() {
   };
 
   // Computed
+  // Debounce so filtering 250+ entries runs at most once per typing pause,
+  // while the input stays instantly responsive.
+  const debSearch = useDebouncedValue(search, 150);
+  const debGlobal = useDebouncedValue(globalSearch, 150);
+
   const sysEntries = useMemo(() => {
     const all = entries[activeSystem] || [];
-    const filtered = search.trim()
+    const filtered = debSearch.trim()
       ? all.filter(e => {
-          const q = search.toLowerCase();
+          const q = debSearch.toLowerCase();
           return e.title?.toLowerCase().includes(q) || e.notes?.toLowerCase().includes(q);
         })
       : all;
@@ -295,15 +308,15 @@ export default function App() {
       if (!a.pinned && b.pinned) return 1;
       return 0;
     });
-  }, [entries, activeSystem, search]);
+  }, [entries, activeSystem, debSearch]);
 
   const globalResults = useMemo(() => {
-    if (!globalSearch.trim()) return [];
-    const q = globalSearch.toLowerCase();
+    if (!debGlobal.trim()) return [];
+    const q = debGlobal.toLowerCase();
     return Object.values(entries).flat().filter(e =>
       e.title?.toLowerCase().includes(q) || e.notes?.toLowerCase().includes(q)
     ).slice(0,50);
-  }, [globalSearch, entries]);
+  }, [debGlobal, entries]);
 
   const dueCount = useMemo(() => {
     const now = new Date();
@@ -329,10 +342,10 @@ export default function App() {
 
       {/* Toast */}
       {toast && (
-        <div style={{position:'fixed',bottom:20,right:20,zIndex:999,
+        <div onClick={()=>setToast(null)} style={{position:'fixed',bottom:20,right:20,zIndex:999,
           background:toast.type==='err'?'#dc2626':toast.type==='warn'?'#d97706':'#16a34a',
           color:'#fff',borderRadius:8,padding:'11px 18px',fontSize:13,fontWeight:600,
-          boxShadow:'0 4px 16px rgba(0,0,0,.2)',pointerEvents:'none',
+          boxShadow:'0 4px 16px rgba(0,0,0,.2)',cursor:'pointer',
           maxWidth:'calc(100vw - 40px)'}}>
           {toast.msg}
         </div>
@@ -556,11 +569,9 @@ export default function App() {
                           color={color}
                           bulkMode={bulkMode}
                           isSelected={selected2.has(entry.id)}
-                          onTap={()=>{
-                            if (bulkMode) toggleSelect(entry.id);
-                            else openEntry(entry);
-                          }}
-                          onLongPress={()=>{ setBulkMode(true); toggleSelect(entry.id); }}
+                          onOpen={openEntry}
+                          onToggleSelect={toggleSelect}
+                          onStartBulk={startBulk}
                         />
                       ))}
                     </div>
@@ -585,31 +596,39 @@ export default function App() {
   );
 }
 
-function SelectableCard({ entry, color, bulkMode, isSelected, onTap, onLongPress }) {
+const SelectableCard = React.memo(function SelectableCard({ entry, color, bulkMode, isSelected, onOpen, onToggleSelect, onStartBulk }) {
   const { t } = useTheme();
   const timer = React.useRef(null);
   const moved = React.useRef(false);
   const fired = React.useRef(false);
+  const [pressed, setPressed] = React.useState(false);
 
   const startPress = () => {
-    moved.current=false; fired.current=false;
-    timer.current=setTimeout(()=>{ if(!moved.current){fired.current=true;onLongPress();} },500);
+    moved.current=false; fired.current=false; setPressed(true);
+    timer.current=setTimeout(()=>{ if(!moved.current){fired.current=true;onStartBulk(entry.id);} },500);
   };
-  const endPress = () => clearTimeout(timer.current);
-  const cancelPress = () => { moved.current=true; clearTimeout(timer.current); };
+  const endPress = () => { clearTimeout(timer.current); setPressed(false); };
+  const cancelPress = () => { moved.current=true; clearTimeout(timer.current); setPressed(false); };
+
+  const tap = () => { if (bulkMode) onToggleSelect(entry.id); else onOpen(entry); };
 
   // After a long-press the browser still fires a click, which used to immediately
   // toggle the selection back off — making long-press look broken on mobile.
   const handleClick = () => {
     if (fired.current) { fired.current=false; return; }
-    onTap();
+    tap();
   };
 
   return (
     <div style={{position:'relative',outline:isSelected?`2px solid ${color}`:'none',
-      borderRadius:8,transition:'outline .1s',WebkitUserSelect:'none',userSelect:'none',cursor:'pointer'}}
+      borderRadius:8,cursor:'pointer',
+      WebkitUserSelect:'none',userSelect:'none',
+      // Subtle press feedback so a tap always feels registered (A4).
+      transform: pressed ? 'scale(0.985)' : 'scale(1)',
+      transition:'outline .1s, transform .08s ease'}}
       onClick={handleClick}
-      onContextMenu={e=>{e.preventDefault();fired.current=true;onLongPress();}}
+      onContextMenu={e=>{e.preventDefault();fired.current=true;onStartBulk(entry.id);}}
+      onMouseDown={()=>setPressed(true)} onMouseUp={()=>setPressed(false)} onMouseLeave={()=>setPressed(false)}
       onTouchStart={startPress} onTouchEnd={endPress} onTouchMove={cancelPress}>
       {bulkMode && (
         <div style={{position:'absolute',top:10,left:10,zIndex:10,width:22,height:22,
@@ -623,7 +642,7 @@ function SelectableCard({ entry, color, bulkMode, isSelected, onTap, onLongPress
       <EntryCard entry={entry} color={color} />
     </div>
   );
-}
+});
 
 function Spinner({ track='#e5e7eb', accent='#2563eb' }) {
   return (

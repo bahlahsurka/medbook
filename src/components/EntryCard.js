@@ -1,7 +1,8 @@
+import React from 'react';
 import { DIFF_COLOR, SYS_COLOR } from '../lib/constants';
 import { useTheme } from '../lib/theme';
 
-export default function EntryCard({ entry, color, onClick, showSystem }) {
+function EntryCard({ entry, color, onClick, showSystem }) {
   const { t } = useTheme();
   const dc = DIFF_COLOR[entry.difficulty] || t.text3;
   const sc = showSystem ? (SYS_COLOR[entry.system] || color) : color;
@@ -19,7 +20,7 @@ export default function EntryCard({ entry, color, onClick, showSystem }) {
       {entry.images?.length > 0 && (
         <div style={{ width:60, height:44, borderRadius:6, flexShrink:0,
           background:t.surface3, overflow:'hidden', border:`1px solid ${t.border}` }}>
-          <img src={entry.images[0]} alt=""
+          <img src={entry.images[0]} alt="" loading="lazy" decoding="async"
             style={{ width:'100%', height:'100%', objectFit:'cover' }} />
         </div>
       )}
@@ -63,3 +64,7 @@ function Tag({ label, color }) {
       borderRadius:4, padding:'2px 7px', border:`1px solid ${color}25` }}>{label}</span>
   );
 }
+
+// Memoised: with ~250+ cards, this stops every card re-rendering on each
+// keystroke/selection. Parent must pass stable props (see App.js).
+export default React.memo(EntryCard);
