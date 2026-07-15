@@ -79,8 +79,11 @@ async function attemptModel(model, userPrompt, signal) {
     } catch { /* non-JSON error body */ }
 
     if (res.status === 429) {
+      // Pro-tier models have a much tighter free ceiling (~5/min) than Flash,
+      // so this is realistically hit by normal use, not just abuse. Make it
+      // retryable rather than a hard stop.
       throw new GeminiError(
-        'Gemini rate limit reached (free tier). Wait a minute and try again.',
+        'Gemini rate limit reached (free tier).',
         'quota'
       );
     }
@@ -106,6 +109,12 @@ async function attemptModel(model, userPrompt, signal) {
       // Special "kind" so generate() knows this one is worth retrying on a
       // fallback model rather than surfacing immediately.
       throw new GeminiError(`Model "${model}" not found or retired.`, 'model_not_found');
+    }
+    if (res.status === 503 || /overloaded|UNAVAILABLE/i.test(detail)) {
+      // Free-tier capacity is temporarily busy — not a config problem.
+      // "kind" lets generate() auto-retry this a couple of times before
+      // asking the user to.
+      throw new GeminiError('Gemini is temporarily overloaded (free tier).', 'overloaded');
     }
     throw new GeminiError(detail || `Gemini error (HTTP ${res.status}).`, 'api');
   }
@@ -142,11 +151,24 @@ async function attemptModel(model, userPrompt, signal) {
 
 let workingModel = null; // remember what worked, so later calls skip straight to it
 
+const OVERLOAD_RETRY_DELAYS_MS = [1000, 3000];  // 503 busy: usually clears in seconds
+const QUOTA_RETRY_DELAY_MS     = 15000;          // 429 rate limit: windows are ~60s, so
+                                                  // one longer wait is worth it — especially
+                                                  // relevant on Pro's tight ~5/min ceiling.
+
+async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 /**
- * Send a prompt, get raw text back. If the configured model has been retired
- * (404), automatically retries a short list of known-good fallback models
- * instead of failing outright — this is what survives Google's model churn
- * without needing a code change every time a model is sunset.
+ * Send a prompt, get raw text back.
+ *
+ * Three kinds of transient trouble are handled automatically, so the user
+ * doesn't have to babysit the Analyze button:
+ *  - MODEL RETIRED (404): walk a fallback list of known-good models.
+ *  - OVERLOADED (503, free tier busy): a couple of short backoff retries
+ *    on the SAME model before moving on — most 503s clear in seconds.
+ *  - RATE LIMITED (429): one longer wait then a single retry on the SAME
+ *    model. Matters most on Pro-tier's tight ~5 requests/minute ceiling,
+ *    where two Analyze clicks close together can trip this in normal use.
  */
 export async function generate(userPrompt, { signal } = {}) {
   if (!isConfigured()) {
@@ -159,21 +181,36 @@ export async function generate(userPrompt, { signal } = {}) {
   const candidates = [workingModel || MODEL, ...FALLBACK_MODELS.filter(m => m !== MODEL)];
 
   for (const model of candidates) {
-    try {
-      const text = await attemptModel(model, userPrompt, signal);
-      workingModel = model; // cache the one that worked for next time
-      return text;
-    } catch (e) {
-      if (e.name === 'AbortError') throw e;
-      if (e.kind !== 'model_not_found') throw e; // only chain through 404s
-      // otherwise: try the next candidate model
+    let quotaRetried = false;
+    // A few quiet retries on THIS model before giving up on it and moving to
+    // the next candidate — an overload is about traffic, not the model choice.
+    for (let attempt = 0; attempt <= OVERLOAD_RETRY_DELAYS_MS.length; attempt++) {
+      try {
+        const text = await attemptModel(model, userPrompt, signal);
+        workingModel = model; // cache the one that worked for next time
+        return text;
+      } catch (e) {
+        if (e.name === 'AbortError') throw e;
+        if (e.kind === 'overloaded' && attempt < OVERLOAD_RETRY_DELAYS_MS.length) {
+          await sleep(OVERLOAD_RETRY_DELAYS_MS[attempt]);
+          continue; // retry same model
+        }
+        if (e.kind === 'quota' && !quotaRetried) {
+          quotaRetried = true;
+          await sleep(QUOTA_RETRY_DELAY_MS);
+          attempt = -1; // restart the inner attempt counter for this one retry
+          continue;
+        }
+        if (e.kind === 'model_not_found' || e.kind === 'overloaded' || e.kind === 'quota') break; // try next model
+        throw e; // anything else (auth/network/etc.) surfaces immediately
+      }
     }
   }
 
-  // Every candidate 404'd.
+  // Every candidate 404'd, stayed overloaded, or stayed rate-limited.
   throw new GeminiError(
-    `No working Gemini model found (tried: ${candidates.join(', ')}). ` +
-    'Google may have changed its model lineup — check REACT_APP_GEMINI_MODEL or try again shortly.',
-    'api'
+    `Gemini is busy, rate-limited, or unavailable right now (tried: ${candidates.join(', ')}). ` +
+    'This is usually temporary on the free tier — wait a minute and try again.',
+    'overloaded'
   );
 }
