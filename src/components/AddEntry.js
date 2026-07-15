@@ -5,6 +5,7 @@ import { buildHighlightParts, resolveHL } from '../lib/highlights';
 import { useHighlight } from '../lib/useHighlight';
 import { useTheme } from '../lib/theme';
 import HLToolbar from './HLToolbar';
+import AIService from '../services/ai';
 
 const DRAFT_KEY = 'medbook_draft_v2';
 const loadDraft = sys => { try { return JSON.parse(localStorage.getItem(DRAFT_KEY)||'{}')[sys]||null; } catch { return null; } };
@@ -101,7 +102,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
     return supabase.storage.from('entry-images').getPublicUrl(path).data.publicUrl;
   };
 
-  const save = async () => {
+  const save = async (alsoAnalyze = false) => {
     setErr('');
     if (!title.trim()) { setErr('Title is required'); return; }
     if (!systems.length) { setErr('Select at least one system'); return; }
@@ -117,9 +118,35 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
       }));
       const {data,error} = await supabase.from('entries').insert(rows).select();
       if (error) throw new Error(`Save failed: ${error.message}`);
+
+      let saved = data;
+      if (alsoAnalyze) {
+        // Entry is already safely saved. If analysis fails we keep the entry and
+        // simply report it — notes are never at risk.
+        setSS('Analyzing…');
+        try {
+          const sections = await AIService.analyzeReview(notes.trim());
+          const payload = {
+            ai_sections: sections,
+            ai_generated_at: new Date().toISOString(),
+            ai_model: AIService.activeModel(),
+          };
+          const ids = data.map(d => d.id);
+          const { error: aiErr } = await supabase.from('entries').update(payload).in('id', ids);
+          if (aiErr) throw new Error(aiErr.message);
+          saved = data.map(d => ({ ...d, ...payload }));
+        } catch (e) {
+          setSS('');
+          setErr(`Entry saved, but analysis failed: ${e.message}`);
+          setSaving(false);
+          setTimeout(() => onSaved(data), 1200);   // still hand back the saved entry
+          return;
+        }
+      }
+
       setSS('Saved ✓');
       clearDraft(activeSystem);
-      onSaved(data);
+      onSaved(saved);
     } catch(e) { setErr(e.message); setSaving(false); setSS(''); }
   };
 
@@ -302,7 +329,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
         )}
 
         <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
-          <button onClick={save} disabled={saving} style={{
+          <button onClick={()=>save(false)} disabled={saving} style={{
             background:saving?'#93c5fd':color, color:'#fff', border:'none',
             borderRadius:8, padding:'12px 28px', fontSize:14, fontWeight:600,
             cursor:saving?'not-allowed':'pointer', fontFamily:'Inter,sans-serif',
@@ -316,6 +343,21 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
               {saveStatus||'Saving…'}
             </> : `✓ Save to ${systems.length} system${systems.length!==1?'s':''}`}
           </button>
+
+          {/* Save + Analyze — only offered when a key is configured and there's
+              actually a Review to analyse. Analysis never runs on its own. */}
+          {!saving && AIService.isConfigured() && notes.trim().length >= 40 && (
+            <button onClick={()=>save(true)} title="Save, then have Gemini organise your Review"
+              style={{
+                background:t.navActiveBg, color:t.navActiveText,
+                border:`1px solid ${t.navActiveBorder}`,
+                borderRadius:8, padding:'12px 20px', fontSize:14, fontWeight:600,
+                cursor:'pointer', fontFamily:'Inter,sans-serif'
+              }}>
+              ✨ Save + Analyze
+            </button>
+          )}
+
           {!saving && (
             <button onClick={()=>{clearDraft(activeSystem);onCancel();}} style={{
               background:t.surface3,color:t.text3,border:`1px solid ${t.border}`,

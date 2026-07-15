@@ -6,6 +6,8 @@ import { useHighlight, clearRange } from '../lib/useHighlight';
 import { useTheme } from '../lib/theme';
 import HLToolbar from './HLToolbar';
 import HLPopover from './HLPopover';
+import AISections from './AISections';
+import AIService, { normalizeSections, isAllEmpty } from '../services/ai';
 
 
 // --- helpers -------------------------------------------------------------
@@ -140,6 +142,16 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
 
   // View highlight state
   const [viewHL,   setVHL]   = useState(entry.highlights||[]);
+
+  // ---- AI (Sprint 2) --------------------------------------------------------
+  // AI output lives entirely apart from `notes` (the Review). No AI code path
+  // ever writes `notes`, so the Review cannot be clobbered.
+  const [ai, setAi]           = useState(() => normalizeSections(entry.ai_sections));
+  const [aiBusy, setAiBusy]   = useState(false);
+  const [aiErr, setAiErr]     = useState('');
+  const [aiDirty, setAiDirty] = useState(false);
+  const [aiNote, setAiNote]   = useState('');
+  const [deckAdded, setDeckAdded] = useState({});
   const [hlViewOn, setHVOn]  = useState(false);
 
   const editTaRef = useRef();
@@ -242,6 +254,63 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     }
     window.getSelection()?.removeAllRanges();
     clearSelState();
+  };
+
+
+  const aiHasContent = !isAllEmpty(ai);
+
+  // ---- AI handlers ----------------------------------------------------------
+  // Runs ONLY when the user clicks. Never automatic (spec).
+  const runAnalyze = async () => {
+    setAiErr(''); setAiNote(''); setAiBusy(true);
+    try {
+      // Only the Review text is sent — no question, images, system or metadata.
+      const sections = await AIService.analyzeReview(entry.notes);
+
+      const payload = {
+        ai_sections: sections,
+        ai_generated_at: new Date().toISOString(),
+        ai_model: AIService.activeModel(),
+      };
+      // NOTE: `notes` is deliberately absent from this update.
+      const { error } = await supabase.from('entries').update(payload).eq('id', entry.id);
+      if (error) throw new Error(error.message);
+
+      setAi(sections);
+      setAiDirty(false);
+      onUpdated({ ...entry, ...payload });
+      if (isAllEmpty(sections)) {
+        setAiNote('Gemini found nothing it could support from this Review. Try adding more detail, then Re-analyze.');
+      }
+    } catch (e) {
+      // Entry is untouched on any failure.
+      setAiErr(e.message || 'Analysis failed.');
+    }
+    setAiBusy(false);
+  };
+
+  const saveAiEdits = async () => {
+    setAiErr(''); setAiBusy(true);
+    const payload = { ai_sections: ai };   // again: never `notes`
+    const { error } = await supabase.from('entries').update(payload).eq('id', entry.id);
+    if (error) { setAiErr(`Couldn't save: ${error.message}`); setAiBusy(false); return; }
+    setAiDirty(false);
+    onUpdated({ ...entry, ...payload });
+    setAiBusy(false);
+  };
+
+  // Copy one AI flashcard into the permanent, user-owned Flashcards deck.
+  // Once copied it is the user's — Re-analyze can never touch it.
+  const addCardToDeck = async (cardObj, i) => {
+    const key = `${i}:${cardObj.front}`;
+    setAiErr('');
+    const { error } = await supabase.from('flashcards').insert({
+      user_id: userId,
+      question: cardObj.front.trim(),
+      answer: cardObj.back.trim(),
+    });
+    if (error) { setAiErr(`Couldn't add to deck: ${error.message}`); return; }
+    setDeckAdded(p => ({ ...p, [key]: true }));
   };
 
   // Remove every highlight in view mode — explicit and confirmed.
@@ -579,6 +648,80 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             userSelect:hlViewOn?'text':'auto'}}>
             <RenderedNotes text={entry.notes} highlights={viewHL} />
           </div>
+        </div>
+      )}
+
+      {/* ---- AI analysis (Sprint 2) ------------------------------------------
+          Sits BELOW the Review so your own notes always read first.
+          Nothing here can modify the Review. */}
+      {entry.notes && AIService.isConfigured() && (
+        <div style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:10,
+          padding:'18px 20px',marginBottom:14,boxShadow:`0 1px 3px ${t.shadow}`}}>
+
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14,flexWrap:'wrap'}}>
+            <div style={{fontSize:10,color:t.text4,letterSpacing:.8,fontWeight:600,
+              textTransform:'uppercase',flex:1}}>
+              AI Analysis
+            </div>
+            {aiDirty && (
+              <button onClick={saveAiEdits} disabled={aiBusy} style={{
+                fontSize:11,fontWeight:600,fontFamily:'Inter,sans-serif',
+                background:t.okBg,border:`1px solid ${t.okBorder}`,color:t.ok,
+                borderRadius:6,padding:'5px 12px',cursor:aiBusy?'default':'pointer'}}>
+                Save changes
+              </button>
+            )}
+            <button onClick={runAnalyze} disabled={aiBusy} style={{
+              fontSize:11,fontWeight:600,fontFamily:'Inter,sans-serif',
+              background:aiBusy?t.surface3:t.navActiveBg,
+              border:`1px solid ${aiBusy?t.border:t.navActiveBorder}`,
+              color:aiBusy?t.text4:t.navActiveText,
+              borderRadius:6,padding:'5px 12px',
+              cursor:aiBusy?'default':'pointer',
+              display:'flex',alignItems:'center',gap:6}}>
+              {aiBusy ? <>
+                <span style={{display:'inline-block',width:10,height:10,
+                  border:`2px solid ${t.border}`,borderTop:`2px solid ${t.text3}`,
+                  borderRadius:'50%',animation:'aispin .7s linear infinite'}} />
+                <style>{`@keyframes aispin{to{transform:rotate(360deg)}}`}</style>
+                Analyzing…
+              </> : (aiHasContent ? '✨ Re-analyze' : '✨ Analyze')}
+            </button>
+          </div>
+
+          {aiErr && (
+            <div style={{background:t.dangerBg,border:`1px solid ${t.dangerBorder}`,
+              borderRadius:8,padding:'10px 14px',fontSize:12.5,color:t.danger,marginBottom:12}}>
+              {aiErr}
+              <div style={{marginTop:6,fontSize:11}}>
+                Your Review and notes are untouched. You can retry.
+              </div>
+            </div>
+          )}
+          {aiNote && (
+            <div style={{background:t.warnBg,border:`1px solid ${t.warnBorder}`,
+              borderRadius:8,padding:'10px 14px',fontSize:12.5,color:t.warn,marginBottom:12}}>
+              {aiNote}
+            </div>
+          )}
+
+          {aiHasContent ? (
+            <AISections
+              sections={ai}
+              onChange={next => { setAi(next); setAiDirty(true); }}
+              onAddToDeck={addCardToDeck}
+              deckAdded={deckAdded}
+              generatedAt={entry.ai_generated_at}
+              model={entry.ai_model}
+              busy={aiBusy}
+            />
+          ) : !aiBusy && !aiErr && (
+            <div style={{fontSize:12.5,color:t.text4,lineHeight:1.6}}>
+              Click <strong>Analyze</strong> to have Gemini organise this Review into
+              Key Learning Points, High Yield, Clinical Pearls, Red Flags, Related
+              Topics and Flashcards. Your Review itself is never changed.
+            </div>
+          )}
         </div>
       )}
 
