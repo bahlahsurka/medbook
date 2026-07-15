@@ -9,10 +9,23 @@ import { SYSTEM_INSTRUCTION, RESPONSE_SCHEMA } from './PromptBuilder';
 // Create React App exposes only REACT_APP_* vars to the browser.
 const API_KEY = process.env.REACT_APP_GEMINI_API_KEY;
 
-// Overridable so you can drop to flash-lite (higher free quota) without a code change.
-const MODEL = process.env.REACT_APP_GEMINI_MODEL || 'gemini-2.5-flash';
+// Gemini's model lineup turns over fast (2.0 shut down June 2026; 2.5 has been
+// seen returning 404 "no longer available" ahead of its own documented
+// deprecation date; 3.x is now current). Hardcoding one model name means this
+// breaks again every few months. Two defenses instead:
+//
+// 1. Default to `gemini-flash-latest` — a documented Google alias that is
+//    auto hot-swapped to the current Flash model, with 2 weeks' notice.
+//    This should rarely need touching.
+// 2. If the configured model 404s anyway (rollout ahead of docs, a bad
+//    override, etc.), automatically retry down a short list of known-good
+//    fallbacks before giving up.
+const MODEL = process.env.REACT_APP_GEMINI_MODEL || 'gemini-flash-latest';
+const FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.5-flash'];
 
-const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+function endpointFor(model) {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+}
 
 /** Typed error so the UI can react differently to quota vs. config vs. network. */
 export class GeminiError extends Error {
@@ -28,25 +41,14 @@ export function isConfigured() {
 }
 
 export function activeModel() {
-  return MODEL;
+  return workingModel || MODEL;
 }
 
-/**
- * Send a prompt, get raw text back.
- * Structured output is requested at the API level (responseMimeType + schema),
- * which is what makes the JSON reliable rather than hopeful.
- */
-export async function generate(userPrompt, { signal } = {}) {
-  if (!isConfigured()) {
-    throw new GeminiError(
-      'No Gemini API key found. Add REACT_APP_GEMINI_API_KEY to .env.local (and to Vercel), then restart.',
-      'config'
-    );
-  }
-
+/** One attempt against one specific model. Throws GeminiError on any failure. */
+async function attemptModel(model, userPrompt, signal) {
   let res;
   try {
-    res = await fetch(ENDPOINT, {
+    res = await fetch(endpointFor(model), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -101,10 +103,9 @@ export async function generate(userPrompt, { signal } = {}) {
       throw new GeminiError('Gemini denied access. The key may be restricted or the API not enabled.', 'auth');
     }
     if (res.status === 404) {
-      throw new GeminiError(
-        `Model "${MODEL}" not found — it may have been retired. Set REACT_APP_GEMINI_MODEL to a current model.`,
-        'api'
-      );
+      // Special "kind" so generate() knows this one is worth retrying on a
+      // fallback model rather than surfacing immediately.
+      throw new GeminiError(`Model "${model}" not found or retired.`, 'model_not_found');
     }
     throw new GeminiError(detail || `Gemini error (HTTP ${res.status}).`, 'api');
   }
@@ -137,4 +138,42 @@ export async function generate(userPrompt, { signal } = {}) {
 
   if (!text) throw new GeminiError('Gemini returned an empty response.', 'empty');
   return text;
+}
+
+let workingModel = null; // remember what worked, so later calls skip straight to it
+
+/**
+ * Send a prompt, get raw text back. If the configured model has been retired
+ * (404), automatically retries a short list of known-good fallback models
+ * instead of failing outright — this is what survives Google's model churn
+ * without needing a code change every time a model is sunset.
+ */
+export async function generate(userPrompt, { signal } = {}) {
+  if (!isConfigured()) {
+    throw new GeminiError(
+      'No Gemini API key found. Add REACT_APP_GEMINI_API_KEY to .env.local (and to Vercel), then restart.',
+      'config'
+    );
+  }
+
+  const candidates = [workingModel || MODEL, ...FALLBACK_MODELS.filter(m => m !== MODEL)];
+
+  for (const model of candidates) {
+    try {
+      const text = await attemptModel(model, userPrompt, signal);
+      workingModel = model; // cache the one that worked for next time
+      return text;
+    } catch (e) {
+      if (e.name === 'AbortError') throw e;
+      if (e.kind !== 'model_not_found') throw e; // only chain through 404s
+      // otherwise: try the next candidate model
+    }
+  }
+
+  // Every candidate 404'd.
+  throw new GeminiError(
+    `No working Gemini model found (tried: ${candidates.join(', ')}). ` +
+    'Google may have changed its model lineup — check REACT_APP_GEMINI_MODEL or try again shortly.',
+    'api'
+  );
 }
