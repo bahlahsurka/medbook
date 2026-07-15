@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR } from '../lib/constants';
 import { buildHighlightParts, resolveHL } from '../lib/highlights';
@@ -84,24 +84,32 @@ function calcNext(entry, rating) {
   };
 }
 
+/**
+ * Build a review queue from a snapshot of entries.
+ * Due cards first (most overdue first), then never-reviewed cards (oldest first).
+ * Deterministic — no shuffle — so ordering always reflects the schedule.
+ */
+function buildQueue(all) {
+  const now = new Date();
+  const due = all
+    .filter(e => e.next_review && new Date(e.next_review) <= now)
+    .sort((a, b) => new Date(a.next_review) - new Date(b.next_review));
+  const fresh = all
+    .filter(e => !e.next_review)
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  return [...due, ...fresh];
+}
+
 export default function ReviewQueue({ allEntries, onReviewed }) {
   const { t, isDark } = useTheme();
-  const now = new Date();
 
-  // Deterministic queue — due cards first (most overdue first), then new cards
-  // (oldest first). No random shuffle, so order is stable and reflects scheduling.
-  const initialQueue = useMemo(() => {
-    const all = Object.values(allEntries).flat();
-    const due = all
-      .filter(e => e.next_review && new Date(e.next_review) <= now)
-      .sort((a,b) => new Date(a.next_review) - new Date(b.next_review));
-    const newE = all
-      .filter(e => !e.next_review)
-      .sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
-    return [...due, ...newE];
-  }, [allEntries]);
+  // Always-current entries, WITHOUT making the queue rebuild on every rating.
+  // (Rebuilding mid-session makes the list shift under the cursor and skip cards.)
+  const entriesRef = useRef(allEntries);
+  entriesRef.current = allEntries;
 
-  const [queue]        = useState(initialQueue); // fixed for this session
+  // The queue is SNAPSHOTTED at session start: stable while you work through it…
+  const [queue, setQueue] = useState(() => buildQueue(Object.values(allEntries).flat()));
   const [idx, setIdx]  = useState(0);
   const [flipped, setFlipped]   = useState(false);
   const [sessionDone, setSess]  = useState(0);
@@ -109,13 +117,33 @@ export default function ReviewQueue({ allEntries, onReviewed }) {
   const [ended, setEnded]       = useState(false); // user ended midway
   const [lightboxIdx, setLightboxIdx] = useState(null); // index into card.images, or null
 
+  // …and REBUILT here, from the latest data, so a new session never replays
+  // cards you just rated.
+  const startNewSession = useCallback(() => {
+    setQueue(buildQueue(Object.values(entriesRef.current).flat()));
+    setIdx(0); setFlipped(false); setDone(false); setEnded(false); setSess(0);
+  }, []);
+
   const card = queue[idx];
   const total = queue.length;
   const progress = total > 0 ? Math.round((sessionDone / total) * 100) : 0;
-  const dueCount = useMemo(() =>
-    Object.values(allEntries).flat()
-      .filter(e => e.next_review && new Date(e.next_review) <= now).length,
-  [allEntries]);
+
+  // Live counts straight from current data (not the frozen session queue).
+  const dueCount = useMemo(() => {
+    const now = new Date();
+    return Object.values(allEntries).flat()
+      .filter(e => e.next_review && new Date(e.next_review) <= now).length;
+  }, [allEntries]);
+
+  // What's scheduled for later — proof to the user that rating actually worked.
+  const nextDue = useMemo(() => {
+    const now = new Date();
+    const upcoming = Object.values(allEntries).flat()
+      .filter(e => e.next_review && new Date(e.next_review) > now)
+      .map(e => new Date(e.next_review))
+      .sort((a, b) => a - b);
+    return upcoming[0] || null;
+  }, [allEntries]);
 
   const rate = async (rating) => {
     if (!card) return;
@@ -143,9 +171,16 @@ export default function ReviewQueue({ allEntries, onReviewed }) {
     <div style={{ maxWidth:560, margin:'0 auto', textAlign:'center', paddingTop:60, fontFamily:'Inter,sans-serif' }}>
       <div style={{ fontSize:48, marginBottom:16 }}>🎉</div>
       <div style={{ fontSize:18, fontWeight:700, color:t.text, marginBottom:8 }}>All caught up!</div>
-      <div style={{ fontSize:14, color:t.text3 }}>
-        No cards due. Add entries and use "Mark Reviewed" to build your queue.
-      </div>
+      {nextDue ? (
+        <div style={{ fontSize:14, color:t.text3 }}>
+          Nothing due right now. Next card is scheduled for{' '}
+          <strong>{nextDue.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}</strong>.
+        </div>
+      ) : (
+        <div style={{ fontSize:14, color:t.text3 }}>
+          No cards due. Add entries, then rate them here to start scheduling reviews.
+        </div>
+      )}
     </div>
   );
 
@@ -167,8 +202,7 @@ export default function ReviewQueue({ allEntries, onReviewed }) {
       {done && <div style={{ fontSize:13, color:t.text4, marginBottom:24 }}>All cards reviewed!</div>}
 
       <div style={{ display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap' }}>
-        <button onClick={() => { setIdx(0); setFlipped(false); setDone(false); setEnded(false); setSess(0); }}
-          style={btn(t.accent)}>
+        <button onClick={startNewSession} style={btn(t.accent)}>
           Start New Session
         </button>
         {!done && (

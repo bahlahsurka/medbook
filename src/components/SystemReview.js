@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { DIFF_COLOR } from '../lib/constants';
 import { buildHighlightParts, resolveHL } from '../lib/highlights';
@@ -84,49 +84,63 @@ function calcNext(entry, rating) {
   };
 }
 
+/**
+ * Build a review queue from a snapshot of this system's entries.
+ * Due cards first (most overdue first), then never-reviewed (oldest first).
+ * `includeScheduled` = the "Review all anyway" re-drill.
+ */
+function buildQueue(entries, includeScheduled) {
+  const now = new Date();
+  const due = entries
+    .filter(e => e.next_review && new Date(e.next_review) <= now)
+    .sort((a,b) => new Date(a.next_review) - new Date(b.next_review)); // most overdue first
+  const fresh = entries
+    .filter(e => !e.next_review)
+    .sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+  if (includeScheduled) {
+    const scheduled = entries
+      .filter(e => e.next_review && new Date(e.next_review) > now)
+      .sort((a,b) => new Date(a.next_review) - new Date(b.next_review));
+    return [...due, ...fresh, ...scheduled];
+  }
+  return [...due, ...fresh];
+}
+
 export default function SystemReview({ system, entries, color, onReviewed, onClose }) {
   const { t, isDark } = useTheme();
-  const now = new Date();
 
-  const [reviewAll, setReviewAll] = useState(false);
+  // Latest entries available WITHOUT rebuilding the queue on every rating.
+  // Rebuilding mid-session made the list shift under the index and SKIP cards.
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
 
-  // Deterministic queue — no random shuffle, so ordering reflects scheduling and
-  // never "jumbles". Default session = cards that are actually due + brand-new cards,
-  // ordered by urgency. Rating a card pushes its next_review into the future, so it
-  // leaves the queue until it's due again (that's how difficulty rating "matters").
-  const queue = useMemo(() => {
-    const due = entries
-      .filter(e => e.next_review && new Date(e.next_review) <= now)
-      .sort((a,b) => new Date(a.next_review) - new Date(b.next_review)); // most overdue first
-    const fresh = entries
-      .filter(e => !e.next_review)
-      .sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
-    if (reviewAll) {
-      // Full re-drill: every card, soonest-scheduled first, new cards first. Still deterministic.
-      const scheduled = entries
-        .filter(e => e.next_review && new Date(e.next_review) > now)
-        .sort((a,b) => new Date(a.next_review) - new Date(b.next_review));
-      return [...due, ...fresh, ...scheduled];
-    }
-    return [...due, ...fresh];
-  }, [entries, reviewAll]);
-
-  // How many cards are scheduled for later (used in the "all caught up" state)
-  const upcoming = useMemo(() =>
-    entries.filter(e => e.next_review && new Date(e.next_review) > now), [entries]);
-  const nextDue = useMemo(() => {
-    if (upcoming.length === 0) return null;
-    return upcoming
-      .map(e => new Date(e.next_review))
-      .sort((a,b) => a - b)[0];
-  }, [upcoming]);
-
+  // Queue is snapshotted at session start — stable while you work through it.
+  const [queue, setQueue] = useState(() => buildQueue(entries, false));
   const [idx, setIdx]       = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [done, setDone]     = useState(false);
   const [ended, setEnded]   = useState(false);
   const [reviewed, setReviewed] = useState(0);
   const [lightboxIdx, setLightboxIdx] = useState(null); // index into card.images, or null
+
+  // Explicit rebuild — from the latest data — so a new session reflects what you
+  // just rated instead of replaying it.
+  const startNewSession = useCallback((includeScheduled = false) => {
+    setQueue(buildQueue(entriesRef.current, includeScheduled));
+    setIdx(0); setFlipped(false); setDone(false); setEnded(false); setReviewed(0);
+  }, []);
+
+  // Live counts from current data (not the frozen queue).
+  const upcoming = useMemo(() => {
+    const now = new Date();
+    return entries.filter(e => e.next_review && new Date(e.next_review) > now);
+  }, [entries]);
+  const nextDue = useMemo(() => {
+    if (upcoming.length === 0) return null;
+    return upcoming
+      .map(e => new Date(e.next_review))
+      .sort((a,b) => a - b)[0];
+  }, [upcoming]);
 
   const card  = queue[idx];
   const total = queue.length;
@@ -182,7 +196,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
           </div>
         )}
         <div style={{display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap'}}>
-          <button onClick={()=>setReviewAll(true)} style={B(t.accent)}>Review all anyway</button>
+          <button onClick={()=>startNewSession(true)} style={B(t.accent)}>Review all anyway</button>
           <button onClick={onClose} style={B(t.surface3,t.text2)}>Close</button>
         </div>
       </div>
@@ -204,6 +218,9 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
           {!done && (
             <button onClick={()=>setEnded(false)} style={B(t.accent)}>Resume</button>
           )}
+          <button onClick={()=>startNewSession(false)} style={B(done?t.accent:t.surface3, done?'#fff':t.text2)}>
+            Start New Session
+          </button>
           <button onClick={onClose} style={B(t.surface3,t.text2)}>Back to {system}</button>
         </div>
       </div>
@@ -255,7 +272,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
             {card.review_count>0 && (
               <span style={{fontSize:11,color:t.text4}}>Reviewed {card.review_count}×</span>
             )}
-            {card.next_review && new Date(card.next_review)<=now && (
+            {card.next_review && new Date(card.next_review)<=new Date() && (
               <span style={{fontSize:11,color:'#dc2626',fontWeight:600}}>Due</span>
             )}
             {!card.next_review && (
