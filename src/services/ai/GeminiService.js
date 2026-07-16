@@ -44,8 +44,27 @@ export function activeModel() {
   return workingModel || MODEL;
 }
 
+const DEV = process.env.NODE_ENV !== 'production';
+
+// Counts every outbound Gemini HTTP request in this page session, so the number
+// of API calls per Analyze click can be verified rather than assumed.
+let requestCount = 0;
+
+/** Total Gemini requests made since page load. Also on window.__geminiRequests in dev. */
+export function getRequestCount() { return requestCount; }
+
+/** Reset the counter (used when measuring a single click). */
+export function resetRequestCount() { requestCount = 0; }
+
 /** One attempt against one specific model. Throws GeminiError on any failure. */
 async function attemptModel(model, userPrompt, signal) {
+  const n = ++requestCount;
+  const startedAt = Date.now();
+  if (DEV) {
+    // eslint-disable-next-line no-console
+    console.log(`[Gemini] request #${n} → ${model} (prompt ${userPrompt.length} chars)`);
+  }
+
   let res;
   try {
     res = await fetch(endpointFor(model), {
@@ -71,6 +90,11 @@ async function attemptModel(model, userPrompt, signal) {
     throw new GeminiError('Network error reaching Gemini. Check your connection.', 'network');
   }
 
+  if (DEV) {
+    // eslint-disable-next-line no-console
+    console.log(`[Gemini] request #${n} ← HTTP ${res.status} from ${model} in ${Date.now() - startedAt}ms`);
+  }
+
   if (!res.ok) {
     let detail = '';
     try {
@@ -79,11 +103,15 @@ async function attemptModel(model, userPrompt, signal) {
     } catch { /* non-JSON error body */ }
 
     if (res.status === 429) {
-      // Pro-tier models have a much tighter free ceiling (~5/min) than Flash,
-      // so this is realistically hit by normal use, not just abuse. Make it
-      // retryable rather than a hard stop.
+      // Free-tier ceilings are small and per-model: Pro ~5/min, Flash ~10/min,
+      // Flash-Lite ~15/min. We deliberately do NOT retry or fall back here —
+      // both would spend more of the quota that just ran out.
+      const isPro = /pro/i.test(model);
       throw new GeminiError(
-        'Gemini rate limit reached (free tier).',
+        `Gemini rate limit reached on ${model}` +
+        (isPro ? ' (Pro free tier allows only ~5 requests/minute). ' : '. ') +
+        'Wait about a minute, then click Analyze once.' +
+        (isPro ? ' If this keeps happening, switching REACT_APP_GEMINI_MODEL back to gemini-flash-latest gives a much higher free limit.' : ''),
         'quota'
       );
     }
@@ -149,26 +177,33 @@ async function attemptModel(model, userPrompt, signal) {
   return text;
 }
 
-let workingModel = null; // remember what worked, so later calls skip straight to it
+let workingModel = null; // set ONLY when a 404 forces a legitimate model swap
 
 const OVERLOAD_RETRY_DELAYS_MS = [1000, 3000];  // 503 busy: usually clears in seconds
-const QUOTA_RETRY_DELAY_MS     = 15000;          // 429 rate limit: windows are ~60s, so
-                                                  // one longer wait is worth it — especially
-                                                  // relevant on Pro's tight ~5/min ceiling.
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 /**
  * Send a prompt, get raw text back.
  *
- * Three kinds of transient trouble are handled automatically, so the user
- * doesn't have to babysit the Analyze button:
- *  - MODEL RETIRED (404): walk a fallback list of known-good models.
- *  - OVERLOADED (503, free tier busy): a couple of short backoff retries
- *    on the SAME model before moving on — most 503s clear in seconds.
- *  - RATE LIMITED (429): one longer wait then a single retry on the SAME
- *    model. Matters most on Pro-tier's tight ~5 requests/minute ceiling,
- *    where two Analyze clicks close together can trip this in normal use.
+ * REQUEST BUDGET — deliberately minimal, because free-tier ceilings are small
+ * (Pro is ~5 requests/minute). One user click must not become many requests.
+ *
+ *   Normal success ......... 1 request
+ *   Rate limited (429) ..... 1 request  (surface immediately — see below)
+ *   Overloaded (503) ....... up to 3 requests, SAME model only
+ *   Model retired (404) .... 1 request per model until one answers
+ *
+ * Why 429 does NOT retry or fall back:
+ *   Retrying a rate limit just spends more of the very quota that ran out, and
+ *   falling back to a different model both multiplies requests AND silently
+ *   changes which model you're using. Neither helps; both made it worse.
+ *   A rate limit is information for the user, not something to fight.
+ *
+ * Why 404 DOES fall back:
+ *   It means the model is genuinely gone (Google retires these on their own
+ *   schedule). Trying another is the only way to recover, and a 404 is a cheap
+ *   rejection rather than real work.
  */
 export async function generate(userPrompt, { signal } = {}) {
   if (!isConfigured()) {
@@ -178,39 +213,43 @@ export async function generate(userPrompt, { signal } = {}) {
     );
   }
 
-  const candidates = [workingModel || MODEL, ...FALLBACK_MODELS.filter(m => m !== MODEL)];
+  const primary = workingModel || MODEL;
+  const candidates = [primary, ...FALLBACK_MODELS.filter(m => m !== primary)];
+  const tried = [];
 
   for (const model of candidates) {
-    let quotaRetried = false;
-    // A few quiet retries on THIS model before giving up on it and moving to
-    // the next candidate — an overload is about traffic, not the model choice.
-    for (let attempt = 0; attempt <= OVERLOAD_RETRY_DELAYS_MS.length; attempt++) {
+    tried.push(model);
+
+    for (let attempt = 0; ; attempt++) {
       try {
         const text = await attemptModel(model, userPrompt, signal);
-        workingModel = model; // cache the one that worked for next time
+        // Only remember a model that differs from the configured one when a 404
+        // forced us here — so a transient blip can't silently pin you to a
+        // model you didn't choose.
+        if (model !== MODEL) workingModel = model;
         return text;
       } catch (e) {
         if (e.name === 'AbortError') throw e;
+
+        // Transient traffic problem: retry the SAME model briefly. Never chain
+        // to other models — that multiplies requests for no benefit.
         if (e.kind === 'overloaded' && attempt < OVERLOAD_RETRY_DELAYS_MS.length) {
           await sleep(OVERLOAD_RETRY_DELAYS_MS[attempt]);
-          continue; // retry same model
-        }
-        if (e.kind === 'quota' && !quotaRetried) {
-          quotaRetried = true;
-          await sleep(QUOTA_RETRY_DELAY_MS);
-          attempt = -1; // restart the inner attempt counter for this one retry
           continue;
         }
-        if (e.kind === 'model_not_found' || e.kind === 'overloaded' || e.kind === 'quota') break; // try next model
-        throw e; // anything else (auth/network/etc.) surfaces immediately
+
+        // Model is gone — the one case where trying another model is right.
+        if (e.kind === 'model_not_found') break;
+
+        // 429 / exhausted 503 / auth / network → tell the user now.
+        throw e;
       }
     }
   }
 
-  // Every candidate 404'd, stayed overloaded, or stayed rate-limited.
   throw new GeminiError(
-    `Gemini is busy, rate-limited, or unavailable right now (tried: ${candidates.join(', ')}). ` +
-    'This is usually temporary on the free tier — wait a minute and try again.',
-    'overloaded'
+    `No working Gemini model found (tried: ${tried.join(', ')}). ` +
+    'Google may have changed its model lineup — check REACT_APP_GEMINI_MODEL.',
+    'api'
   );
 }

@@ -63,6 +63,8 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
   const [hlMode,    setHlMode]  = useState(false);
 
   const fileRef = useRef(); const galRef = useRef(); const taRef = useRef(); const overlayRef = useRef();
+  // Synchronous duplicate-submit guard (setSaving is async; two fast clicks can race).
+  const saveInFlight = useRef(false);
   const hl = useHighlight(taRef, draft?.highlights || []);
 
   const inp = {
@@ -103,9 +105,13 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
   };
 
   const save = async (alsoAnalyze = false) => {
+    if (saveInFlight.current) return;   // ignore repeat clicks while saving
     setErr('');
+    // Validate BEFORE claiming the lock, so a validation bail-out can't leave
+    // the button permanently jammed.
     if (!title.trim()) { setErr('Title is required'); return; }
     if (!systems.length) { setErr('Select at least one system'); return; }
+    saveInFlight.current = true;
     setSaving(true);
     try {
       let urls = [];
@@ -148,6 +154,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
       clearDraft(activeSystem);
       onSaved(saved);
     } catch(e) { setErr(e.message); setSaving(false); setSS(''); }
+    finally { saveInFlight.current = false; }
   };
 
   const hasDraft = !!(draft?.title||draft?.notes);

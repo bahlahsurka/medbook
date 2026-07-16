@@ -259,9 +259,17 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
 
   const aiHasContent = !isAllEmpty(ai);
 
+  // Hard guard against duplicate in-flight requests. `disabled={aiBusy}` alone
+  // isn't enough: setAiBusy(true) is async, so two fast clicks can both pass
+  // the check before React re-renders and disables the button. A ref is
+  // synchronous, so the second click is dropped immediately.
+  const analyzeInFlight = useRef(false);
+
   // ---- AI handlers ----------------------------------------------------------
   // Runs ONLY when the user clicks. Never automatic (spec).
   const runAnalyze = async () => {
+    if (analyzeInFlight.current) return;   // ignore clicks while one is running
+    analyzeInFlight.current = true;
     setAiErr(''); setAiNote(''); setAiBusy(true);
     try {
       // Only the Review text is sent — no question, images, system or metadata.
@@ -285,8 +293,10 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     } catch (e) {
       // Entry is untouched on any failure.
       setAiErr(e.message || 'Analysis failed.');
+    } finally {
+      setAiBusy(false);
+      analyzeInFlight.current = false;
     }
-    setAiBusy(false);
   };
 
   const saveAiEdits = async () => {
