@@ -17,7 +17,7 @@ const SECTIONS = [
 ];
 
 export default function AISections({
-  sections, onChange, onAddToDeck, deckAdded = {}, generatedAt, model, busy,
+  sections, onChange, onAddToDeck, onAddAllToDeck, deckAdded = {}, generatedAt, model, busy,
 }) {
   const { t } = useTheme();
   // Expanded by default — the whole point is to see the output at a glance.
@@ -112,6 +112,7 @@ export default function AISections({
         cards={Array.isArray(sections?.flashcards) ? sections.flashcards : []}
         onChange={list => setList('flashcards', list)}
         onAddToDeck={onAddToDeck}
+        onAddAllToDeck={onAddAllToDeck}
         deckAdded={deckAdded}
         busy={busy}
       />
@@ -125,14 +126,27 @@ export default function AISections({
   );
 }
 
-function FlashcardSection({ cards, onChange, onAddToDeck, deckAdded, busy }) {
+function FlashcardSection({ cards, onChange, onAddToDeck, onAddAllToDeck, deckAdded, busy }) {
   const { t } = useTheme();
   const [open, setOpen] = useState(true);
+  const [addingAll, setAddingAll] = useState(false);
   const accent = '#16a34a';
 
   const update = (i, field, value) =>
     onChange(cards.map((c,j)=> j===i ? { ...c, [field]: value } : c));
   const remove = i => onChange(cards.filter((_,j)=>j!==i));
+
+  const withIndex = cards.map((c,i)=>({ c, i }));
+  const pendingCount = withIndex.filter(({c,i}) =>
+    !deckAdded[`${i}:${c.front}`] && c.front?.trim() && c.back?.trim()).length;
+
+  const handleAddAll = async (e) => {
+    e.stopPropagation(); // don't also toggle the collapse
+    if (!onAddAllToDeck || pendingCount === 0) return;
+    setAddingAll(true);
+    await onAddAllToDeck(withIndex);
+    setAddingAll(false);
+  };
 
   return (
     <div style={{ background:t.surface, border:`1px solid ${t.border}`,
@@ -143,6 +157,20 @@ function FlashcardSection({ cards, onChange, onAddToDeck, deckAdded, busy }) {
         <span style={{ fontSize:12.5, fontWeight:700, color:t.text, flex:1 }}>Flashcards</span>
         <span style={{ fontSize:11, color:t.text4, background:t.surface3,
           borderRadius:10, padding:'1px 7px', fontWeight:600 }}>{cards.length}</span>
+        {onAddAllToDeck && cards.length > 0 && (
+          <button
+            onClick={handleAddAll}
+            disabled={busy || addingAll || pendingCount === 0}
+            title={pendingCount===0 ? 'All cards already in your deck' : `Add all ${pendingCount} to your deck`}
+            style={{ fontSize:11, fontWeight:600, fontFamily:'Inter,sans-serif',
+              background: pendingCount===0 ? t.surface3 : `${accent}1f`,
+              border:`1px solid ${pendingCount===0 ? t.border : accent+'55'}`,
+              color: pendingCount===0 ? t.text4 : accent,
+              borderRadius:6, padding:'4px 10px',
+              cursor:(busy||addingAll||pendingCount===0) ? 'default' : 'pointer' }}>
+            {addingAll ? 'Adding…' : pendingCount===0 ? '✓ All in deck' : `+ Add all (${pendingCount})`}
+          </button>
+        )}
         <span style={{ fontSize:11, color:t.text4, transform:open?'rotate(90deg)':'none',
           transition:'transform .15s' }}>▶</span>
       </div>

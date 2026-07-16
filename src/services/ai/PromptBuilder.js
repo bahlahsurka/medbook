@@ -6,6 +6,21 @@
 
 export const PROMPT_VERSION = 'v1';
 
+// Google's documented free-tier ceilings, for the session-usage estimate shown
+// in the UI. These are NOT read from Google at runtime — the free-tier API
+// does not reliably return quota headers to a browser — so this is a rough
+// guide against published limits, not an authoritative live number.
+export const FREE_TIER_LIMITS = {
+  'gemini-2.5-pro':        { rpm: 5,  rpd: 100  },
+  'gemini-2.5-flash':      { rpm: 10, rpd: 250  },
+  'gemini-flash-latest':   { rpm: 10, rpd: 250  },
+  'gemini-2.5-flash-lite': { rpm: 15, rpd: 1000 },
+  'gemini-3.5-flash':      { rpm: 10, rpd: 250  },
+};
+export function limitsFor(model) {
+  return FREE_TIER_LIMITS[model] || { rpm: null, rpd: null };
+}
+
 /** Hard caps from the spec. Enforced in the prompt AND again in ResponseParser. */
 export const LIMITS = {
   keyLearningPoints: 7,   // ~3-7

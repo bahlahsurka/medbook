@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { DIFF_COLOR } from '../lib/constants';
 import { buildHighlightParts, resolveHL } from '../lib/highlights';
 import { useTheme } from '../lib/theme';
+import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 
 // Renders notes with the same highlight colours the entry has in its system view
 function RenderedNotes({ text, highlights, isDark }) {
@@ -144,6 +145,13 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
 
   const card  = queue[idx];
   const total = queue.length;
+
+  // Keyboard: Space=reveal, Enter=Easy, g=Good, h=Hard, a=Again.
+  useReviewKeyboard(!done && !ended && !!card && lightboxIdx===null, {
+    flipped, onFlip: () => setFlipped(true),
+    onAgain: () => rate('again'), onHard: () => rate('hard'),
+    onGood: () => rate('good'),   onEasy: () => rate('easy'),
+  });
   const progress = total > 0 ? Math.round((reviewed/total)*100) : 0;
   const dc = DIFF_COLOR[card?.difficulty] || '#6b7280';
 
@@ -289,7 +297,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
               background:t.surface2,border:`2px dashed ${t.borderStrong}`,borderRadius:10,
               padding:16,fontSize:14,color:t.text3,cursor:'pointer',
               fontWeight:600,fontFamily:'Inter,sans-serif'}}>
-              Tap to reveal notes
+              Tap to reveal · Space
             </button>
           ) : (
             <div>
@@ -323,7 +331,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
             <>
               <div style={{fontSize:11,color:t.text4,fontWeight:600,
                 textAlign:'center',marginBottom:10,letterSpacing:.5}}>
-                HOW WELL DID YOU KNOW THIS?
+                HOW WELL DID YOU KNOW THIS?  ·  a / h / g / enter
               </div>
               <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}}>
                 {RATINGS.map(r=>(

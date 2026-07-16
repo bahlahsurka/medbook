@@ -8,6 +8,7 @@ import HLToolbar from './HLToolbar';
 import HLPopover from './HLPopover';
 import AISections from './AISections';
 import AIService, { normalizeSections, isAllEmpty } from '../services/ai';
+import { limitsFor } from '../services/ai/PromptBuilder';
 
 
 // --- helpers -------------------------------------------------------------
@@ -152,6 +153,12 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const [aiDirty, setAiDirty] = useState(false);
   const [aiNote, setAiNote]   = useState('');
   const [deckAdded, setDeckAdded] = useState({});
+
+  // Session usage bar — intentionally the ONLY piece of AI state that is not
+  // saved anywhere. Plain in-memory useState: it appears after an Analyze
+  // click and is gone the moment this component unmounts (i.e. when the user
+  // leaves this entry). Nothing else on this screen behaves this way.
+  const [usageInfo, setUsageInfo] = useState(null);
   const [hlViewOn, setHVOn]  = useState(false);
 
   const editTaRef = useRef();
@@ -287,6 +294,14 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
       setAi(sections);
       setAiDirty(false);
       onUpdated({ ...entry, ...payload });
+
+      // Update the temporary usage estimate. This is OUR count of requests
+      // sent this page session against Google's PUBLISHED limits — not a
+      // live number from Google (the free tier doesn't reliably expose one
+      // to a browser) — so it's labelled as an estimate, not a fact.
+      const usedModel = AIService.activeModel();
+      setUsageInfo({ model: usedModel, count: AIService.getRequestCount(), limits: limitsFor(usedModel) });
+
       if (isAllEmpty(sections)) {
         setAiNote('Gemini found nothing it could support from this Review. Try adding more detail, then Re-analyze.');
       }
@@ -321,6 +336,30 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     });
     if (error) { setAiErr(`Couldn't add to deck: ${error.message}`); return; }
     setDeckAdded(p => ({ ...p, [key]: true }));
+  };
+
+  // "Add all to deck" — one insert for every not-yet-added card, in a single
+  // request rather than looping addCardToDeck (avoids N round-trips and the
+  // risk of a partial batch if one insert lands and the rest lag).
+  const addAllCardsToDeck = async (cardsWithIndex) => {
+    const pending = cardsWithIndex.filter(({ i, c }) =>
+      !deckAdded[`${i}:${c.front}`] && c.front?.trim() && c.back?.trim());
+    if (pending.length === 0) return;
+
+    setAiErr('');
+    const { error } = await supabase.from('flashcards').insert(
+      pending.map(({ c }) => ({
+        user_id: userId,
+        question: c.front.trim(),
+        answer: c.back.trim(),
+      }))
+    );
+    if (error) { setAiErr(`Couldn't add cards to deck: ${error.message}`); return; }
+    setDeckAdded(p => {
+      const next = { ...p };
+      pending.forEach(({ i, c }) => { next[`${i}:${c.front}`] = true; });
+      return next;
+    });
   };
 
   // Remove every highlight in view mode — explicit and confirmed.
@@ -699,6 +738,28 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             </button>
           </div>
 
+          {/* Temporary usage estimate — appears after Analyze, gone the moment
+              you leave this entry (plain component state, not saved anywhere).
+              Numbers are OUR count of requests this session vs Google's
+              PUBLISHED limits, not a live figure from Google. */}
+          {usageInfo && (
+            <div style={{display:'flex',alignItems:'center',gap:8,
+              background:t.surface2,border:`1px solid ${t.border}`,borderRadius:7,
+              padding:'6px 12px',marginBottom:12,fontSize:11,color:t.text4}}>
+              <span style={{fontSize:12}}>📊</span>
+              <span>
+                ~{usageInfo.count} request{usageInfo.count!==1?'s':''} this session on{' '}
+                <strong style={{color:t.text3}}>{usageInfo.model}</strong>
+                {usageInfo.limits.rpd && (
+                  <> · free tier is usually ~{usageInfo.limits.rpm}/min, ~{usageInfo.limits.rpd}/day</>
+                )}
+              </span>
+              <span style={{marginLeft:'auto',fontSize:10,fontStyle:'italic',opacity:.7}}>
+                estimate, not from Google
+              </span>
+            </div>
+          )}
+
           {aiErr && (
             <div style={{background:t.dangerBg,border:`1px solid ${t.dangerBorder}`,
               borderRadius:8,padding:'10px 14px',fontSize:12.5,color:t.danger,marginBottom:12}}>
@@ -720,6 +781,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
               sections={ai}
               onChange={next => { setAi(next); setAiDirty(true); }}
               onAddToDeck={addCardToDeck}
+              onAddAllToDeck={addAllCardsToDeck}
               deckAdded={deckAdded}
               generatedAt={entry.ai_generated_at}
               model={entry.ai_model}

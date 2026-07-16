@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useTheme } from '../lib/theme';
+import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 
 export default function FlashCards({ userId }) {
   const { t } = useTheme();
@@ -99,6 +100,14 @@ export default function FlashCards({ userId }) {
 
   const card = studyCards[studyIdx];
 
+  // Keyboard: Space=reveal, Enter=Next (no difficulty rating here — this is a
+  // plain flip-through deck, not the spaced-repetition review queue).
+  const inStudy = (view === 'study' || view === 'studyOne') && !done && !!card;
+  useReviewKeyboard(inStudy, {
+    flipped, onFlip: () => setFlipped(true),
+    onNext: () => nextCard(),
+  });
+
   if (loading) return (
     <div style={{ textAlign:'center', paddingTop:60, color:t.text4, fontFamily:'Inter,sans-serif' }}>
       Loading flashcards…
@@ -165,7 +174,7 @@ export default function FlashCards({ userId }) {
 
         {!flipped ? (
           <button onClick={()=>setFlipped(true)} style={{ ...B(t.accent), width:'100%' }}>
-            Show Answer
+            Show Answer · Space
           </button>
         ) : (
           <div style={{ display:'flex', gap:10 }}>

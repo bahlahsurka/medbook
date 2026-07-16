@@ -4,7 +4,7 @@
 // Components call AIService.analyzeReview(review) and nothing else.
 // Swapping provider, model, or moving the key server-side never reaches the UI.
 
-import { generate, isConfigured, activeModel, GeminiError } from './GeminiService';
+import { generate, isConfigured, activeModel, getRequestCount, GeminiError } from './GeminiService';
 import { buildAnalysisPrompt, buildSectionPrompt } from './PromptBuilder';
 import { parseAnalysis, isAllEmpty, normalizeSections, emptySections, ParseError } from './ResponseParser';
 
@@ -16,6 +16,14 @@ const AIService = {
 
   /** Which model is in use (shown in the UI footer for transparency). */
   activeModel,
+
+  /**
+   * Requests made THIS PAGE SESSION (resets on reload). This is an in-app
+   * counter, not data from Google — the free-tier API does not reliably
+   * expose remaining-quota headers to a browser, so we track what we
+   * ourselves have sent rather than claim a number we can't actually know.
+   */
+  getRequestCount,
 
   /**
    * Analyse a review and return the six sections.
