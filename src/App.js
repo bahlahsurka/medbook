@@ -493,7 +493,7 @@ export default function App() {
               )}
 
               {view==='review' && <ReviewQueue allEntries={entries} onReviewed={onReviewed} />}
-              {view==='cards'  && <FlashCards userId={session.user.id} />}
+              {view==='cards'  && <FlashCards userId={session.user.id} userSystems={userSystems} />}
               {view==='stats'  && <Dashboard entries={entries} userSystems={userSystems} />}
 
               {view==='add' && (

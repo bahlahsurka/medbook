@@ -333,6 +333,10 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
       user_id: userId,
       question: cardObj.front.trim(),
       answer: cardObj.back.trim(),
+      // File it under the system the source entry belongs to — this is what
+      // makes AI-generated cards land in the right folder automatically
+      // instead of a flat, undifferentiated pile.
+      system: entry.system,
     });
     if (error) { setAiErr(`Couldn't add to deck: ${error.message}`); return; }
     setDeckAdded(p => ({ ...p, [key]: true }));
@@ -352,6 +356,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         user_id: userId,
         question: c.front.trim(),
         answer: c.back.trim(),
+        system: entry.system,
       }))
     );
     if (error) { setAiErr(`Couldn't add cards to deck: ${error.message}`); return; }
