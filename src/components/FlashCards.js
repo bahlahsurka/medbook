@@ -20,6 +20,15 @@ export default function FlashCards({ userId, userSystems }) {
   const [view, setView]           = useState('folders');
   const [activeFolder, setAF]     = useState(null); // system name, or UNCAT, or null (top level)
 
+  // Bulk select — deliberately an explicit toggle button, NOT long-press.
+  // The entry-list's long-press bulk mode has its own touch-sensitivity
+  // problems; reusing that pattern here would just import the same issue
+  // into a second screen. A "Select" button avoids it entirely.
+  const [bulkMode, setBulkMode]   = useState(false);
+  const [selectedIds, setSelIds]  = useState(new Set());
+  const [bulkTarget, setBulkTarget] = useState('');
+  const [bulkBusy, setBulkBusy]   = useState(false);
+
   const [studyIdx, setStudyIdx]   = useState(0);
   const [studyCards, setStudyCards] = useState([]);
   const [flipped, setFlipped] = useState(false);
@@ -101,8 +110,44 @@ export default function FlashCards({ userId, userSystems }) {
     return cards.filter(c => (c.system || UNCAT) === activeFolder);
   }, [cards, activeFolder]);
 
-  const openFolder = (key) => { setAF(key); setView('list'); };
-  const backToFolders = () => { setAF(null); setView('folders'); };
+  const openFolder = (key) => { setAF(key); setView('list'); exitBulk(); };
+  const backToFolders = () => { setAF(null); setView('folders'); exitBulk(); };
+
+  const exitBulk = () => { setBulkMode(false); setSelIds(new Set()); setBulkTarget(''); };
+  const toggleSelect = (id) => setSelIds(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  // One request for the whole batch, matching the same pattern used for
+  // bulk operations on entries elsewhere in the app — not a loop of
+  // individual updates.
+  const bulkMove = async () => {
+    if (selectedIds.size === 0 || !bulkTarget) return;
+    setBulkBusy(true); setErr('');
+    const ids = [...selectedIds];
+    const targetSystem = bulkTarget === UNCAT ? null : bulkTarget;
+    const { error } = await supabase.from('flashcards')
+      .update({ system: targetSystem })
+      .in('id', ids);
+    setBulkBusy(false);
+    if (error) { setErr(`Couldn't move cards: ${error.message}`); return; }
+    setCards(p => p.map(c => ids.includes(c.id) ? { ...c, system: targetSystem } : c));
+    exitBulk();
+  };
+
+  const bulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!window.confirm(`Delete ${selectedIds.size} card${selectedIds.size!==1?'s':''}? This can't be undone.`)) return;
+    setBulkBusy(true); setErr('');
+    const ids = [...selectedIds];
+    const { error } = await supabase.from('flashcards').delete().in('id', ids);
+    setBulkBusy(false);
+    if (error) { setErr(`Couldn't delete cards: ${error.message}`); return; }
+    setCards(p => p.filter(c => !ids.includes(c.id)));
+    exitBulk();
+  };
 
   // ── CRUD ─────────────────────────────────────────────────────────────
   const openAdd = () => {
@@ -413,7 +458,7 @@ export default function FlashCards({ userId, userSystems }) {
         fontFamily:'Inter,sans-serif', padding:0 }}>← All Folders</button>
 
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-        marginBottom:20, flexWrap:'wrap', gap:10 }}>
+        marginBottom:14, flexWrap:'wrap', gap:10 }}>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <div style={{ width:10, height:10, borderRadius:'50%', background:folderColor, flexShrink:0 }} />
           <div style={{ fontSize:16, fontWeight:700, color:t.text }}>
@@ -421,18 +466,63 @@ export default function FlashCards({ userId, userSystems }) {
           </div>
         </div>
         <div style={{ display:'flex', gap:8 }}>
-          {folderCards.length > 0 && (
+          {folderCards.length > 0 && !bulkMode && (
             <button onClick={studyThisFolder} style={B(t.accent)}>▶ Study (Shuffled)</button>
           )}
-          <button onClick={openAdd} style={B(t.ok)}>+ New Card</button>
+          {folderCards.length > 0 && (
+            <button onClick={()=> bulkMode ? exitBulk() : setBulkMode(true)} style={
+              bulkMode ? B(t.surface3,t.text2) : { ...B(t.surface2,t.text2), border:`1px solid ${t.border}` }
+            }>
+              {bulkMode ? 'Cancel' : 'Select'}
+            </button>
+          )}
+          {!bulkMode && <button onClick={openAdd} style={B(t.ok)}>+ New Card</button>}
         </div>
       </div>
 
-      {activeFolder === UNCAT && folderCards.length > 0 && (
+      {/* Bulk action bar — appears once at least one card is checked. One
+          request moves/deletes the whole batch, not a loop per card. */}
+      {bulkMode && (
+        <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap',
+          background:t.surface2, border:`1px solid ${t.border}`, borderRadius:8,
+          padding:'10px 12px', marginBottom:14 }}>
+          <span style={{ fontSize:12.5, color:t.text3, fontWeight:600 }}>
+            {selectedIds.size===0 ? 'Tap cards to select' : `${selectedIds.size} selected`}
+          </span>
+          {selectedIds.size > 0 && (
+            <>
+              <select value={bulkTarget} onChange={e=>setBulkTarget(e.target.value)}
+                style={{ fontSize:12, background:t.surface, border:`1px solid ${t.borderStrong}`,
+                  borderRadius:6, padding:'5px 8px', color:t.text, fontFamily:'Inter,sans-serif' }}>
+                <option value="">Move to…</option>
+                <option value={UNCAT}>Uncategorized</option>
+                {(userSystems||[]).map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
+              </select>
+              <button onClick={bulkMove} disabled={!bulkTarget || bulkBusy} style={{
+                fontSize:12, fontWeight:600, fontFamily:'Inter,sans-serif',
+                background: bulkTarget ? t.ok : t.surface3, color: bulkTarget ? '#fff' : t.text4,
+                border:'none', borderRadius:6, padding:'6px 12px',
+                cursor: (bulkTarget && !bulkBusy) ? 'pointer' : 'default' }}>
+                {bulkBusy ? 'Moving…' : 'Move'}
+              </button>
+              <button onClick={bulkDelete} disabled={bulkBusy} style={{
+                fontSize:12, fontWeight:600, fontFamily:'Inter,sans-serif',
+                background:t.dangerBg, color:t.danger, border:`1px solid ${t.dangerBorder}`,
+                borderRadius:6, padding:'6px 12px', cursor:bulkBusy?'default':'pointer' }}>
+                Delete
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {err && <div style={{marginBottom:14}}><ErrBox msg={err} /></div>}
+
+      {activeFolder === UNCAT && folderCards.length > 0 && !bulkMode && (
         <div style={{ background:t.warnBg, border:`1px solid ${t.warnBorder}`, borderRadius:8,
           padding:'10px 14px', fontSize:12.5, color:t.warn, marginBottom:14 }}>
-          These cards have no system assigned. Use the dropdown on each card to file it —
-          no need to open Edit.
+          These cards have no system assigned. Tap <strong>Select</strong> to move several at
+          once, or use the dropdown on a single card to file it individually.
         </div>
       )}
 
@@ -446,53 +536,69 @@ export default function FlashCards({ userId, userSystems }) {
         </div>
       ) : (
         <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-          {folderCards.map(c => (
-            <div key={c.id} style={{ background:t.surface, border:`1px solid ${t.border}`,
-              borderRadius:10, padding:'16px 18px',
-              boxShadow:`0 1px 2px ${t.shadow}` }}>
+          {folderCards.map(c => {
+            const isSel = selectedIds.has(c.id);
+            return (
+            <div key={c.id}
+              onClick={bulkMode ? ()=>toggleSelect(c.id) : undefined}
+              style={{ background:t.surface,
+                border:`1px solid ${isSel ? folderColor : t.border}`,
+                outline: isSel ? `2px solid ${folderColor}` : 'none',
+                borderRadius:10, padding:'16px 18px', boxShadow:`0 1px 2px ${t.shadow}`,
+                cursor: bulkMode ? 'pointer' : 'default' }}>
               <div style={{ display:'flex', justifyContent:'space-between',
                 alignItems:'flex-start', gap:10 }}>
+                {bulkMode && (
+                  <div style={{ width:20, height:20, borderRadius:5, flexShrink:0, marginTop:1,
+                    background: isSel ? folderColor : t.surface,
+                    border:`2px solid ${isSel ? folderColor : t.borderStrong}`,
+                    display:'flex', alignItems:'center', justifyContent:'center' }}>
+                    {isSel && <span style={{ color:'#fff', fontSize:12, fontWeight:700 }}>✓</span>}
+                  </div>
+                )}
                 <div style={{ flex:1 }}>
                   <div style={{ fontSize:13, fontWeight:600, color:t.text, marginBottom:6 }}>
                     {c.question}
                   </div>
                   <div style={{ fontSize:12, color:t.text3, lineHeight:1.6 }}>{c.answer}</div>
                 </div>
-                <div style={{ display:'flex', flexDirection:'column', gap:6, flexShrink:0, alignItems:'flex-end' }}>
-                  <div style={{ display:'flex', gap:6 }}>
-                    <button onClick={()=>studyOne(c)} style={{
-                      background:t.navActiveBg, border:`1px solid ${t.navActiveBorder}`, color:t.navActiveText,
-                      borderRadius:6, padding:'5px 10px', fontSize:11,
-                      cursor:'pointer', fontWeight:600, fontFamily:'Inter,sans-serif' }}>
-                      ▶ Review
-                    </button>
-                    <button onClick={()=>startEdit(c)} style={{
-                      background:t.surface2, border:`1px solid ${t.border}`, color:t.text2,
-                      borderRadius:6, padding:'5px 10px', fontSize:11,
-                      cursor:'pointer', fontWeight:600, fontFamily:'Inter,sans-serif' }}>
-                      ✎ Edit
-                    </button>
-                    <button onClick={()=>deleteCard(c.id)} style={{
-                      background:t.dangerBg, border:`1px solid ${t.dangerBorder}`, color:t.danger,
-                      borderRadius:6, padding:'5px 10px', fontSize:11,
-                      cursor:'pointer', fontWeight:600, fontFamily:'Inter,sans-serif' }}>
-                      Delete
-                    </button>
+                {!bulkMode && (
+                  <div style={{ display:'flex', flexDirection:'column', gap:6, flexShrink:0, alignItems:'flex-end' }}>
+                    <div style={{ display:'flex', gap:6 }}>
+                      <button onClick={()=>studyOne(c)} style={{
+                        background:t.navActiveBg, border:`1px solid ${t.navActiveBorder}`, color:t.navActiveText,
+                        borderRadius:6, padding:'5px 10px', fontSize:11,
+                        cursor:'pointer', fontWeight:600, fontFamily:'Inter,sans-serif' }}>
+                        ▶ Review
+                      </button>
+                      <button onClick={()=>startEdit(c)} style={{
+                        background:t.surface2, border:`1px solid ${t.border}`, color:t.text2,
+                        borderRadius:6, padding:'5px 10px', fontSize:11,
+                        cursor:'pointer', fontWeight:600, fontFamily:'Inter,sans-serif' }}>
+                        ✎ Edit
+                      </button>
+                      <button onClick={()=>deleteCard(c.id)} style={{
+                        background:t.dangerBg, border:`1px solid ${t.dangerBorder}`, color:t.danger,
+                        borderRadius:6, padding:'5px 10px', fontSize:11,
+                        cursor:'pointer', fontWeight:600, fontFamily:'Inter,sans-serif' }}>
+                        Delete
+                      </button>
+                    </div>
+                    {/* Fast re-file path — no need to open Edit just to fix a
+                        miscategorized or legacy Uncategorized card. */}
+                    <select value={c.system || ''} onChange={e=>quickMove(c, e.target.value)}
+                      title="Move to a different system"
+                      style={{ fontSize:11, background:t.surface2, border:`1px solid ${t.border}`,
+                        borderRadius:6, padding:'4px 6px', color:t.text3, fontFamily:'Inter,sans-serif',
+                        cursor:'pointer' }}>
+                      <option value="">Uncategorized</option>
+                      {(userSystems||[]).map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
+                    </select>
                   </div>
-                  {/* Fast re-file path — no need to open Edit just to fix a
-                      miscategorized or legacy Uncategorized card. */}
-                  <select value={c.system || ''} onChange={e=>quickMove(c, e.target.value)}
-                    title="Move to a different system"
-                    style={{ fontSize:11, background:t.surface2, border:`1px solid ${t.border}`,
-                      borderRadius:6, padding:'4px 6px', color:t.text3, fontFamily:'Inter,sans-serif',
-                      cursor:'pointer' }}>
-                    <option value="">Uncategorized</option>
-                    {(userSystems||[]).map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
-                  </select>
-                </div>
+                )}
               </div>
             </div>
-          ))}
+          );})}
         </div>
       )}
     </div>

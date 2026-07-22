@@ -457,7 +457,16 @@ export default function App() {
         )}
 
         {/* Content — scrollRef attached here for scroll restoration */}
-        <div ref={scrollRef} style={{flex:1,overflowY:'auto',padding:isMobile?'14px 12px':'20px'}}>
+        <div ref={scrollRef}
+          onClick={e => {
+            // Tapping genuinely blank space (not a card, not a button — this
+            // fires only when the click landed directly on this pane, never
+            // when it bubbled up from a child) exits bulk mode. Previously
+            // the only way out was scrolling back up to the toolbar, which
+            // is exactly the friction being fixed here.
+            if (bulkMode && e.target === e.currentTarget) { setBulkMode(false); setSelected2(new Set()); }
+          }}
+          style={{flex:1,overflowY:'auto',padding:isMobile?'14px 12px':'20px'}}>
 
           {fetching && (
             <div style={{textAlign:'center',paddingTop:80}}>
@@ -561,7 +570,11 @@ export default function App() {
                       )}
                     </div>
                   ) : (
-                    <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                    <div
+                      onClick={e => {
+                        if (bulkMode && e.target === e.currentTarget) { setBulkMode(false); setSelected2(new Set()); }
+                      }}
+                      style={{display:'flex',flexDirection:'column',gap:8}}>
                       {sysEntries.map(entry=>(
                         <SelectableCard
                           key={entry.id}
@@ -601,14 +614,36 @@ const SelectableCard = React.memo(function SelectableCard({ entry, color, bulkMo
   const timer = React.useRef(null);
   const moved = React.useRef(false);
   const fired = React.useRef(false);
+  const startXY = React.useRef({x:0,y:0});
   const [pressed, setPressed] = React.useState(false);
 
-  const startPress = () => {
+  // 650ms + a real movement tolerance (not "cancel on any touchmove event").
+  // The old 500ms threshold with zero tolerance was easy for an ordinary tap
+  // to cross — especially on a tablet, where a slightly larger or slightly
+  // lingering touch contact reads as a "hold" — which is what made bulk
+  // mode trigger itself on normal taps. 650ms is comfortably past a normal
+  // tap's duration while still feeling immediate for a deliberate hold, and
+  // measuring actual pixel movement (not "did a touchmove event fire at
+  // all") keeps a genuine long-press from being cancelled by natural
+  // finger micro-jitter.
+  const HOLD_MS = 650;
+  const MOVE_TOLERANCE_PX = 10;
+
+  const startPress = (e) => {
+    const t0 = e.touches?.[0];
+    startXY.current = t0 ? { x:t0.clientX, y:t0.clientY } : { x:0, y:0 };
     moved.current=false; fired.current=false; setPressed(true);
-    timer.current=setTimeout(()=>{ if(!moved.current){fired.current=true;onStartBulk(entry.id);} },500);
+    timer.current=setTimeout(()=>{ if(!moved.current){fired.current=true;onStartBulk(entry.id);} },HOLD_MS);
   };
   const endPress = () => { clearTimeout(timer.current); setPressed(false); };
-  const cancelPress = () => { moved.current=true; clearTimeout(timer.current); setPressed(false); };
+  const trackMove = (e) => {
+    const t0 = e.touches?.[0];
+    if (!t0) return;
+    const dx = t0.clientX - startXY.current.x, dy = t0.clientY - startXY.current.y;
+    if (Math.hypot(dx,dy) > MOVE_TOLERANCE_PX) {
+      moved.current=true; clearTimeout(timer.current); setPressed(false);
+    }
+  };
 
   const tap = () => { if (bulkMode) onToggleSelect(entry.id); else onOpen(entry); };
 
@@ -629,7 +664,7 @@ const SelectableCard = React.memo(function SelectableCard({ entry, color, bulkMo
       onClick={handleClick}
       onContextMenu={e=>{e.preventDefault();fired.current=true;onStartBulk(entry.id);}}
       onMouseDown={()=>setPressed(true)} onMouseUp={()=>setPressed(false)} onMouseLeave={()=>setPressed(false)}
-      onTouchStart={startPress} onTouchEnd={endPress} onTouchMove={cancelPress}>
+      onTouchStart={startPress} onTouchEnd={endPress} onTouchMove={trackMove}>
       {bulkMode && (
         <div style={{position:'absolute',top:10,left:10,zIndex:10,width:22,height:22,
           borderRadius:5,background:isSelected?color:t.surface,
