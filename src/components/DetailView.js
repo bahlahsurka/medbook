@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
-import { buildHighlightParts, resolveHL } from '../lib/highlights';
+import { buildHighlightParts, resolveHL, adjustHighlights } from '../lib/highlights';
 import { useHighlight, clearRange } from '../lib/useHighlight';
 import { useTheme } from '../lib/theme';
 import HLToolbar from './HLToolbar';
@@ -481,11 +481,21 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     try {
       const newUrls = await Promise.all(newImgs.map(uploadImg));
       const allImgs = [...editImgs,...newUrls];
+      // Saving trims the notes, which shifts every character offset after the
+      // trim point if the raw text had leading/trailing whitespace — very
+      // common when pasting review text (a stray leading space or blank line
+      // from the source page). Highlights were positioned against the
+      // UNTRIMMED textarea text, so without this correction every highlight
+      // silently drifts by however many characters trim() removed from the
+      // front. Reuse the same tested diff logic used for ordinary edits —
+      // a trim is just an edit that removes a prefix/suffix.
+      const trimmedNotes = editNotes.trim();
+      const adjustedHighlights = adjustHighlights(editNotes, trimmedNotes, editHl.highlights);
       const ok = await updateDB({
-        title:editTitle.trim(), notes:editNotes.trim(),
-        difficulty:editDiff, images:allImgs, highlights:editHl.highlights
+        title:editTitle.trim(), notes:trimmedNotes,
+        difficulty:editDiff, images:allImgs, highlights:adjustedHighlights
       });
-      if (ok) { setVHL(editHl.highlights); setEditing(false); setNI([]); }
+      if (ok) { setVHL(adjustedHighlights); setEditing(false); setNI([]); }
     } catch(e) { setErr(e.message); }
     setSaving(false);
   };

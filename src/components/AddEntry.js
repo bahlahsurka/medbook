@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { DIFFICULTY, DIFF_COLOR } from '../lib/constants';
-import { buildHighlightParts, resolveHL } from '../lib/highlights';
+import { buildHighlightParts, resolveHL, adjustHighlights } from '../lib/highlights';
 import { useHighlight } from '../lib/useHighlight';
 import { useTheme } from '../lib/theme';
 import HLToolbar from './HLToolbar';
@@ -117,9 +117,17 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
       let urls = [];
       if (images.length > 0) { setSS('Uploading images…'); urls = await Promise.all(images.map(uploadImg)); }
       setSS('Saving…');
+      // Saving trims the notes, which shifts every character offset after the
+      // trim point if the raw text had leading/trailing whitespace — common
+      // when pasting review text (a stray leading space or blank line from
+      // the source page). Highlights were positioned against the UNTRIMMED
+      // textarea text, so without this correction every highlight silently
+      // drifts by however many characters trim() removed from the front.
+      const trimmedNotes = notes.trim();
+      const adjustedHighlights = adjustHighlights(notes, trimmedNotes, hl.highlights);
       const rows = systems.map(sys => ({
-        user_id:userId, system:sys, title:title.trim(), notes:notes.trim(),
-        difficulty, images:urls, highlights:hl.highlights,
+        user_id:userId, system:sys, title:title.trim(), notes:trimmedNotes,
+        difficulty, images:urls, highlights:adjustedHighlights,
         pinned:false, review_count:0, last_reviewed:null
       }));
       const {data,error} = await supabase.from('entries').insert(rows).select();
@@ -131,7 +139,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
         // simply report it — notes are never at risk.
         setSS('Analyzing…');
         try {
-          const sections = await AIService.analyzeReview(notes.trim());
+          const sections = await AIService.analyzeReview(trimmedNotes);
           const payload = {
             ai_sections: sections,
             ai_generated_at: new Date().toISOString(),
