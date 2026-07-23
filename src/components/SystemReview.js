@@ -4,6 +4,7 @@ import { DIFF_COLOR } from '../lib/constants';
 import { buildHighlightParts, resolveHL } from '../lib/highlights';
 import { useTheme } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
+import { buildCycledQueue, buildCycledQueueWithScheduled } from '../lib/reviewQueue';
 
 // Renders notes with the same highlight colours the entry has in its system view
 function RenderedNotes({ text, highlights, isDark }) {
@@ -85,28 +86,6 @@ function calcNext(entry, rating) {
   };
 }
 
-/**
- * Build a review queue from a snapshot of this system's entries.
- * Due cards first (most overdue first), then never-reviewed (oldest first).
- * `includeScheduled` = the "Review all anyway" re-drill.
- */
-function buildQueue(entries, includeScheduled) {
-  const now = new Date();
-  const due = entries
-    .filter(e => e.next_review && new Date(e.next_review) <= now)
-    .sort((a,b) => new Date(a.next_review) - new Date(b.next_review)); // most overdue first
-  const fresh = entries
-    .filter(e => !e.next_review)
-    .sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
-  if (includeScheduled) {
-    const scheduled = entries
-      .filter(e => e.next_review && new Date(e.next_review) > now)
-      .sort((a,b) => new Date(a.next_review) - new Date(b.next_review));
-    return [...due, ...fresh, ...scheduled];
-  }
-  return [...due, ...fresh];
-}
-
 export default function SystemReview({ system, entries, color, onReviewed, onClose }) {
   const { t, isDark } = useTheme();
 
@@ -116,7 +95,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
   entriesRef.current = entries;
 
   // Queue is snapshotted at session start — stable while you work through it.
-  const [queue, setQueue] = useState(() => buildQueue(entries, false));
+  const [queue, setQueue] = useState(() => buildCycledQueue(entries));
   const [idx, setIdx]       = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [done, setDone]     = useState(false);
@@ -127,7 +106,9 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
   // Explicit rebuild — from the latest data — so a new session reflects what you
   // just rated instead of replaying it.
   const startNewSession = useCallback((includeScheduled = false) => {
-    setQueue(buildQueue(entriesRef.current, includeScheduled));
+    setQueue(includeScheduled
+      ? buildCycledQueueWithScheduled(entriesRef.current)
+      : buildCycledQueue(entriesRef.current));
     setIdx(0); setFlipped(false); setDone(false); setEnded(false); setReviewed(0);
   }, []);
 

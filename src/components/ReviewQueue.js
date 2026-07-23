@@ -4,6 +4,7 @@ import { SYS_COLOR, DIFF_COLOR } from '../lib/constants';
 import { buildHighlightParts, resolveHL } from '../lib/highlights';
 import { useTheme } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
+import { buildCycledQueue } from '../lib/reviewQueue';
 
 // Renders notes with the same highlight colours the entry has in its system view
 function RenderedNotes({ text, highlights, isDark }) {
@@ -85,22 +86,6 @@ function calcNext(entry, rating) {
   };
 }
 
-/**
- * Build a review queue from a snapshot of entries.
- * Due cards first (most overdue first), then never-reviewed cards (oldest first).
- * Deterministic — no shuffle — so ordering always reflects the schedule.
- */
-function buildQueue(all) {
-  const now = new Date();
-  const due = all
-    .filter(e => e.next_review && new Date(e.next_review) <= now)
-    .sort((a, b) => new Date(a.next_review) - new Date(b.next_review));
-  const fresh = all
-    .filter(e => !e.next_review)
-    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-  return [...due, ...fresh];
-}
-
 export default function ReviewQueue({ allEntries, onReviewed }) {
   const { t, isDark } = useTheme();
 
@@ -110,7 +95,7 @@ export default function ReviewQueue({ allEntries, onReviewed }) {
   entriesRef.current = allEntries;
 
   // The queue is SNAPSHOTTED at session start: stable while you work through it…
-  const [queue, setQueue] = useState(() => buildQueue(Object.values(allEntries).flat()));
+  const [queue, setQueue] = useState(() => buildCycledQueue(Object.values(allEntries).flat()));
   const [idx, setIdx]  = useState(0);
   const [flipped, setFlipped]   = useState(false);
   const [sessionDone, setSess]  = useState(0);
@@ -121,7 +106,7 @@ export default function ReviewQueue({ allEntries, onReviewed }) {
   // …and REBUILT here, from the latest data, so a new session never replays
   // cards you just rated.
   const startNewSession = useCallback(() => {
-    setQueue(buildQueue(Object.values(entriesRef.current).flat()));
+    setQueue(buildCycledQueue(Object.values(entriesRef.current).flat()));
     setIdx(0); setFlipped(false); setDone(false); setEnded(false); setSess(0);
   }, []);
 
