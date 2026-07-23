@@ -54,6 +54,14 @@ export default function Auth() {
     setMsg({ ok:true, text:'Password updated — you are signed in.' });
   };
 
+  // App.js's own isRecovery flag is captured once at mount and won't
+  // re-evaluate on its own just because the URL changed here — a full
+  // reload (now with no recovery marker in the URL, since it was cleared
+  // above) is what lets App.js correctly see a normal session next time
+  // and show the main app instead of leaving this success message as a
+  // dead end.
+  const continueToApp = () => { window.location.href = window.location.pathname; };
+
   const handle = async (e) => {
     e.preventDefault();
     setLoading(true); setMsg(null);
@@ -134,16 +142,24 @@ export default function Auth() {
         <div>
           <label style={lbl}>NEW PASSWORD</label>
           <input type="password" value={newPassword} onChange={e=>setNewPassword(e.target.value)}
-            required placeholder="••••••••" style={inp} minLength={6} autoFocus />
+            required placeholder="••••••••" style={inp} minLength={6} autoFocus disabled={msg?.ok} />
         </div>
         {msg && <div style={{ padding:'10px 14px', borderRadius:8, fontSize:13,
           background:msg.ok?t.okBg:t.dangerBg, color:msg.ok?t.ok:t.danger,
           border:`1px solid ${msg.ok?t.okBorder:t.dangerBorder}` }}>{msg.text}</div>}
-        <button type="submit" disabled={pwSaving} style={{ background:t.accent, color:'#fff',
-          border:'none', borderRadius:8, padding:11, fontSize:14, fontWeight:600,
-          cursor:pwSaving?'not-allowed':'pointer', opacity:pwSaving?.7:1, marginTop:4 }}>
-          {pwSaving ? 'Saving…' : 'Set New Password'}
-        </button>
+        {msg?.ok ? (
+          <button type="button" onClick={continueToApp} style={{ background:t.accent, color:'#fff',
+            border:'none', borderRadius:8, padding:11, fontSize:14, fontWeight:600,
+            cursor:'pointer', marginTop:4 }}>
+            Continue to MedBook
+          </button>
+        ) : (
+          <button type="submit" disabled={pwSaving} style={{ background:t.accent, color:'#fff',
+            border:'none', borderRadius:8, padding:11, fontSize:14, fontWeight:600,
+            cursor:pwSaving?'not-allowed':'pointer', opacity:pwSaving?.7:1, marginTop:4 }}>
+            {pwSaving ? 'Saving…' : 'Set New Password'}
+          </button>
+        )}
       </form>
     </>
   );

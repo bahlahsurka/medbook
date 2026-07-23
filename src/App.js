@@ -33,6 +33,14 @@ function storagePathFromUrl(url) {
 export default function App() {
   const { t } = useTheme();
   const [session, setSession]         = useState(null);
+  // Detect Supabase's password-recovery redirect (#...&type=recovery in the
+  // URL). getSession()/onAuthStateChange below will make `session` truthy
+  // for a recovery session same as any other sign-in — this flag is what
+  // lets the render gate below tell the two apart and route to the
+  // password-reset screen instead of straight into the app.
+  const [isRecovery] = useState(() =>
+    typeof window !== 'undefined' && window.location.hash.includes('type=recovery')
+  );
   const [authLoading, setAL]          = useState(true);
   const [entries, setEntries]         = useState({});
   const [fetching, setFetching]       = useState(false);
@@ -326,6 +334,13 @@ export default function App() {
 
   const color = userSystems.find(s=>s.name===activeSystem)?.color
     || SYS_COLOR[activeSystem] || '#2563eb';
+
+  // Recovery takes priority over everything else, including an active
+  // session — a recovery-flow sign-in still makes `session` truthy below,
+  // which is exactly what was routing people straight into the app instead
+  // of the "set new password" screen. This check has to run before the
+  // authLoading/session checks, not after, or it's too late to matter.
+  if (isRecovery) return <Auth />;
 
   if (authLoading) return (
     <div style={{minHeight:'100vh',background:t.appBg,display:'flex',
