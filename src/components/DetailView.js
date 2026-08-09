@@ -55,13 +55,22 @@ const EditHighlightOverlay = React.forwardRef(function EditHighlightOverlay({ te
       position:'absolute', inset:0, pointerEvents:'none',
       whiteSpace:'pre-wrap', wordBreak:'normal', overflowWrap:'break-word',
       fontSize:14, lineHeight:'1.7', padding:'10px 12px',
-      fontFamily:'Inter,sans-serif', boxSizing:'border-box',
+      fontFamily:'Inter,sans-serif', fontWeight:400, letterSpacing:'normal',
+      boxSizing:'border-box',
+      // Android's text-autosizing ("font boosting") can inflate a <textarea>'s
+      // effective font size differently than a plain <div>, especially in a
+      // long block of text — the two elements drift apart line by line, only
+      // becoming visibly misaligned several paragraphs in. Disabling it here
+      // AND on the paired textarea below is what keeps them in sync on
+      // tablets. This must match the textarea's style exactly.
+      WebkitTextSizeAdjust:'100%', textSizeAdjust:'100%',
       border:'1px solid transparent', color:'transparent', overflow:'hidden'
     }}>
       {parts.map((p,i) => {
         if (!p.hl) return <span key={i}>{p.t}</span>;
         const c = resolveHL(p.hl, isDark);
-        return <mark key={i} style={{background:c.bg,color:'transparent',borderRadius:2,padding:'0 1px'}}>{p.t}</mark>;
+        return <mark key={i} style={{background:c.bg,color:'transparent',borderRadius:2,padding:'0 1px',
+          margin:0, fontWeight:'inherit', lineHeight:'inherit'}}>{p.t}</mark>;
       })}
     </div>
   );
@@ -122,7 +131,8 @@ function Lightbox({ images, start, onClose }) {
   );
 }
 
-export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId, color: colorProp }) {
+export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId, color: colorProp,
+  onPrev, onNext, hasPrev, hasNext }) {
   const { t, isDark } = useTheme();
   const inp={display:'block',width:'100%',marginTop:8,background:t.surface,
     border:`1px solid ${t.borderStrong}`,borderRadius:8,color:t.text,padding:'10px 12px',
@@ -199,6 +209,28 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const clearSelState = useCallback(() => {
     setSelRect(null); setSelRange(null);
   }, []);
+
+  // Left/Right arrow keys — same navigation as the on-screen prev/next
+  // buttons. Disabled while editing (arrows must move the text cursor
+  // instead), while the image lightbox is open, and while any input/
+  // textarea/contentEditable has focus generally.
+  useEffect(() => {
+    if (editing) return;
+    const isTypingTarget = (el) => {
+      if (!el) return false;
+      const tag = el.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
+    };
+    const onKeyDown = (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (lb !== null) return; // lightbox open — let it own the keyboard
+      if (isTypingTarget(document.activeElement)) return;
+      if (e.key === 'ArrowLeft' && hasPrev) { e.preventDefault(); onPrev(); }
+      else if (e.key === 'ArrowRight' && hasNext) { e.preventDefault(); onNext(); }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [editing, lb, hasPrev, hasNext, onPrev, onNext]);
 
   useEffect(() => {
     if (!hlViewOn) { clearSelState(); return; }
@@ -563,6 +595,8 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
               rows={8} style={{...inp,resize:'vertical',lineHeight:'1.7',
                 marginTop:0,
                 position:'relative',zIndex:1,
+                fontWeight:400, letterSpacing:'normal',
+                WebkitTextSizeAdjust:'100%', textSizeAdjust:'100%',
                 background: editHl.highlights.length>0 ? 'transparent' : t.surface,
                 caretColor:t.text, color:t.text}} />
           </div>
@@ -637,11 +671,39 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         />
       )}
 
-      <button onClick={onBack} style={{background:'none',border:'none',color:t.text3,
-        cursor:'pointer',fontSize:13,padding:0,marginBottom:16,
-        display:'flex',alignItems:'center',gap:4,fontWeight:500,fontFamily:'Inter,sans-serif'}}>
-        ← Back to {entry.system}
-      </button>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
+        marginBottom:16,gap:10,flexWrap:'wrap'}}>
+        <button onClick={onBack} style={{background:'none',border:'none',color:t.text3,
+          cursor:'pointer',fontSize:13,padding:0,
+          display:'flex',alignItems:'center',gap:4,fontWeight:500,fontFamily:'Inter,sans-serif'}}>
+          ← Back to {entry.system}
+        </button>
+
+        {/* Prev/Next — walks the same ordered list you'd see on the system
+            page, so this is a shortcut for "go back and open the next one",
+            not a separate ordering. Hidden entirely when there's nowhere to
+            go (e.g. only one entry, or search was narrowing the list). */}
+        {(hasPrev || hasNext) && (
+          <div style={{display:'flex',gap:6}}>
+            <button onClick={onPrev} disabled={!hasPrev} title="Previous entry"
+              style={{background:t.surface2,border:`1px solid ${t.border}`,
+                color:hasPrev?t.text2:t.text4,borderRadius:7,
+                width:34,height:34,fontSize:16,fontFamily:'Inter,sans-serif',
+                cursor:hasPrev?'pointer':'default',opacity:hasPrev?1:.4,
+                display:'flex',alignItems:'center',justifyContent:'center'}}>
+              ‹
+            </button>
+            <button onClick={onNext} disabled={!hasNext} title="Next entry"
+              style={{background:t.surface2,border:`1px solid ${t.border}`,
+                color:hasNext?t.text2:t.text4,borderRadius:7,
+                width:34,height:34,fontSize:16,fontFamily:'Inter,sans-serif',
+                cursor:hasNext?'pointer':'default',opacity:hasNext?1:.4,
+                display:'flex',alignItems:'center',justifyContent:'center'}}>
+              ›
+            </button>
+          </div>
+        )}
+      </div>
 
       <div style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:10,
         padding:20,marginBottom:14,borderTop:`3px solid ${color}`,

@@ -48,7 +48,7 @@ export default function App() {
   const [activeSystem, setAS]         = useState('Internal Medicine');
   const [view, setView]               = useState('list');
   const [selected, setSelected]       = useState(null);
-  const [sidebarOpen, setSB]          = useState(window.innerWidth > 768);
+  const [sidebarOpen, setSB]          = useState(false);
   const [isMobile, setMobile]         = useState(window.innerWidth <= 768);
   const [search, setSearch]           = useState('');
   const [globalSearch, setGS]         = useState('');
@@ -70,10 +70,13 @@ export default function App() {
 
   // Resize
   useEffect(() => {
-    const fn = () => {
-      setMobile(window.innerWidth <= 768);
-      if (window.innerWidth > 768) setSB(true);
-    };
+    // NOTE: this used to also force the sidebar back open on any resize past
+    // 768px (`if (window.innerWidth > 768) setSB(true)`). On a tablet, the
+    // on-screen keyboard opening/closing, orientation nuances, and browser
+    // chrome show/hide can all fire a resize event — so that line was
+    // reopening the sidebar after essentially any input, overriding an
+    // explicit close. The sidebar is now ONLY opened by the hamburger button.
+    const fn = () => setMobile(window.innerWidth <= 768);
     window.addEventListener('resize', fn);
     return () => window.removeEventListener('resize', fn);
   }, []);
@@ -132,6 +135,7 @@ export default function App() {
     saveScroll(activeSystem);
     setSelected(entry);
     setView('detail');
+    setSB(false); // sidebar only ever opens via the hamburger button
   }, [activeSystem, saveScroll]);
 
   const backToList = useCallback(() => {
@@ -144,13 +148,13 @@ export default function App() {
   const navigate = useCallback((sys, v = 'list') => {
     setAS(sys); setView(v); setSearch('');
     setBulkMode(false); setSelected2(new Set());
-    if (window.innerWidth <= 768) setSB(false);
+    setSB(false); // sidebar only ever opens via the hamburger button
   }, []);
 
   const switchView = useCallback((v) => {
     setView(v);
     setBulkMode(false); setSelected2(new Set());
-    if (window.innerWidth <= 768) setSB(false);
+    setSB(false); // sidebar only ever opens via the hamburger button
   }, []);
 
 
@@ -318,6 +322,22 @@ export default function App() {
     });
   }, [entries, activeSystem, debSearch]);
 
+  // Left/right arrow navigation inside DetailView — walks the SAME ordered
+  // list currently shown behind it (same filter, same pinned-first sort),
+  // so arrows always match what you'd see if you went back and tapped the
+  // next card yourself.
+  const detailIndex = useMemo(() => {
+    if (!selected) return -1;
+    return sysEntries.findIndex(e => e.id === selected.id);
+  }, [sysEntries, selected]);
+
+  const navigateEntry = useCallback((dir) => {
+    if (detailIndex === -1) return;
+    const next = sysEntries[detailIndex + dir];
+    if (!next) return;
+    setSelected(next); // already in 'detail' view — no scroll/view change needed
+  }, [detailIndex, sysEntries]);
+
   const globalResults = useMemo(() => {
     if (!debGlobal.trim()) return [];
     const q = debGlobal.toLowerCase();
@@ -325,12 +345,6 @@ export default function App() {
       e.title?.toLowerCase().includes(q) || e.notes?.toLowerCase().includes(q)
     ).slice(0,50);
   }, [debGlobal, entries]);
-
-  const dueCount = useMemo(() => {
-    const now = new Date();
-    return Object.values(entries).flat()
-      .filter(e => e.next_review && new Date(e.next_review) <= now).length;
-  }, [entries]);
 
   const color = userSystems.find(s=>s.name===activeSystem)?.color
     || SYS_COLOR[activeSystem] || '#2563eb';
@@ -391,7 +405,7 @@ export default function App() {
           onExport={exportJSON} onImportClick={()=>importRef.current?.click()}
           onLogout={()=>supabase.auth.signOut()}
           onManageSystems={()=>setManage(true)}
-          userSystems={userSystems} user={session.user} dueCount={dueCount} />
+          userSystems={userSystems} user={session.user} />
       </div>
 
       {/* Main */}
@@ -443,7 +457,7 @@ export default function App() {
                   {isMobile?'🔁':'🔁 Review'}
                 </button>
               )}
-              <button onClick={()=>setView('add')} style={{background:color,color:'#fff',
+              <button onClick={()=>{ setView('add'); setSB(false); }} style={{background:color,color:'#fff',
                 border:'none',borderRadius:7,padding:isMobile?'8px 14px':'8px 16px',
                 fontSize:13,fontWeight:600,cursor:'pointer'}}>
                 {isMobile?'+':'+ Add Entry'}
@@ -510,7 +524,7 @@ export default function App() {
                     {globalResults.map(e=>(
                       <EntryCard key={e.id} entry={e}
                         color={userSystems.find(s=>s.name===e.system)?.color||SYS_COLOR[e.system]||'#2563eb'}
-                        showSystem onClick={()=>{ setAS(e.system); openEntry(e); if(isMobile)setSB(false); }} />
+                        showSystem onClick={()=>{ setAS(e.system); openEntry(e); setSB(false); }} />
                     ))}
                   </div>
                 </div>
@@ -530,7 +544,10 @@ export default function App() {
                 <DetailView entry={selected} onBack={backToList}
                   onDeleted={onDeleted} onUpdated={onUpdated} userId={session.user.id}
                   color={userSystems.find(s=>s.name===selected.system)?.color
-                    || SYS_COLOR[selected.system] || '#2563eb'} />
+                    || SYS_COLOR[selected.system] || '#2563eb'}
+                  onPrev={()=>navigateEntry(-1)} onNext={()=>navigateEntry(1)}
+                  hasPrev={detailIndex > 0}
+                  hasNext={detailIndex !== -1 && detailIndex < sysEntries.length - 1} />
               )}
 
               {view==='list' && (
@@ -577,7 +594,7 @@ export default function App() {
                         {search?'No entries match your search':`No entries yet for ${activeSystem}`}
                       </div>
                       {!search && (
-                        <button onClick={()=>setView('add')} style={{marginTop:16,
+                        <button onClick={()=>{ setView('add'); setSB(false); }} style={{marginTop:16,
                           background:color,color:'#fff',border:'none',borderRadius:8,
                           padding:'10px 22px',fontSize:13,fontWeight:600,cursor:'pointer'}}>
                           + Add First Entry

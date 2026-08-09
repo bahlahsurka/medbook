@@ -2,7 +2,7 @@ import { useTheme } from '../lib/theme';
 
 export default function Sidebar({ open, entries, activeSystem, setActiveSystem,
   view, setView, onExport, onImportClick, onLogout, onManageSystems,
-  userSystems, user, dueCount }) {
+  userSystems, user }) {
 
   const { t, isDark, toggle } = useTheme();
   const total = Object.values(entries).flat().length;
@@ -37,7 +37,7 @@ export default function Sidebar({ open, entries, activeSystem, setActiveSystem,
       <div style={{ padding:'8px 8px 2px', flexShrink:0 }}>
         {[
           { id:'search', icon:'🔍', label:'Global Search' },
-          { id:'review', icon:'🔁', label:'Review Queue', badge: dueCount > 0 ? dueCount : null },
+          { id:'review', icon:'🔁', label:'Review Queue' },
           { id:'cards',  icon:'🃏', label:'Flashcards' },
           { id:'stats',  icon:'📊', label:'Dashboard' },
         ].map(n => (

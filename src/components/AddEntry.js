@@ -33,7 +33,15 @@ const HighlightOverlay = React.forwardRef(function HighlightOverlay({ text, high
       position:'absolute', inset:0, pointerEvents:'none',
       whiteSpace:'pre-wrap', wordBreak:'normal', overflowWrap:'break-word',
       fontSize:14, lineHeight:'1.7', padding:'10px 12px',
-      fontFamily:'Inter,sans-serif', boxSizing:'border-box',
+      fontFamily:'Inter,sans-serif', fontWeight:400, letterSpacing:'normal',
+      boxSizing:'border-box',
+      // Android's text-autosizing ("font boosting") can inflate a <textarea>'s
+      // effective font size differently than a plain <div>, especially in a
+      // long block of text — the two elements drift apart line by line, only
+      // becoming visibly misaligned several paragraphs in. Disabling it on
+      // both this overlay AND the textarea below is what keeps them in sync
+      // on tablets. This must match the textarea's style exactly.
+      WebkitTextSizeAdjust:'100%', textSizeAdjust:'100%',
       border:'1px solid transparent',
       color:'transparent', overflow:'hidden'
     }}>
@@ -41,7 +49,8 @@ const HighlightOverlay = React.forwardRef(function HighlightOverlay({ text, high
         if (!p.hl) return <span key={i}>{p.t}</span>;
         const c = resolveHL(p.hl, isDark);
         // color stays transparent — the real (always-opaque) textarea text shows through.
-        return <mark key={i} style={{background:c.bg,color:'transparent',borderRadius:2,padding:'0 1px'}}>{p.t}</mark>;
+        return <mark key={i} style={{background:c.bg,color:'transparent',borderRadius:2,padding:'0 1px',
+          margin:0, fontWeight:'inherit', lineHeight:'inherit'}}>{p.t}</mark>;
       })}
     </div>
   );
@@ -285,6 +294,8 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
               style={{
                 ...inp, resize:'vertical', lineHeight:'1.7', marginTop:0,
                 position:'relative', zIndex:1,
+                fontWeight:400, letterSpacing:'normal',
+                WebkitTextSizeAdjust:'100%', textSizeAdjust:'100%',
                 background: hl.highlights.length > 0 ? 'transparent' : t.surface,
                 caretColor: t.text,
                 color: t.text,
