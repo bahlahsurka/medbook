@@ -19,7 +19,7 @@ import { open as openSqlite } from 'sqlite';
 import { writeFile, mkdtemp } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
-import { PassThrough } from 'stream';
+import { PassThrough, Readable } from 'stream';
 
 const TIME_BUDGET_MS = 250_000;
 const MEDIA_SAMPLE_LIMIT = 2000; // process at most this many media entries in
@@ -44,7 +44,9 @@ function makeBlobRangeSource(blobUrl, totalSize) {
       get(blobUrl, { access: 'private', headers: { Range: rangeHeader } })
         .then(r => {
           if (!r?.stream) { pass.destroy(new Error('No stream for range ' + rangeHeader)); return; }
-          r.stream.pipe(pass);
+          // r.stream is a Web Streams API ReadableStream (same kind fetch()
+          // returns), not a Node stream — it has no .pipe(). Convert first.
+          Readable.fromWeb(r.stream).pipe(pass);
         })
         .catch(err => pass.destroy(err));
       return pass;
