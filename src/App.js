@@ -83,9 +83,39 @@ export default function App() {
 
   // Auth
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session); setAL(false);
-    });
+    (async () => {
+      // OAuth return handling. Modern Supabase uses the PKCE flow, where
+      // Google sends the user back with "?code=..." that must be EXCHANGED
+      // for a session — an async step. Calling getSession() immediately can
+      // win that race and return null, leaving the user apparently signed
+      // out despite having just authenticated successfully. So we complete
+      // the exchange explicitly first.
+      try {
+        const url = new URL(window.location.href);
+        const code = url.searchParams.get('code');
+        const hasImplicitToken = window.location.hash.includes('access_token');
+
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) console.error('[auth] code exchange failed:', error.message);
+          // Clean the code out of the URL so a refresh can't retry a
+          // single-use code (which would error).
+          window.history.replaceState(null, '', window.location.pathname);
+        } else if (hasImplicitToken) {
+          // Older implicit flow: the client picks this up itself, but give
+          // it a moment to finish before we read the session.
+          await new Promise(r => setTimeout(r, 100));
+          window.history.replaceState(null, '', window.location.pathname);
+        }
+      } catch (e) {
+        console.error('[auth] OAuth return handling error:', e);
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      setSession(session);
+      setAL(false);
+    })();
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, s) => setSession(s));
     return () => subscription.unsubscribe();
   }, []);
@@ -541,7 +571,7 @@ export default function App() {
               )}
 
               {view==='detail' && selected && (
-                <DetailView entry={selected} onBack={backToList}
+                <DetailView key={selected.id} entry={selected} onBack={backToList}
                   onDeleted={onDeleted} onUpdated={onUpdated} userId={session.user.id}
                   color={userSystems.find(s=>s.name===selected.system)?.color
                     || SYS_COLOR[selected.system] || '#2563eb'}
