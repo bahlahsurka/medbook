@@ -189,25 +189,31 @@ export class MediaService {
       await this._provider(providerName).put(storageKey, buffer, contentType);
     }
 
-    // ATOMIC insert-or-skip, done as ONE database statement via upsert +
-    // ignoreDuplicates (Postgres: INSERT ... ON CONFLICT DO NOTHING).
+    // RACE HANDLING — history worth recording, because the fix changed twice:
     //
-    // The previous version did a separate "does this filename already exist"
-    // SELECT before inserting — a check-then-insert pattern with a real race
-    // window between the two calls. In production, a resumed job invocation
-    // (via selfInvoke) and a manually re-triggered one ended up processing
-    // overlapping media_cursor ranges, both landing in that window at once,
-    // and the second INSERT crashed the whole function with a duplicate-key
-    // violation — verified by reproducing the exact same error message
-    // against a real Postgres instance before writing this fix.
+    // v1 (original): a separate "does this exist" SELECT, then a plain
+    // INSERT. Real race window between the two — a resumed job invocation
+    // and a manual retry overlapped in production and crashed with a
+    // duplicate-key violation.
     //
-    // Upsert removes the window entirely: two concurrent attempts at the
-    // identical (deck, hash, filename) triplet are both handled by the
-    // database in one atomic step. Whichever lands first wins; the second is
-    // silently ignored rather than erroring — proven against real Postgres.
-    const { data: upserted, error } = await this.db
+    // v2: switched to upsert(..., { onConflict, ignoreDuplicates: true }),
+    // proven correct against raw SQL and against this file's own test
+    // harness — but the SAME crash still happened in production afterward.
+    // That's a real signal: I had verified the SQL pattern works, but never
+    // verified that supabase-js's upsert() options are being interpreted
+    // correctly by the actual PostgREST version in this project — a gap
+    // between "correct in theory" and "correct in this deployment."
+    //
+    // v3 (this version): plain INSERT, with the ONE thing about a duplicate
+    // that's actually guaranteed stable — Postgres's own unique_violation
+    // SQLSTATE code, 23505 — caught explicitly and treated as a successful
+    // dedup rather than a failure. This depends on nothing but standard
+    // Postgres error codes, not on any ORM-level option being parsed a
+    // particular way, which is a strictly smaller set of assumptions than
+    // v2 relied on.
+    const { data: inserted, error } = await this.db
       .from('imported_media')
-      .upsert({
+      .insert({
         user_id: userId,
         root_deck_id: rootDeckId,
         anki_filename: ankiFilename,
@@ -216,19 +222,28 @@ export class MediaService {
         storage_key: storageKey,
         content_type: contentType,
         size_bytes: buffer.length,
-      }, {
-        onConflict: 'root_deck_id,content_hash,anki_filename',
-        ignoreDuplicates: true,
       })
       .select('id')
-      .maybeSingle();
+      .single();
 
-    if (error) throw new Error(`Failed to record media: ${error.message}`);
+    if (error) {
+      if (error.code === '23505') {
+        // Someone else (a concurrent invocation) inserted the identical
+        // (deck, hash, filename) row first. That's a successful dedup, not
+        // a failure — look up the id that actually landed and continue.
+        const { data: winner } = await this.db
+          .from('imported_media')
+          .select('id')
+          .eq('root_deck_id', rootDeckId)
+          .eq('content_hash', contentHash)
+          .eq('anki_filename', ankiFilename)
+          .single();
+        return { deduped: true, storageKey, mediaId: winner?.id };
+      }
+      throw new Error(`Failed to record media: ${error.message}`);
+    }
 
-    // ignoreDuplicates means a genuine duplicate returns no row (correctly
-    // skipped, not an error) — fall back to the id we already know about.
-    const mediaId = upserted?.id || hit?.id;
-    return { deduped: !!hit, storageKey, mediaId };
+    return { deduped: !!hit, storageKey, mediaId: inserted.id };
   }
 
   /**
