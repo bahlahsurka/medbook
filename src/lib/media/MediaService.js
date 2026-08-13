@@ -171,7 +171,8 @@ export class MediaService {
   async storeImportedMedia({ userId, rootDeckId, ankiFilename, buffer, contentType }) {
     const contentHash = MediaService.hash(buffer);
 
-    // Already stored these exact bytes for this deck?
+    // Already stored these exact bytes for this deck? Determines whether we
+    // need to upload at all, and if not, which existing object to point at.
     const { data: existing } = await this.db
       .from('imported_media')
       .select('id, storage_key, storage_provider')
@@ -179,56 +180,55 @@ export class MediaService {
       .eq('content_hash', contentHash)
       .limit(1);
 
-    if (existing?.length) {
-      const hit = existing[0];
-      // Same bytes, but referenced under a DIFFERENT Anki filename — record the
-      // extra filename so lookups by that name resolve, still without a second
-      // upload. (The unique index is on (deck, hash, filename), so this is a
-      // legitimate new row pointing at the same stored object.)
-      if (!(await this._filenameExists(rootDeckId, ankiFilename))) {
-        await this.db.from('imported_media').insert({
-          user_id: userId,
-          root_deck_id: rootDeckId,
-          anki_filename: ankiFilename,
-          content_hash: contentHash,
-          storage_provider: hit.storage_provider,
-          storage_key: hit.storage_key,        // SAME object — no re-upload
-          content_type: contentType,
-          size_bytes: buffer.length,
-        });
-      }
-      return { deduped: true, storageKey: hit.storage_key, mediaId: hit.id };
+    const hit = existing?.[0];
+    const providerName = hit?.storage_provider || this.defaultProvider;
+    const storageKey = hit?.storage_key || `${userId}/${rootDeckId}/${contentHash}`;
+
+    // Only upload if these bytes genuinely aren't stored yet for this deck.
+    if (!hit) {
+      await this._provider(providerName).put(storageKey, buffer, contentType);
     }
 
-    // New bytes — upload once, keyed by hash so identical content is
-    // self-evidently one object.
-    const providerName = this.defaultProvider;
-    const storageKey = `${userId}/${rootDeckId}/${contentHash}`;
-    await this._provider(providerName).put(storageKey, buffer, contentType);
-
-    const { data: inserted, error } = await this.db.from('imported_media').insert({
-      user_id: userId,
-      root_deck_id: rootDeckId,
-      anki_filename: ankiFilename,
-      content_hash: contentHash,
-      storage_provider: providerName,
-      storage_key: storageKey,
-      content_type: contentType,
-      size_bytes: buffer.length,
-    }).select('id').single();
+    // ATOMIC insert-or-skip, done as ONE database statement via upsert +
+    // ignoreDuplicates (Postgres: INSERT ... ON CONFLICT DO NOTHING).
+    //
+    // The previous version did a separate "does this filename already exist"
+    // SELECT before inserting — a check-then-insert pattern with a real race
+    // window between the two calls. In production, a resumed job invocation
+    // (via selfInvoke) and a manually re-triggered one ended up processing
+    // overlapping media_cursor ranges, both landing in that window at once,
+    // and the second INSERT crashed the whole function with a duplicate-key
+    // violation — verified by reproducing the exact same error message
+    // against a real Postgres instance before writing this fix.
+    //
+    // Upsert removes the window entirely: two concurrent attempts at the
+    // identical (deck, hash, filename) triplet are both handled by the
+    // database in one atomic step. Whichever lands first wins; the second is
+    // silently ignored rather than erroring — proven against real Postgres.
+    const { data: upserted, error } = await this.db
+      .from('imported_media')
+      .upsert({
+        user_id: userId,
+        root_deck_id: rootDeckId,
+        anki_filename: ankiFilename,
+        content_hash: contentHash,
+        storage_provider: providerName,
+        storage_key: storageKey,
+        content_type: contentType,
+        size_bytes: buffer.length,
+      }, {
+        onConflict: 'root_deck_id,content_hash,anki_filename',
+        ignoreDuplicates: true,
+      })
+      .select('id')
+      .maybeSingle();
 
     if (error) throw new Error(`Failed to record media: ${error.message}`);
-    return { deduped: false, storageKey, mediaId: inserted.id };
-  }
 
-  async _filenameExists(rootDeckId, ankiFilename) {
-    const { data } = await this.db
-      .from('imported_media')
-      .select('id')
-      .eq('root_deck_id', rootDeckId)
-      .eq('anki_filename', ankiFilename)
-      .limit(1);
-    return !!data?.length;
+    // ignoreDuplicates means a genuine duplicate returns no row (correctly
+    // skipped, not an error) — fall back to the id we already know about.
+    const mediaId = upserted?.id || hit?.id;
+    return { deduped: !!hit, storageKey, mediaId };
   }
 
   /**
