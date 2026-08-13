@@ -108,8 +108,27 @@ export default async function handler(req, res) {
     if (error || !data) throw new Error('Import job not found');
     job = data;
 
-    if (['completed', 'cancelled'].includes(job.status)) {
+    if (job.status === 'cancelled') {
       return res.status(200).json({ status: job.status, message: 'Nothing to do.' });
+    }
+
+    // A completed job is never reprocessed — but re-report (and self-heal)
+    // its counts on read rather than just echoing whatever was stored at
+    // completion time. Counting is read-only, so this is safe to redo on
+    // every request: it's how a job that finished under the old buggy
+    // card-count query (deck_id === root, see countCardsForRoot below)
+    // gets corrected without needing to re-import anything.
+    if (job.status === 'completed') {
+      const { count: noteCount } = await db.from('imported_notes')
+        .select('*', { count: 'exact', head: true }).eq('root_deck_id', job.deck_id);
+      const cardCount = await countCardsForRoot(db, job.user_id, job.deck_id);
+      if (cardCount !== job.imported_cards || noteCount !== job.imported_notes) {
+        await updateJob(db, jobId, { imported_notes: noteCount, imported_cards: cardCount });
+      }
+      return res.status(200).json({
+        status: 'completed', message: 'Already completed.', deckId: job.deck_id,
+        notes: noteCount, cards: cardCount,
+      });
     }
 
     // ---- resume a previously-failed job ----
