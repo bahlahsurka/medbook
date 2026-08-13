@@ -227,10 +227,18 @@ export class MediaService {
       .single();
 
     if (error) {
-      if (error.code === '23505') {
-        // Someone else (a concurrent invocation) inserted the identical
-        // (deck, hash, filename) row first. That's a successful dedup, not
-        // a failure — look up the id that actually landed and continue.
+      // Two independent ways to detect "this was a duplicate, not a real
+      // failure" — the standardized code, AND a direct match on the literal
+      // error text. Belt and suspenders: if error.code isn't coming through
+      // exactly as PostgrestError's type definitions suggest it should in
+      // this specific environment, the message-content check still catches
+      // it, because this exact string has now been observed directly in
+      // production three times — it's no longer a guess.
+      const isDuplicate = error.code === '23505'
+        || /duplicate key value violates unique constraint/i.test(error.message || '')
+        || /imported_media_dedup_idx/i.test(error.message || '');
+
+      if (isDuplicate) {
         const { data: winner } = await this.db
           .from('imported_media')
           .select('id')
@@ -240,7 +248,11 @@ export class MediaService {
           .single();
         return { deduped: true, storageKey, mediaId: winner?.id };
       }
-      throw new Error(`Failed to record media: ${error.message}`);
+
+      // Genuinely unexpected — surface the RAW fields so if this happens
+      // again, the actual shape of the error is visible instead of just a
+      // wrapped message string that looks identical across different bugs.
+      throw new Error(`Failed to record media: ${error.message} [code=${error.code}, details=${error.details}, hint=${error.hint}]`);
     }
 
     return { deduped: !!hit, storageKey, mediaId: inserted.id };
