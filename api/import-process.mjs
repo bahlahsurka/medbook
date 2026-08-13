@@ -128,6 +128,13 @@ export default async function handler(req, res) {
       return res.status(200).json({
         status: 'completed', message: 'Already completed.', deckId: job.deck_id,
         notes: noteCount, cards: cardCount,
+        // Diagnostic: total_cards was recorded straight off the source
+        // SQLite (SELECT COUNT(*) FROM cards) at extraction time, before
+        // any insert/mapping logic ran. If this is nonzero while `cards`
+        // above is 0, the source genuinely had cards and they're being
+        // lost somewhere in the note_id/deck_id mapping during insert. If
+        // this is ALSO 0, the source extraction itself never saw them.
+        expectedCardsFromSource: job.total_cards,
       });
     }
 
