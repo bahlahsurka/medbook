@@ -112,6 +112,42 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: job.status, message: 'Nothing to do.' });
     }
 
+    // ---- resume a previously-failed job ----
+    //
+    // THE ACTUAL BUG (found by reading this file, not by touching
+    // MediaService.js again): the three phase gates below only recognize
+    // 'pending' / 'processing_metadata' / 'importing_cards' (phase 1),
+    // 'importing_media' (phase 2), and 'verifying' (phase 3). They never
+    // recognized 'failed'. So the very first time storeImportedMedia threw
+    // for real, this handler's catch block persisted status: 'failed' —
+    // and every trigger after that hit NONE of the three gates, fell
+    // through to `return res.status(200).json({ status: job.status })`,
+    // and did zero work. No archive re-read, no media re-processed, no new
+    // error. What looked like "the same crash three deploys in a row" was
+    // one crash, followed by three retriggers that were all silent no-ops
+    // — the "same error" being read back was the untouched error_message
+    // column from the original failure, and media_cursor was identical
+    // across attempts because nothing had actually run since. None of the
+    // v2/v3/v4 MediaService fixes ever got a chance to execute against
+    // this job.
+    //
+    // Fix: on a 'failed' job, work out which phase it actually got to from
+    // its own progress columns (deck_id / notes_cursor / media_cursor) and
+    // re-enter there, clearing the stale error so a fresh one is visible
+    // if it fails again.
+    if (job.status === 'failed') {
+      let resumeStatus;
+      if (!job.deck_id || (job.notes_cursor || 0) < (job.total_notes || 0)) {
+        resumeStatus = job.deck_id ? 'importing_cards' : 'pending';
+      } else if (job.import_media && (job.media_cursor || 0) < (job.total_media || 0)) {
+        resumeStatus = 'importing_media';
+      } else {
+        resumeStatus = 'verifying';
+      }
+      await updateJob(db, jobId, { status: resumeStatus, error_message: null, error_detail: null });
+      job.status = resumeStatus;
+    }
+
     const userId = job.user_id;
     const media = createMediaService({ db });
 
