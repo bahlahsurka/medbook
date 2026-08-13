@@ -27,7 +27,7 @@ import { writeFile, mkdtemp } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
 import { PassThrough, Readable } from 'stream';
-import { createMediaService } from '../lib/media/MediaService.js';
+import { createMediaService } from '../src/lib/media/MediaService.js';
 
 const TIME_BUDGET_MS = 240_000;   // leave headroom under the 300s ceiling
 const NOTE_BATCH = 500;
