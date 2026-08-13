@@ -354,9 +354,16 @@ export default async function handler(req, res) {
 
     /* ========== PHASE 3: verify, then delete the source ========== */
     if (job.status === 'verifying') {
-      const [{ count: noteCount }, { count: cardCount }] = await Promise.all([
+      // Cards don't carry a root_deck_id of their own — each card's deck_id
+      // is its OWN (often nested) Anki sub-deck, not the root. Counting
+      // "cards for this import" by .eq('deck_id', job.deck_id) therefore
+      // only ever catches cards someone put directly on the root deck node
+      // — for any hierarchical deck (i.e. almost all real decks) that's
+      // near-zero, even though every card imported fine. Go through notes
+      // instead, which DO carry root_deck_id, and count cards per note.
+      const [{ count: noteCount }, cardCount] = await Promise.all([
         db.from('imported_notes').select('*', { count: 'exact', head: true }).eq('root_deck_id', job.deck_id),
-        db.from('imported_cards').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('deck_id', job.deck_id),
+        countCardsForRoot(db, userId, job.deck_id),
       ]);
 
       // Integrity check BEFORE destroying the source archive (spec §56).
@@ -410,6 +417,29 @@ async function selfInvoke(req, jobId) {
   if (!host) return;
   // Fire-and-forget: we don't await the work, only the handoff.
   fetch(`${proto}://${host}/api/import-process?jobId=${jobId}`, { method: 'POST' }).catch(() => {});
+}
+
+/**
+ * Count cards belonging to ANY deck under this import, by going through
+ * notes (which carry root_deck_id) rather than trusting card.deck_id,
+ * which is scoped to whichever specific Anki sub-deck the card is in.
+ * Chunked because .in() has a practical size limit and a deck can have
+ * several thousand notes.
+ */
+async function countCardsForRoot(db, userId, rootDeckId) {
+  const { data: noteRows } = await db.from('imported_notes').select('id').eq('root_deck_id', rootDeckId);
+  const noteIds = (noteRows || []).map(n => n.id);
+  if (!noteIds.length) return 0;
+
+  let total = 0;
+  for (let i = 0; i < noteIds.length; i += 1000) {
+    const { count } = await db.from('imported_cards')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .in('note_id', noteIds.slice(i, i + 1000));
+    total += count || 0;
+  }
+  return total;
 }
 
 async function refreshDeckCounts(db, userId, rootDeckId) {
