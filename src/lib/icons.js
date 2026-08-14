@@ -128,3 +128,10 @@ export function IconPulse({ size=16, style, className }) {
     <polyline points="2 12 7 12 9 6 12 18 15 9 17 12 22 12" />
   </Svg>;
 }
+
+export function IconPlus({ size=16, style, className }) {
+  return <Svg size={size} style={style} className={className}>
+    <line x1="12" y1="5" x2="12" y2="19" />
+    <line x1="5" y1="12" x2="19" y2="12" />
+  </Svg>;
+}
