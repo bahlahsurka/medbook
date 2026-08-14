@@ -720,13 +720,12 @@ export default function App() {
                     if (bulkMode && e.target === e.currentTarget) { setBulkMode(false); setSelected2(new Set()); }
                   }}>
 
-                  {/* Filters — hidden during bulk select: filtering mid-
-                      selection is confusing (could hide already-selected
-                      items), and hiding it hands back the blank space the
-                      tap-to-exit gesture relies on. */}
-                  {!bulkMode && (entries[activeSystem]||[]).length>0 && (
+                  {/* Filters — stays mounted at bulk-mode toggle, just
+                      disabled in place (see FilterChips) so nothing shifts. */}
+                  {(entries[activeSystem]||[]).length>0 && (
                     <FilterChips t={t} difficultyFilter={difficultyFilter} setDifficultyFilter={setDifficultyFilter}
-                      pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} />
+                      pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly}
+                      disabled={bulkMode} onExitBulk={()=>{ setBulkMode(false); setSelected2(new Set()); }} />
                   )}
 
                   {/* Bulk toolbar */}
@@ -960,9 +959,20 @@ function EmptyHint({ t, Icon, text }) {
 // Difficulty + pinned filters (batch 5), shared by the per-system list and
 // Global Search. Purely a client-side narrowing of whatever list the caller
 // already computed — no data fetching, no navigation changes.
-function FilterChips({ t, difficultyFilter, setDifficultyFilter, pinnedOnly, setPinnedOnly }) {
+// `disabled` (bulk mode) greys the chips out and makes them inert in
+// place — deliberately NOT unmounting this row when bulk mode toggles.
+// An earlier version hid it entirely, which shifted the toolbar and list
+// up by this row's height at the exact moment bulk mode activates —
+// disorienting on its own, and it could shift a card into the spot a
+// blank-space exit tap was aimed at, or vice versa. Same layout at every
+// moment, only interactivity changes. Its own background also exits bulk
+// mode on tap, same as the toolbar row below it.
+function FilterChips({ t, difficultyFilter, setDifficultyFilter, pinnedOnly, setPinnedOnly, disabled, onExitBulk }) {
   return (
-    <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',marginBottom:10}}>
+    <div onClick={e => { if (disabled && e.target === e.currentTarget) onExitBulk(); }}
+      style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',marginBottom:10,
+        opacity:disabled?0.45:1, pointerEvents:disabled?'none':'auto',
+        transition:`opacity ${MOTION.fast} ${MOTION.ease}`}}>
       {['All', ...DIFFICULTY].map(d => {
         const active = difficultyFilter===d;
         const c = d==='All' ? t.text3 : (DIFF_COLOR[d] || t.text3);
