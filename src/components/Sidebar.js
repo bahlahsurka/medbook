@@ -1,6 +1,9 @@
+import { useMemo, useState } from 'react';
 import { useTheme, SPACE, RADIUS, FONT, MOTION } from '../lib/theme';
+import { computeSystemStats } from '../lib/systemStats';
+import { timeAgo } from '../lib/timeAgo';
 import { IconPulse, IconSearch, IconRepeat, IconCards, IconChart, IconSun, IconMoon,
-  IconDownload, IconUpload, IconSettings, IconLogout } from '../lib/icons';
+  IconDownload, IconUpload, IconSettings, IconLogout, IconChevronDown } from '../lib/icons';
 
 const NAV_ICONS = { search: IconSearch, review: IconRepeat, cards: IconCards, stats: IconChart };
 
@@ -10,6 +13,27 @@ export default function Sidebar({ open, width=240, entries, activeSystem, setAct
 
   const { t, isDark, toggle } = useTheme();
   const total = Object.values(entries).flat().length;
+
+  // Same rollup Dashboard uses for "recently studied" / due counts — read
+  // straight off entries already in props, nothing new fetched. Systems
+  // with entries keep the user's own Manage Systems order (their reordering
+  // is a deliberate preference, not something to silently override);
+  // "Recently Studied" is a separate callout above it, not a re-sort of it.
+  const systemStats = useMemo(() => computeSystemStats(entries, userSystems, t.accent),
+    [entries, userSystems, t.accent]);
+  const withEntries = systemStats.filter(s => s.count > 0);
+  const emptySystems = systemStats.filter(s => s.count === 0);
+  const recentlyStudied = withEntries
+    .filter(s => s.lastStudied)
+    .sort((a, b) => b.lastStudied - a.lastStudied)
+    .slice(0, 3);
+
+  // Only worth collapsing when there's a meaningful pile of untouched
+  // systems to hide AND the list isn't the user's entire (empty) starting
+  // point — a brand-new account with nothing added anywhere shouldn't open
+  // to a sidebar that's mostly a "+27 more" button.
+  const [showEmpty, setShowEmpty] = useState(false);
+  const collapseEmpty = withEntries.length > 0 && emptySystems.length > 2;
 
   // The outer box is the thing that actually collapses (width, a real layout
   // property — necessary so the flex row it sits in reclaims the space, not
@@ -115,36 +139,51 @@ export default function Sidebar({ open, width=240, entries, activeSystem, setAct
         })}
       </div>
 
-      <div style={{ padding:`${SPACE.sm}px ${SPACE.lg}px 4px`, fontSize:FONT.size.micro, letterSpacing:.8,
-        color:t.text4, fontWeight:FONT.weight.semibold, textTransform:'uppercase', flexShrink:0 }}>
-        Systems
-      </div>
-
       {/* Systems */}
       <div style={{ flex:1, overflowY:'scroll', WebkitOverflowScrolling:'touch', minHeight:0 }}>
-        {(userSystems || []).map(sys => {
-          const cnt = (entries[sys.name] || []).length;
-          const isActive = activeSystem===sys.name && ['list','add','detail'].includes(view);
-          const c = sys.color || t.accent;
-          return (
-            <div key={sys.name} onClick={() => setActiveSystem(sys.name)}
-              className="mb-navitem"
-              onMouseEnter={e => { if (!isActive) e.currentTarget.style.background=t.surface2; }}
-              onMouseLeave={e => { if (!isActive) e.currentTarget.style.background='transparent'; }}
-              style={{ display:'flex', alignItems:'center', padding:`7px ${SPACE.lg}px`,
-                cursor:'pointer', borderLeft:`3px solid ${isActive?c:'transparent'}`,
-                background:isActive?`${c}1f`:'transparent',
-                transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}` }}>
-              <span style={{ fontSize:FONT.size.sm+0.5, flex:1, color:isActive?c:t.text2,
-                fontWeight:isActive?FONT.weight.semibold:FONT.weight.regular }}>{sys.name}</span>
-              {cnt > 0 && (
-                <span style={{ fontSize:FONT.size.micro, background:isActive?`${c}2e`:t.surface3,
-                  color:isActive?c:t.text4, borderRadius:RADIUS.pill,
-                  padding:'1px 7px', fontWeight:FONT.weight.semibold }}>{cnt}</span>
-              )}
+
+        {/* Recently Studied — a callout, not a re-sort of the list below.
+            Only appears once something has actually been rated at least
+            once (SystemReview/ReviewQueue populate last_reviewed); a fresh
+            account sees nothing here rather than an empty placeholder. */}
+        {recentlyStudied.length > 0 && (
+          <>
+            <SectionLabel t={t}>Recently Studied</SectionLabel>
+            {recentlyStudied.map(sys => (
+              <SystemRow key={`recent-${sys.name}`} sys={sys} t={t}
+                isActive={activeSystem===sys.name && ['list','add','detail'].includes(view)}
+                onClick={() => setActiveSystem(sys.name)}
+                caption={`studied ${timeAgo(sys.lastStudied)}`} />
+            ))}
+          </>
+        )}
+
+        <SectionLabel t={t}>Systems</SectionLabel>
+        {withEntries.map(sys => (
+          <SystemRow key={sys.name} sys={sys} t={t}
+            isActive={activeSystem===sys.name && ['list','add','detail'].includes(view)}
+            onClick={() => setActiveSystem(sys.name)}
+            showProgress />
+        ))}
+
+        {emptySystems.length > 0 && (
+          collapseEmpty && !showEmpty ? (
+            <div className="mb-navitem" onClick={() => setShowEmpty(true)}
+              style={{ display:'flex', alignItems:'center', gap:6, padding:`7px ${SPACE.lg}px`,
+                cursor:'pointer', color:t.text4, fontSize:FONT.size.xs, fontWeight:FONT.weight.medium }}>
+              <IconChevronDown size={12} />
+              {emptySystems.length} more system{emptySystems.length===1?'':'s'} with no entries yet
             </div>
-          );
-        })}
+          ) : (
+            <div style={{ animation: collapseEmpty ? `medbook-fade-in ${MOTION.normal} ${MOTION.ease}` : 'none' }}>
+              {emptySystems.map(sys => (
+                <SystemRow key={sys.name} sys={sys} t={t}
+                  isActive={activeSystem===sys.name && ['list','add','detail'].includes(view)}
+                  onClick={() => setActiveSystem(sys.name)} />
+              ))}
+            </div>
+          )
+        )}
       </div>
 
       {/* Bottom actions */}
@@ -170,5 +209,55 @@ function Btn({ onClick, children, icon, danger, full, t }) {
       display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
       {icon}{children}
     </button>
+  );
+}
+
+function SectionLabel({ t, children }) {
+  return (
+    <div style={{ padding:`${SPACE.sm}px ${SPACE.lg}px 4px`, fontSize:FONT.size.micro, letterSpacing:.8,
+      color:t.text4, fontWeight:FONT.weight.semibold, textTransform:'uppercase', flexShrink:0 }}>
+      {children}
+    </div>
+  );
+}
+
+// One system row, used for the full list, the "Recently Studied" callout,
+// and the collapsed-empty group — same shape everywhere so a system looks
+// like the same thing wherever it's showing up.
+function SystemRow({ sys, t, isActive, onClick, caption, showProgress }) {
+  const c = sys.color || t.accent;
+  const pct = sys.count > 0 ? Math.round((sys.reviewedCount / sys.count) * 100) : 0;
+  return (
+    <div onClick={onClick} className="mb-navitem"
+      style={{ padding:`6px ${SPACE.lg}px`, cursor:'pointer',
+        borderLeft:`3px solid ${isActive?c:'transparent'}`,
+        background:isActive?`${c}1f`:'transparent',
+        transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}` }}>
+      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+        <span style={{ fontSize:FONT.size.sm+0.5, flex:1, color:isActive?c:t.text2,
+          fontWeight:isActive?FONT.weight.semibold:FONT.weight.regular,
+          overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sys.name}</span>
+        {sys.dueCount > 0 && (
+          <span style={{ fontSize:FONT.size.micro, fontWeight:FONT.weight.semibold, color:t.accent,
+            background:t.navActiveBg, borderRadius:RADIUS.pill, padding:'1px 6px', flexShrink:0 }}>
+            {sys.dueCount} due
+          </span>
+        )}
+        {sys.count > 0 && (
+          <span style={{ fontSize:FONT.size.micro, background:isActive?`${c}2e`:t.surface3,
+            color:isActive?c:t.text4, borderRadius:RADIUS.pill,
+            padding:'1px 7px', fontWeight:FONT.weight.semibold, flexShrink:0 }}>{sys.count}</span>
+        )}
+      </div>
+      {caption && (
+        <div style={{ fontSize:FONT.size.micro, color:t.text4, marginTop:1 }}>{caption}</div>
+      )}
+      {showProgress && sys.count > 0 && (
+        <div style={{ height:3, background:t.surface3, borderRadius:RADIUS.sm, marginTop:5, overflow:'hidden' }}>
+          <div style={{ height:'100%', borderRadius:RADIUS.sm, background:c,
+            width:`${Math.max(pct>0?4:0, pct)}%`, transition:`width ${MOTION.slow} ${MOTION.ease}` }} />
+        </div>
+      )}
+    </div>
   );
 }

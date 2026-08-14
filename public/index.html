@@ -70,6 +70,17 @@
         to   { opacity: 1; }
       }
 
+      /* Entry card hover/press (batch 4). Lives here rather than a <style>
+         tag in EntryCard.js itself — with 250+ cards on screen at once that
+         would mean 250+ identical <style> nodes instead of one shared rule.
+         A lift + shadow rather than a background swap: reads the same way
+         regardless of theme without needing exact surface-color values in
+         static CSS, and composes fine with SelectableCard's own independent
+         press-scale on its wrapper (different element, own transform box). */
+      .mb-entrycard:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+      body.medbook-dark .mb-entrycard:hover { box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+      .mb-entrycard:active { transform: scale(0.99); }
+
       /* Animation philosophy: subtle, functional micro-interactions only,
          120–250ms, transform/opacity. Anyone with reduced-motion set gets
          them collapsed to instant, everywhere, with no per-component work. */
