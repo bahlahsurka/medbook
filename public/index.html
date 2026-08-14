@@ -81,6 +81,17 @@
       body.medbook-dark .mb-entrycard:hover { box-shadow: 0 4px 14px rgba(0,0,0,.4); }
       .mb-entrycard:active { transform: scale(0.99); }
 
+      /* Filter chips (batch 5) — difficulty/pinned filters above the
+         entries list and Global Search. */
+      .mb-chip { transition: background 120ms ease, border-color 120ms ease, transform 120ms ease; }
+      .mb-chip:hover { filter: brightness(0.97); }
+      body.medbook-dark .mb-chip:hover { filter: brightness(1.15); }
+      .mb-chip:active { transform: scale(0.94); }
+
+      /* Entry-list loading skeleton (batch 5). */
+      @keyframes medbook-skeleton-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 0.9; } }
+      .mb-skeleton { animation: medbook-skeleton-pulse 1.4s ease-in-out infinite; }
+
       /* Animation philosophy: subtle, functional micro-interactions only,
          120–250ms, transform/opacity. Anyone with reduced-motion set gets
          them collapsed to instant, everywhere, with no per-component work. */
