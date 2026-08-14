@@ -4,7 +4,8 @@ import { loadSystems, saveSystems, DEFAULT_SYSTEMS } from './lib/systems';
 import { SYS_COLOR } from './lib/constants';
 import { useScrollRestore } from './lib/useScrollRestore';
 import { useDebouncedValue } from './lib/useDebouncedValue';
-import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation } from './lib/theme';
+import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation, BREAKPOINT } from './lib/theme';
+import { IconMenu, IconX, IconChevronLeft } from './lib/icons';
 import Auth from './components/Auth';
 import Sidebar from './components/Sidebar';
 import EntryCard from './components/EntryCard';
@@ -48,8 +49,17 @@ export default function App() {
   const [activeSystem, setAS]         = useState('Internal Medicine');
   const [view, setView]               = useState('list');
   const [selected, setSelected]       = useState(null);
-  const [sidebarOpen, setSB]          = useState(false);
-  const [isMobile, setMobile]         = useState(window.innerWidth <= 768);
+  // Pre-existing bug found while wiring up the animated collapse below:
+  // this always defaulted to false with nothing ever setting it true on
+  // mount, so on tablet/desktop the sidebar was invisible (display:none)
+  // until the hamburger was clicked once. Default it open on anything
+  // wider than the mobile breakpoint, where it's the normal in-flow layout
+  // rather than an overlay drawer.
+  const [sidebarOpen, setSB]          = useState(() => window.innerWidth > BREAKPOINT.mobile);
+  const [isMobile, setMobile]         = useState(window.innerWidth <= BREAKPOINT.mobile);
+  // Tablet: sidebar stays inline (not an overlay drawer) but narrower, so it
+  // no longer gets treated identically to a wide desktop monitor.
+  const [isTablet, setTablet]         = useState(window.innerWidth > BREAKPOINT.mobile && window.innerWidth <= BREAKPOINT.tablet);
   const [search, setSearch]           = useState('');
   const [globalSearch, setGS]         = useState('');
   const [toast, setToast]             = useState(null);
@@ -76,7 +86,10 @@ export default function App() {
     // chrome show/hide can all fire a resize event — so that line was
     // reopening the sidebar after essentially any input, overriding an
     // explicit close. The sidebar is now ONLY opened by the hamburger button.
-    const fn = () => setMobile(window.innerWidth <= 768);
+    const fn = () => {
+      setMobile(window.innerWidth <= BREAKPOINT.mobile);
+      setTablet(window.innerWidth > BREAKPOINT.mobile && window.innerWidth <= BREAKPOINT.tablet);
+    };
     window.addEventListener('resize', fn);
     return () => window.removeEventListener('resize', fn);
   }, []);
@@ -155,7 +168,11 @@ export default function App() {
   }, [session, systemsLoaded]);
 
   const showToast = useCallback((msg, type = 'ok') => {
-    setToast({ msg, type });
+    // `id` gives each toast a distinct key so the enter animation replays
+    // even if one fires again before the previous one's timeout clears —
+    // without it, React would just update the same DOM node in place and
+    // the mount-triggered animation wouldn't re-fire.
+    setToast({ msg, type, id: Date.now() });
     clearTimeout(toastRef.current);
     toastRef.current = setTimeout(() => setToast(null), 3500);
   }, []);
@@ -400,11 +417,11 @@ export default function App() {
 
       {/* Toast */}
       {toast && (
-        <div onClick={()=>setToast(null)} style={{position:'fixed',bottom:SPACE.xl,right:SPACE.xl,zIndex:Z.toast,
+        <div key={toast.id} onClick={()=>setToast(null)} style={{position:'fixed',bottom:SPACE.xl,right:SPACE.xl,zIndex:Z.toast,
           background:toast.type==='err'?t.danger:toast.type==='warn'?t.warn:t.ok,
           color:'#fff',borderRadius:RADIUS.md,padding:'11px 18px',fontSize:FONT.size.base,fontWeight:FONT.weight.semibold,
           boxShadow:elevation(t,'lg'),cursor:'pointer',
-          transition:`transform ${MOTION.normal} ${MOTION.ease}, opacity ${MOTION.normal} ${MOTION.ease}`,
+          animation:`medbook-fade-in ${MOTION.normal} ${MOTION.ease}`,
           maxWidth:'calc(100vw - 40px)'}}>
           {toast.msg}
         </div>
@@ -417,20 +434,25 @@ export default function App() {
 
       {isMobile && sidebarOpen && (
         <div onClick={()=>setSB(false)} style={{position:'fixed',inset:0,background:t.overlay,zIndex:Z.mobileScrim,
-          transition:`opacity ${MOTION.normal} ${MOTION.ease}`}} />
+          animation:`medbook-scrim-in ${MOTION.normal} ${MOTION.ease}`}} />
       )}
 
       <input ref={importRef} type="file" accept=".json" style={{display:'none'}} onChange={importJSON} />
 
-      {/* Sidebar */}
+      {/* Sidebar — mobile is an off-canvas drawer that slides via `left`
+          (Sidebar itself always full-width, only its position moves); on
+          tablet/desktop the wrapper stays in normal flow and Sidebar's own
+          `open` prop drives a smooth width collapse instead of the old
+          instant display:none swap, so opening/closing animates everywhere. */}
       <div style={{
         position:isMobile?'fixed':'relative',
         left:isMobile?(sidebarOpen?0:-260):'auto',
-        top:0,bottom:0,zIndex:Z.sidebar,width:240,flexShrink:0,
+        top:0,bottom:0,zIndex:Z.sidebar,flexShrink:0,
+        width:isMobile?240:'auto',
         transition:isMobile?`left ${MOTION.normal} ${MOTION.ease}`:'none',
-        display:(!isMobile&&!sidebarOpen)?'none':'block'
       }}>
-        <Sidebar open={true} entries={entries} activeSystem={activeSystem}
+        <Sidebar open={isMobile?true:sidebarOpen} width={isTablet?220:240}
+          entries={entries} activeSystem={activeSystem}
           setActiveSystem={sys=>navigate(sys,'list')}
           view={view} setView={switchView}
           onExport={exportJSON} onImportClick={()=>importRef.current?.click()}
@@ -446,9 +468,27 @@ export default function App() {
         <div style={{display:'flex',alignItems:'center',gap:SPACE.sm+2,padding:`${SPACE.md}px ${SPACE.lg}px`,
           borderBottom:`1px solid ${t.border}`,background:t.surface,flexShrink:0,
           boxShadow:elevation(t,'sm')}}>
-          <button onClick={()=>setSB(p=>!p)} style={{background:'none',border:'none',
-            color:t.text3,cursor:'pointer',fontSize:18,padding:'2px 4px',flexShrink:0,
-            borderRadius:RADIUS.sm,transition:`color ${MOTION.fast} ${MOTION.ease}`}}>☰</button>
+          <style>{`
+            .mb-headerbtn { transition: background ${MOTION.fast} ${MOTION.ease}, transform ${MOTION.fast} ${MOTION.ease}; }
+            .mb-headerbtn:hover { background: ${t.surface2}; }
+            .mb-headerbtn:active { transform: scale(0.92); }
+            .mb-actionbtn-ghost:active { transform: scale(0.96); }
+          `}</style>
+          <button className="mb-headerbtn" onClick={()=>setSB(p=>!p)} title={sidebarOpen?'Close sidebar':'Open sidebar'}
+            style={{background:'none',border:'none',
+            color:t.text3,cursor:'pointer',padding:6,flexShrink:0,position:'relative',width:28,height:28,
+            borderRadius:RADIUS.sm}}>
+            {/* On mobile the button sits under the open drawer itself (it's
+                covered, same as the scrim being the only way to close it —
+                pre-existing), but on tablet/desktop the toggle now genuinely
+                collapses the sidebar too, so the icon reflects state there. */}
+            <IconMenu size={17} style={{position:'absolute',top:6,left:6,
+              transition:`opacity ${MOTION.fast} ${MOTION.ease}, transform ${MOTION.fast} ${MOTION.ease}`,
+              opacity:sidebarOpen?0:1, transform:sidebarOpen?'rotate(90deg)':'rotate(0deg)'}} />
+            <IconX size={17} style={{position:'absolute',top:6,left:6,
+              transition:`opacity ${MOTION.fast} ${MOTION.ease}, transform ${MOTION.fast} ${MOTION.ease}`,
+              opacity:sidebarOpen?1:0, transform:sidebarOpen?'rotate(0deg)':'rotate(-90deg)'}} />
+          </button>
 
           {view==='stats'  && <span style={{fontWeight:FONT.weight.bold,color:t.text,fontSize:FONT.size.md}}>Dashboard</span>}
           {view==='search' && <span style={{fontWeight:FONT.weight.bold,color:t.text,fontSize:FONT.size.md}}>Global Search</span>}
@@ -498,10 +538,12 @@ export default function App() {
           )}
 
           {(view==='add'||view==='detail') && (
-            <button onClick={()=>{ if(view==='detail') backToList(); else setView('list'); }}
+            <button className="mb-actionbtn-ghost" onClick={()=>{ if(view==='detail') backToList(); else setView('list'); }}
               style={{background:t.surface3,color:t.text3,border:`1px solid ${t.border}`,
-                borderRadius:7,padding:'7px 14px',fontSize:13,cursor:'pointer'}}>
-              ← Back
+                borderRadius:RADIUS.sm+1,padding:'7px 14px',fontSize:FONT.size.base,cursor:'pointer',
+                display:'flex',alignItems:'center',gap:5,
+                transition:`background ${MOTION.fast} ${MOTION.ease}, transform ${MOTION.fast} ${MOTION.ease}`}}>
+              <IconChevronLeft size={14} /> Back
             </button>
           )}
         </div>
@@ -547,7 +589,13 @@ export default function App() {
           )}
 
           {!fetching && !fetchErr && (
-            <>
+            // Keyed on `view` only (not the selected entry) so switching
+            // between nav destinations gets a soft transition, while
+            // browsing entries inside DetailView via prev/next — same view,
+            // different `selected` — does not retrigger it. Purely a
+            // presentational wrapper around each destination's own render
+            // output; nothing inside any of them changes.
+            <div key={view} style={{animation:`medbook-fade-in ${MOTION.normal} ${MOTION.ease}`}}>
               {view==='search' && (
                 <div style={{maxWidth:680,margin:'0 auto'}}>
                   {!globalSearch && <div style={{color:t.text4,textAlign:'center',paddingTop:40,fontSize:14}}>Type to search all systems</div>}
@@ -665,7 +713,7 @@ export default function App() {
                   )}
                 </div>
               )}
-            </>
+            </div>
           )}
         </div>
       </div>

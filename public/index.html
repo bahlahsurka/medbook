@@ -57,6 +57,19 @@
       }
       body.medbook-dark :focus-visible { outline-color: #3b82f6; }
 
+      /* Shared enter-transition keyframes for shell chrome (mobile nav
+         drawer scrim, toast, view/page transitions). CSS animations run
+         automatically on mount with no JS orchestration needed — kept here,
+         once, rather than duplicated per component. */
+      @keyframes medbook-fade-in {
+        from { opacity: 0; transform: translateY(4px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes medbook-scrim-in {
+        from { opacity: 0; }
+        to   { opacity: 1; }
+      }
+
       /* Animation philosophy: subtle, functional micro-interactions only,
          120–250ms, transform/opacity. Anyone with reduced-motion set gets
          them collapsed to instant, everywhere, with no per-component work. */
