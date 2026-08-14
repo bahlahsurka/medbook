@@ -201,3 +201,46 @@ export function IconSparkle({ size=14, style, className }) {
     <path d="M12 3 L13.6 9.4 L20 11 L13.6 12.6 L12 19 L10.4 12.6 L4 11 L10.4 9.4 Z" />
   </Svg>;
 }
+
+// --- Added for Flashcards + Review Queue (batch 7) --------------------------
+
+// Filled triangle (not just an outline) — reads clearly as "play/study" at
+// small sizes, replacing the ▶ character used ad hoc before this batch.
+export function IconPlay({ size=14, style, className }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" style={style} className={className}
+      fill="currentColor" stroke="none">
+      <path d="M7 4.5v15a1 1 0 0 0 1.53.85l12-7.5a1 1 0 0 0 0-1.7l-12-7.5A1 1 0 0 0 7 4.5z" />
+    </svg>
+  );
+}
+
+export function IconPause({ size=14, style, className }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" style={style} className={className}
+      fill="currentColor" stroke="none">
+      <rect x="6" y="4" width="4" height="16" rx="1" />
+      <rect x="14" y="4" width="4" height="16" rx="1" />
+    </svg>
+  );
+}
+
+// Stacked cards — used for the flashcard folder/deck rows.
+export function IconLayers({ size=14, style, className }) {
+  return <Svg size={size} style={style} className={className}>
+    <polygon points="12 2 22 8.5 12 15 2 8.5 12 2" />
+    <polyline points="2 15.5 12 22 22 15.5" />
+    <polyline points="2 12 12 18.5 22 12" />
+  </Svg>;
+}
+
+// Lightning bolt — a compact "this needs attention" marker for the highest-
+// due systems in the Review Queue's priority breakdown.
+export function IconZap({ size=14, style, className }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" style={style} className={className}
+      fill="currentColor" stroke="none">
+      <path d="M13 2 3 14h7l-1 8 11-14h-7l0-6z" />
+    </svg>
+  );
+}

@@ -687,7 +687,7 @@ export default function App() {
                 </div>
               )}
 
-              {view==='review' && <ReviewQueue allEntries={entries} onReviewed={onReviewed} />}
+              {view==='review' && <ReviewQueue allEntries={entries} onReviewed={onReviewed} userSystems={userSystems} />}
               {view==='cards'  && <FlashCards userId={session.user.id} userSystems={userSystems} />}
               {view==='stats'  && (
                 <Dashboard entries={entries} userSystems={userSystems}
