@@ -11,10 +11,30 @@ export default function Sidebar({ open, width=240, entries, activeSystem, setAct
   const { t, isDark, toggle } = useTheme();
   const total = Object.values(entries).flat().length;
 
+  // The outer box is the thing that actually collapses (width, a real layout
+  // property — necessary so the flex row it sits in reclaims the space, not
+  // just a cosmetic slide). Everything visible lives in an INNER box that
+  // stays a fixed `width` the whole time and only fades in/out — without
+  // that split, the content itself was being squeezed narrower as the box
+  // shrank (rather than cleanly clipped), and on reopen there was nothing to
+  // see until the box was already most of the way open, so the reveal read
+  // as an abrupt pop instead of a slide. Closing looked fine by contrast
+  // because shrinking *away* from full-width content is naturally legible;
+  // growing *from* a clipped sliver isn't, without the fade.
+  const collapseMs = 260;
   return (
-    <div style={{ width:open?width:0, minWidth:open?width:0, background:t.surface,
-      borderRight:`1px solid ${t.border}`, display:'flex', flexDirection:'column',
-      overflow:'hidden', transition:`width ${MOTION.normal} ${MOTION.ease}`, flexShrink:0,
+    // No min-width here — THAT was the actual root cause of "no animation
+    // while opening" (found via a vanilla-CSS repro, not just tuning): with
+    // min-width set to the same target as width, min-width jumps instantly
+    // (it has no transition of its own) and clamps width from below the
+    // moment it's set, so on open it pins the box at full width from frame
+    // one and the width transition never has room to visibly interpolate.
+    // Closing was unaffected because a shrinking min-width never fights a
+    // shrinking width. overflow:hidden already makes flexbox's own implicit
+    // min-width:auto resolve to 0 per spec, so nothing here needs it anyway.
+    <div style={{ width:open?width:0, background:t.surface,
+      borderRight:`1px solid ${open?t.border:'transparent'}`, overflow:'hidden', flexShrink:0,
+      transition:`width ${collapseMs}ms ${MOTION.ease}, border-color ${collapseMs}ms ${MOTION.ease}`,
       height:'100%', maxHeight:'100vh' }}>
 
       {/* Interactive states that inline styles can't express (:hover, :active)
@@ -31,6 +51,13 @@ export default function Sidebar({ open, width=240, entries, activeSystem, setAct
         .mb-actionbtn:active { transform: scale(0.97); }
         .mb-theme-icon { transition: transform ${MOTION.normal} ${MOTION.ease}, opacity ${MOTION.normal} ${MOTION.ease}; }
       `}</style>
+
+      <div style={{ width, height:'100%', display:'flex', flexDirection:'column',
+        opacity:open?1:0,
+        // Fading out starts immediately (matches the close feel that already
+        // worked); fading in waits ~90ms so it doesn't start revealing
+        // squeezed-looking content before the box has grown enough to matter.
+        transition:`opacity ${open?collapseMs-40:120}ms ${MOTION.ease} ${open?'90ms':'0ms'}` }}>
 
       {/* Logo */}
       <div style={{ padding:`${SPACE.lg}px ${SPACE.lg}px ${SPACE.md}px`, borderBottom:`1px solid ${t.border}`, flexShrink:0 }}>
@@ -128,6 +155,7 @@ export default function Sidebar({ open, width=240, entries, activeSystem, setAct
         </div>
         <Btn t={t} onClick={onManageSystems} icon={<IconSettings size={13} />} full style={{ marginBottom:6 }}>Manage Systems</Btn>
         <Btn t={t} onClick={onLogout} icon={<IconLogout size={13} />} danger full>Sign Out</Btn>
+      </div>
       </div>
     </div>
   );
