@@ -129,6 +129,13 @@ export const MOTION = {
 // it just gives future components a scale to pick from instead of guessing.
 export const Z = { mobileScrim:40, sidebar:50, dropdown:60, overlay:200, modal:300, modalStack:400, toast:900, lightbox:1000 };
 
+// Responsive breakpoints. Previously a single 768px cutoff did double duty
+// for "phone vs. everything else", so a tablet in portrait got the exact
+// same layout as a wide desktop monitor. `tablet` marks the range where the
+// sidebar is still inline (not an overlay drawer) but can afford to be
+// narrower, giving content more room without switching interaction model.
+export const BREAKPOINT = { mobile: 768, tablet: 1024 };
+
 const ThemeContext = createContext({ t: LIGHT, theme:'light', toggle:()=>{}, isDark:false });
 
 function readInitial() {
