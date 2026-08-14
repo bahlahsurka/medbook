@@ -449,7 +449,11 @@ export default function App() {
         left:isMobile?(sidebarOpen?0:-260):'auto',
         top:0,bottom:0,zIndex:Z.sidebar,flexShrink:0,
         width:isMobile?240:'auto',
-        transition:isMobile?`left ${MOTION.normal} ${MOTION.ease}`:'none',
+        // 260ms rather than the usual 180ms MOTION.normal — a 240px panel
+        // sweep reads as noticeably quicker/more abrupt than the same
+        // duration on a small icon/button, matching the width-collapse
+        // timing used for tablet/desktop in Sidebar.js.
+        transition:isMobile?`left 260ms ${MOTION.ease}`:'none',
       }}>
         <Sidebar open={isMobile?true:sidebarOpen} width={isTablet?220:240}
           entries={entries} activeSystem={activeSystem}
