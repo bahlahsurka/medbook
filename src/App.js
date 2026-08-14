@@ -850,6 +850,15 @@ const SelectableCard = React.memo(function SelectableCard({ entry, color, bulkMo
     timer.current=setTimeout(()=>{ if(!moved.current){fired.current=true;onStartBulk(entry.id);} },HOLD_MS);
   };
   const endPress = () => { clearTimeout(timer.current); setPressed(false); };
+  // The browser fires touchcancel — not touchmove/touchend — the moment it
+  // decides a touch is becoming a scroll/pan gesture instead of a tap, and
+  // that decision can happen before our own trackMove sees enough delta to
+  // clear the timer itself. Without listening for it, the long-press timer
+  // below just keeps running: the user scrolls the finger away and lifts it
+  // somewhere else entirely, and ~650ms later this card selects itself
+  // anyway. That reads exactly as "gets selected even by minute touches" —
+  // the touch that "selected" it was actually a scroll, not a hold.
+  const cancelPress = () => { clearTimeout(timer.current); setPressed(false); };
   const trackMove = (e) => {
     const t0 = e.touches?.[0];
     if (!t0) return;
@@ -880,7 +889,7 @@ const SelectableCard = React.memo(function SelectableCard({ entry, color, bulkMo
       onClick={handleClick}
       onContextMenu={e=>{e.preventDefault();fired.current=true;onStartBulk(entry.id);}}
       onMouseDown={()=>setPressed(true)} onMouseUp={()=>setPressed(false)} onMouseLeave={()=>setPressed(false)}
-      onTouchStart={startPress} onTouchEnd={endPress} onTouchMove={trackMove}>
+      onTouchStart={startPress} onTouchEnd={endPress} onTouchMove={trackMove} onTouchCancel={cancelPress}>
       {bulkMode && (
         <div style={{position:'absolute',top:10,left:10,zIndex:10,width:22,height:22,
           borderRadius:RADIUS.sm,background:isSelected?color:t.surface,
