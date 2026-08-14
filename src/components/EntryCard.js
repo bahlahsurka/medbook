@@ -1,10 +1,9 @@
 import React from 'react';
-import { DIFF_COLOR, SYS_COLOR } from '../lib/constants';
+import { SYS_COLOR } from '../lib/constants';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
 
 function EntryCard({ entry, color, onClick, showSystem }) {
   const { t } = useTheme();
-  const dc = DIFF_COLOR[entry.difficulty] || t.text3;
   const sc = showSystem ? (SYS_COLOR[entry.system] || color) : color;
   const isDue = entry.next_review && new Date(entry.next_review) <= new Date();
 
@@ -34,17 +33,13 @@ function EntryCard({ entry, color, onClick, showSystem }) {
           {entry.pinned && <span style={{ fontSize:FONT.size.sm, flexShrink:0 }}>📌</span>}
         </div>
 
-        {/* Difficulty as a dot + label rather than a bordered pill —
-            same information, less decoration; the system tag stays a pill
+        {/* Difficulty is deliberately not shown here — it's still a real,
+            editable field (see DetailView's edit mode), just not surfaced
+            as a badge on the card itself. The system tag stays a pill
             since (in cross-system contexts like Global Search) it's the
             more load-bearing piece of identifying info. */}
         <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
           {showSystem && <Tag label={entry.system} color={sc} />}
-          <span style={{ display:'flex', alignItems:'center', gap:4, fontSize:FONT.size.xs,
-            color:t.text3, fontWeight:FONT.weight.medium }}>
-            <span style={{ width:6, height:6, borderRadius:RADIUS.circle, background:dc, flexShrink:0 }} />
-            {entry.difficulty}
-          </span>
           {isDue && (
             <span style={{ fontSize:FONT.size.micro, fontWeight:FONT.weight.semibold, color:t.accent,
               background:t.navActiveBg, borderRadius:RADIUS.pill, padding:'1px 6px' }}>Due</span>

@@ -505,8 +505,8 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
 
   // colorProp comes from App (knows user's custom systems); SYS_COLOR is only a fallback.
   const color = colorProp || SYS_COLOR[entry.system] || '#2563eb';
-  const dc    = DIFF_COLOR[entry.difficulty]||'#6b7280';
   const fmt   = iso => new Date(iso).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  const hasImages = entry.images?.length > 0;
 
   const updateDB = async fields => {
     const {data,error} = await supabase.from('entries').update(fields).eq('id',entry.id).select().single();
@@ -639,8 +639,10 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   };
 
   // ── EDIT MODE ──────────────────────────────────────────────────────────
+  // A narrower cap than view mode even on desktop — a form of stacked
+  // fields reads worse stretched to full width than a moderate column does.
   if (editing) return (
-    <div style={{maxWidth:680,margin:'0 auto',fontFamily:'Inter,sans-serif'}}>
+    <div className="mb-detail-shell-narrow" style={{fontFamily:'Inter,sans-serif'}}>
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:SPACE.lg+2}}>
         <IconEdit size={15} style={{color:t.text3,flexShrink:0}} />
         <div style={{fontSize:FONT.size.md,fontWeight:FONT.weight.bold,color:t.text}}>
@@ -772,8 +774,16 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   );
 
   // ── VIEW MODE ──────────────────────────────────────────────────────────
+  // Width/columns are driven by the .mb-detail-shell/.mb-detail-grid CSS
+  // classes (public/index.html) rather than inline styles, specifically so
+  // they can respond to viewport size — mobile stays the original single
+  // 680px column; tablet/laptop (≥768px) get a wider shell and, once there
+  // are images, a two-column layout with a sticky image rail instead of a
+  // stretched single column. A quick fade-in on mount smooths switching
+  // between entries via prev/next, since this component remounts (`key`)
+  // each time.
   return (
-    <div style={{maxWidth:680,margin:'0 auto',fontFamily:'Inter,sans-serif'}}>
+    <div className="mb-detail-shell" style={{fontFamily:'Inter,sans-serif',animation:'medbook-fade-in 200ms ease'}}>
       {lb!==null && <Lightbox images={entry.images} start={lb} onClose={()=>setLb(null)} />}
 
       {/* Floating highlight bar — only in view mode, only while Highlight is on,
@@ -822,8 +832,15 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         )}
       </div>
 
-      <div style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
-        padding:SPACE.xl,marginBottom:SPACE.md+2,borderTop:`3px solid ${color}`,
+      {/* Header card + grid are wrapped together (below) only when there
+          are no images — narrowing/centring as one unit rather than the
+          header staying full shell width while the single-column grid
+          beneath it shrinks on its own. With images, both already span
+          the same combined width naturally, so no wrapper is needed. */}
+      <div className={hasImages ? undefined : 'mb-detail-single-col'}>
+
+      <div className="mb-detail-card" style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
+        marginBottom:SPACE.md+2,borderTop:`3px solid ${color}`,
         boxShadow:elevation(t,'sm')}}>
 
         <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:SPACE.sm,flexWrap:'wrap'}}>
@@ -838,11 +855,9 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
           {entry.pinned && <IconPin size={16} style={{marginLeft:8,color:t.warn,verticalAlign:-2}} />}
         </div>
 
+        {/* Difficulty is intentionally not shown here — see the same note
+            in EntryCard.js. It's still fully editable in Edit mode. */}
         <div style={{display:'flex',flexWrap:'wrap',gap:SPACE.sm,alignItems:'center',marginBottom:SPACE.lg}}>
-          <span style={{display:'flex',alignItems:'center',gap:4,fontSize:FONT.size.xs,color:t.text3,fontWeight:FONT.weight.medium}}>
-            <span style={{width:6,height:6,borderRadius:RADIUS.circle,background:dc,flexShrink:0}} />
-            {entry.difficulty}
-          </span>
           <span style={{fontSize:FONT.size.xs,color:t.text4}}>{fmt(entry.created_at)}</span>
           {entry.review_count>0 && (
             <span style={{fontSize:FONT.size.xs,color:t.ok,fontWeight:FONT.weight.semibold}}>
@@ -870,9 +885,12 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         </div>
       </div>
 
+      <div className={`mb-detail-grid${hasImages ? '' : ' mb-detail-grid--single'}`}>
+      <div className="mb-detail-main" style={{display:'flex',flexDirection:'column',gap:SPACE.md+2,minWidth:0}}>
+
       {entry.notes && (
-        <div style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
-          padding:`${SPACE.lg+2}px ${SPACE.xl}px`,marginBottom:SPACE.md+2,boxShadow:elevation(t,'sm')}}>
+        <div className="mb-detail-card" style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
+          boxShadow:elevation(t,'sm')}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
             marginBottom:SPACE.md,flexWrap:'wrap',gap:8}}>
             <div style={{fontSize:FONT.size.micro,color:t.text4,letterSpacing:.8,fontWeight:FONT.weight.semibold,textTransform:'uppercase'}}>
@@ -904,15 +922,18 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
               </div>
             </>
           )}
-          {/* maxWidth caps the reading measure on wide screens (roughly 70
-              characters/line, the readable range for long-form text) without
-              touching notesRef's structure — readSelection()'s character-
-              offset math walks notesRef's text content, which this doesn't
-              change. On mobile the card is already narrower than this, so
-              it has no effect there. */}
+          {/* maxWidth keeps line length from running away on very wide
+              monitors, without touching notesRef's structure —
+              readSelection()'s character-offset math walks notesRef's text
+              content, which this doesn't change. 720px comfortably fills
+              the tablet/laptop main column (~836px with the image rail,
+              ~760px without) rather than stranding the text in a fraction
+              of a much wider card the way a tighter, editorial-style
+              measure would. On mobile the card is already narrower than
+              this, so it has no effect there. */}
           <div ref={notesRef}
             data-selectable={hlViewOn ? 'true' : 'false'}
-            style={{lineHeight:1.9,fontSize:FONT.size.md,color:t.text2,maxWidth:'70ch',
+            style={{lineHeight:1.9,fontSize:FONT.size.md,color:t.text2,maxWidth:720,
             userSelect:hlViewOn?'text':'auto'}}>
             <RenderedNotes text={entry.notes} highlights={viewHL} />
           </div>
@@ -923,8 +944,8 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
           Sits BELOW the Review so your own notes always read first.
           Nothing here can modify the Review. */}
       {entry.notes && AIService.isConfigured() && (
-        <div style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
-          padding:`${SPACE.lg+2}px ${SPACE.xl}px`,marginBottom:SPACE.md+2,boxShadow:elevation(t,'sm')}}>
+        <div className="mb-detail-card" style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
+          boxShadow:elevation(t,'sm')}}>
 
           <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:SPACE.lg,flexWrap:'wrap'}}>
             <div style={{fontSize:FONT.size.micro,color:t.text4,letterSpacing:.8,fontWeight:FONT.weight.semibold,
@@ -1016,24 +1037,30 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         </div>
       )}
 
-      {entry.images?.length>0 && (
-        <div style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
-          padding:`${SPACE.lg+2}px ${SPACE.xl}px`,boxShadow:elevation(t,'sm')}}>
-          <div style={{display:'flex',alignItems:'center',gap:6,fontSize:FONT.size.micro,color:t.text4,
-            letterSpacing:.8,fontWeight:FONT.weight.semibold,textTransform:'uppercase',marginBottom:SPACE.lg}}>
-            <IconImages size={11} style={{flexShrink:0}} /> Images ({entry.images.length}) — scroll · tap to expand
-          </div>
-          <div style={{display:'flex',gap:10,overflowX:'auto',
-            WebkitOverflowScrolling:'touch',paddingBottom:8,scrollSnapType:'x mandatory'}}>
-            {entry.images.map((url,i)=>(
-              <img key={i} src={url} alt="" className="mb-detailimg" onClick={()=>setLb(i)}
-                style={{height:180,width:'auto',maxWidth:'80vw',flexShrink:0,
-                  borderRadius:RADIUS.md,border:`1px solid ${t.border}`,cursor:'pointer',
-                  objectFit:'contain',background:t.surface2,scrollSnapAlign:'start'}} />
-            ))}
+      </div>{/* /.mb-detail-main */}
+
+      {hasImages && (
+        <div className="mb-detail-side">
+          <div className="mb-detail-card" style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
+            boxShadow:elevation(t,'sm')}}>
+            <div style={{display:'flex',alignItems:'center',gap:6,fontSize:FONT.size.micro,color:t.text4,
+              letterSpacing:.8,fontWeight:FONT.weight.semibold,textTransform:'uppercase',marginBottom:SPACE.lg}}>
+              <IconImages size={11} style={{flexShrink:0}} /> Images ({entry.images.length}) — tap to expand
+            </div>
+            <div className="mb-detail-images">
+              {entry.images.map((url,i)=>(
+                <img key={i} src={url} alt="" className="mb-detailimg" onClick={()=>setLb(i)}
+                  style={{borderRadius:RADIUS.md,border:`1px solid ${t.border}`,cursor:'pointer',
+                    objectFit:'contain',background:t.surface2}} />
+              ))}
+            </div>
           </div>
         </div>
       )}
+
+      </div>{/* /.mb-detail-grid */}
+
+      </div>{/* /.mb-detail-single-col (no-op wrapper when hasImages) */}
     </div>
   );
 }

@@ -105,6 +105,66 @@
       .mb-detailimg:hover { transform: scale(1.03); box-shadow: 0 4px 12px rgba(0,0,0,.12); }
       body.medbook-dark .mb-detailimg:hover { box-shadow: 0 4px 14px rgba(0,0,0,.45); }
 
+      /* Entry detail responsive shell (tablet/laptop pass). Mobile is
+         untouched below 768px — same single 680px column as before. From
+         768px up the shell widens and, when the entry has images, splits
+         into a main reading column + a sticky image rail, so a laptop
+         window isn't just a stretched phone layout. Widths/columns live
+         here rather than inline so they can be media-queried at all —
+         inline styles can't respond to viewport size on their own. */
+      .mb-detail-shell { max-width: 680px; margin: 0 auto; }
+      .mb-detail-shell-narrow { max-width: 680px; margin: 0 auto; }
+      @media (min-width: 768px) {
+        .mb-detail-shell { max-width: 1160px; }
+        .mb-detail-shell-narrow { max-width: 760px; }
+      }
+
+      .mb-detail-grid { display: block; }
+      .mb-detail-side { margin-top: 14px; }
+      @media (min-width: 768px) {
+        .mb-detail-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 300px;
+          gap: 24px;
+          align-items: start;
+        }
+        /* No images — one flexible reading column instead of the two-column
+           split (width capping happens on .mb-detail-single-col below, so
+           the header card above it narrows to match rather than staying
+           stretched to the full 1160px shell while the content beneath it
+           is centred and narrower). */
+        .mb-detail-grid.mb-detail-grid--single {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .mb-detail-side { margin-top: 0; position: sticky; top: 20px; }
+      }
+
+      /* Wraps the header card + grid together when there are no images, so
+         both narrow and centre as one unit instead of the header staying
+         full shell width while the grid below it shrinks on its own. */
+      @media (min-width: 768px) {
+        .mb-detail-single-col { max-width: 760px; margin: 0 auto; }
+      }
+
+      /* Image gallery inside the detail screen — a horizontal scroll strip
+         on mobile (unchanged), a compact 2-up grid once it has room to
+         breathe in the sidebar rail. */
+      .mb-detail-images {
+        display: flex; gap: 10px; overflow-x: auto;
+        -webkit-overflow-scrolling: touch; padding-bottom: 8px;
+        scroll-snap-type: x mandatory;
+      }
+      .mb-detail-images img { height: 180px; width: auto; max-width: 80vw; flex-shrink: 0; scroll-snap-align: start; }
+      @media (min-width: 768px) {
+        .mb-detail-images { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; overflow: visible; padding-bottom: 0; }
+        .mb-detail-images img { height: auto; width: 100%; max-width: none; aspect-ratio: 4 / 3; }
+      }
+
+      .mb-detail-card { padding: 18px 20px; }
+      @media (min-width: 768px) {
+        .mb-detail-card { padding: 26px 28px; }
+      }
+
       /* Lightbox entrance — the scrim fades, the image/controls pop in
          slightly scaled up. Runs automatically on mount, same pattern as
          medbook-fade-in above. */
