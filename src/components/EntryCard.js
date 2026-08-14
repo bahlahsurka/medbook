@@ -6,11 +6,12 @@ function EntryCard({ entry, color, onClick, showSystem }) {
   const { t } = useTheme();
   const dc = DIFF_COLOR[entry.difficulty] || t.text3;
   const sc = showSystem ? (SYS_COLOR[entry.system] || color) : color;
+  const isDue = entry.next_review && new Date(entry.next_review) <= new Date();
 
   return (
     <div onClick={onClick} className="mb-entrycard"
       style={{ background:t.surface, border:`1px solid ${t.border}`,
-        borderLeft:`4px solid ${sc}`, borderRadius:RADIUS.md, padding:`${SPACE.md+1}px ${SPACE.lg}px`,
+        borderLeft:`4px solid ${sc}`, borderRadius:RADIUS.md, padding:`${SPACE.md}px ${SPACE.lg}px`,
         cursor:'pointer', display:'flex', gap:SPACE.md+2, alignItems:'flex-start',
         transition:`transform ${MOTION.fast} ${MOTION.ease}, box-shadow ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}`,
         boxShadow:elevation(t,'sm') }}>
@@ -24,18 +25,35 @@ function EntryCard({ entry, color, onClick, showSystem }) {
       )}
 
       <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ display:'flex', alignItems:'flex-start', gap:6, marginBottom:5 }}>
-          <div style={{ fontSize:FONT.size.base+0.5, fontWeight:FONT.weight.semibold, color:t.text,
+        {/* Title is the thing being scanned for during a study session —
+            bumped a step up the type scale and given the most contrast on
+            the card, everything else here is deliberately quieter. */}
+        <div style={{ display:'flex', alignItems:'flex-start', gap:6, marginBottom:4 }}>
+          <div style={{ fontSize:FONT.size.md, fontWeight:FONT.weight.semibold, color:t.text,
             lineHeight:FONT.leading.normal, flex:1 }}>{entry.title}</div>
-          {entry.pinned && <span style={{ fontSize:FONT.size.base, flexShrink:0 }}>📌</span>}
+          {entry.pinned && <span style={{ fontSize:FONT.size.sm, flexShrink:0 }}>📌</span>}
         </div>
-        <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignItems:'center' }}>
+
+        {/* Difficulty as a dot + label rather than a bordered pill —
+            same information, less decoration; the system tag stays a pill
+            since (in cross-system contexts like Global Search) it's the
+            more load-bearing piece of identifying info. */}
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
           {showSystem && <Tag label={entry.system} color={sc} />}
-          <Tag label={entry.difficulty} color={dc} />
+          <span style={{ display:'flex', alignItems:'center', gap:4, fontSize:FONT.size.xs,
+            color:t.text3, fontWeight:FONT.weight.medium }}>
+            <span style={{ width:6, height:6, borderRadius:RADIUS.circle, background:dc, flexShrink:0 }} />
+            {entry.difficulty}
+          </span>
+          {isDue && (
+            <span style={{ fontSize:FONT.size.micro, fontWeight:FONT.weight.semibold, color:t.accent,
+              background:t.navActiveBg, borderRadius:RADIUS.pill, padding:'1px 6px' }}>Due</span>
+          )}
           {entry.review_count > 0 && (
             <span style={{ fontSize:FONT.size.xs, color:t.ok, fontWeight:FONT.weight.semibold }}>✓ ×{entry.review_count}</span>
           )}
         </div>
+
         {entry.notes && (
           <div style={{ fontSize:FONT.size.sm, color:t.text4, marginTop:5,
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>

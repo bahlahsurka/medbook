@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { supabase } from './lib/supabase';
 import { loadSystems, saveSystems, DEFAULT_SYSTEMS } from './lib/systems';
-import { SYS_COLOR } from './lib/constants';
+import { SYS_COLOR, DIFFICULTY, DIFF_COLOR } from './lib/constants';
 import { useScrollRestore } from './lib/useScrollRestore';
 import { useDebouncedValue } from './lib/useDebouncedValue';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation, BREAKPOINT } from './lib/theme';
-import { IconMenu, IconX, IconChevronLeft, IconRepeat, IconPlus, IconInbox } from './lib/icons';
+import { IconMenu, IconX, IconChevronLeft, IconRepeat, IconPlus, IconInbox, IconSearch } from './lib/icons';
 import Auth from './components/Auth';
 import Sidebar from './components/Sidebar';
 import EntryCard from './components/EntryCard';
@@ -63,6 +63,12 @@ export default function App() {
   const [isTablet, setTablet]         = useState(window.innerWidth > BREAKPOINT.mobile && window.innerWidth <= BREAKPOINT.tablet);
   const [search, setSearch]           = useState('');
   const [globalSearch, setGS]         = useState('');
+  // Batch 5: lightweight client-side filters layered on top of search —
+  // shared between the per-system list and Global Search (one consistent
+  // lens rather than two independent ones), same reset-on-system-switch
+  // behavior `search` already has (see `navigate` below).
+  const [difficultyFilter, setDifficultyFilter] = useState('All');
+  const [pinnedOnly, setPinnedOnly]   = useState(false);
   const [toast, setToast]             = useState(null);
   const [userSystems, setUS]          = useState(DEFAULT_SYSTEMS);
   const [systemsLoaded, setSysLoaded] = useState(false);
@@ -195,6 +201,7 @@ export default function App() {
 
   const navigate = useCallback((sys, v = 'list') => {
     setAS(sys); setView(v); setSearch('');
+    setDifficultyFilter('All'); setPinnedOnly(false);
     setBulkMode(false); setSelected2(new Set());
     setSB(false); // sidebar only ever opens via the hamburger button
   }, []);
@@ -357,18 +364,24 @@ export default function App() {
 
   const sysEntries = useMemo(() => {
     const all = entries[activeSystem] || [];
-    const filtered = debSearch.trim()
+    let filtered = debSearch.trim()
       ? all.filter(e => {
           const q = debSearch.toLowerCase();
           return e.title?.toLowerCase().includes(q) || e.notes?.toLowerCase().includes(q);
         })
       : all;
+    // Difficulty/pinned filters (batch 5) — pure client-side narrowing on
+    // top of the existing search match, same fields EntryCard already
+    // displays. Applied before the existing sort so pinned-first ordering
+    // and prev/next arrow navigation both keep working unchanged.
+    if (difficultyFilter !== 'All') filtered = filtered.filter(e => e.difficulty === difficultyFilter);
+    if (pinnedOnly) filtered = filtered.filter(e => e.pinned);
     return [...filtered].sort((a,b) => {
       if (a.pinned && !b.pinned) return -1;
       if (!a.pinned && b.pinned) return 1;
       return 0;
     });
-  }, [entries, activeSystem, debSearch]);
+  }, [entries, activeSystem, debSearch, difficultyFilter, pinnedOnly]);
 
   // Left/right arrow navigation inside DetailView — walks the SAME ordered
   // list currently shown behind it (same filter, same pinned-first sort),
@@ -389,13 +402,21 @@ export default function App() {
   const globalResults = useMemo(() => {
     if (!debGlobal.trim()) return [];
     const q = debGlobal.toLowerCase();
-    return Object.values(entries).flat().filter(e =>
+    let filtered = Object.values(entries).flat().filter(e =>
       e.title?.toLowerCase().includes(q) || e.notes?.toLowerCase().includes(q)
-    ).slice(0,50);
-  }, [debGlobal, entries]);
+    );
+    if (difficultyFilter !== 'All') filtered = filtered.filter(e => e.difficulty === difficultyFilter);
+    if (pinnedOnly) filtered = filtered.filter(e => e.pinned);
+    return filtered.slice(0,50);
+  }, [debGlobal, entries, difficultyFilter, pinnedOnly]);
 
   const color = userSystems.find(s=>s.name===activeSystem)?.color
     || SYS_COLOR[activeSystem] || '#2563eb';
+
+  // Distinguishes "this system truly has nothing yet" (show the Add First
+  // Entry CTA) from "search/filters narrowed it to nothing" (don't — the
+  // fix there is to loosen the filter, not add a duplicate entry).
+  const hasActiveFilter = !!search || difficultyFilter !== 'All' || pinnedOnly;
 
   // Small header progress readout for the active system's entry list
   // (batch 4) — same "due"/"reviewed" definitions ReviewQueue and Dashboard
@@ -607,10 +628,14 @@ export default function App() {
           style={{flex:1,overflowY:'auto',padding:isMobile?'14px 12px':'20px'}}>
 
           {fetching && (
-            <div style={{textAlign:'center',paddingTop:80}}>
-              <Spinner track={t.spinnerTrack} accent={t.accent} />
-              <div style={{fontSize:13,color:t.text3,marginTop:16}}>Loading your notebook…</div>
-            </div>
+            ['list','search'].includes(view) ? (
+              <EntryListSkeleton t={t} />
+            ) : (
+              <div style={{textAlign:'center',paddingTop:80}}>
+                <Spinner track={t.spinnerTrack} accent={t.accent} />
+                <div style={{fontSize:13,color:t.text3,marginTop:16}}>Loading your notebook…</div>
+              </div>
+            )
           )}
 
           {!fetching && fetchErr && (
@@ -633,9 +658,19 @@ export default function App() {
             <div key={view} style={{animation:`medbook-fade-in ${MOTION.normal} ${MOTION.ease}`}}>
               {view==='search' && (
                 <div style={{maxWidth:680,margin:'0 auto'}}>
-                  {!globalSearch && <div style={{color:t.text4,textAlign:'center',paddingTop:40,fontSize:14}}>Type to search all systems</div>}
-                  {globalSearch && globalResults.length===0 && <div style={{color:t.text4,textAlign:'center',paddingTop:40,fontSize:14}}>No results found</div>}
-                  <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                  {!globalSearch && (
+                    <EmptyHint t={t} Icon={IconSearch} text="Type to search all systems" />
+                  )}
+                  {globalSearch && (
+                    <FilterChips t={t} difficultyFilter={difficultyFilter} setDifficultyFilter={setDifficultyFilter}
+                      pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} />
+                  )}
+                  {globalSearch && globalResults.length===0 && (
+                    <EmptyHint t={t} Icon={IconInbox} text="No results match your search and filters" />
+                  )}
+                  <div key={`${debGlobal}-${difficultyFilter}-${pinnedOnly}`}
+                    style={{display:'flex',flexDirection:'column',gap:8,
+                      animation:globalResults.length>0?`medbook-fade-in ${MOTION.fast} ${MOTION.ease}`:'none'}}>
                     {globalResults.map(e=>(
                       <EntryCard key={e.id} entry={e}
                         color={userSystems.find(s=>s.name===e.system)?.color||SYS_COLOR[e.system]||'#2563eb'}
@@ -674,11 +709,32 @@ export default function App() {
               )}
 
               {view==='list' && (
-                <div style={{maxWidth:680,margin:'0 auto',position:'relative'}}>
+                <div style={{maxWidth:680,margin:'0 auto',position:'relative'}}
+                  onClick={e => {
+                    // Same "tap blank space to exit bulk mode" affordance as
+                    // the list wrapper below, but covering the WHOLE column
+                    // (filters row + toolbar row included) — without this,
+                    // adding the filter row created a new patch of
+                    // blank-looking space that silently did nothing when
+                    // tapped, which is exactly what broke the exit gesture.
+                    if (bulkMode && e.target === e.currentTarget) { setBulkMode(false); setSelected2(new Set()); }
+                  }}>
+
+                  {/* Filters — hidden during bulk select: filtering mid-
+                      selection is confusing (could hide already-selected
+                      items), and hiding it hands back the blank space the
+                      tap-to-exit gesture relies on. */}
+                  {!bulkMode && (entries[activeSystem]||[]).length>0 && (
+                    <FilterChips t={t} difficultyFilter={difficultyFilter} setDifficultyFilter={setDifficultyFilter}
+                      pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} />
+                  )}
 
                   {/* Bulk toolbar */}
                   {sysEntries.length>0 && (
-                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
+                    <div onClick={e => {
+                        if (bulkMode && e.target === e.currentTarget) { setBulkMode(false); setSelected2(new Set()); }
+                      }}
+                      style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
                       <button className="mb-bulkbtn" onClick={()=>{ setBulkMode(p=>!p); setSelected2(new Set()); }}
                         style={{fontSize:FONT.size.sm,
                           background:bulkMode?t.navActiveBg:t.surface3,
@@ -717,9 +773,11 @@ export default function App() {
                         <IconInbox size={24} style={{color:t.text4}} />
                       </div>
                       <div style={{fontSize:FONT.size.base,color:t.text3}}>
-                        {search?'No entries match your search':`No entries yet for ${activeSystem}`}
+                        {hasActiveFilter
+                          ? 'No entries match your search and filters'
+                          : `No entries yet for ${activeSystem}`}
                       </div>
-                      {!search && (
+                      {!hasActiveFilter && (
                         <button className="mb-hero-cta" onClick={()=>{ setView('add'); setSB(false); }} style={{marginTop:16,
                           background:color,color:'#fff',border:'none',borderRadius:RADIUS.md,
                           padding:'10px 22px',fontSize:FONT.size.base,fontWeight:FONT.weight.semibold,cursor:'pointer',
@@ -730,11 +788,12 @@ export default function App() {
                       )}
                     </div>
                   ) : (
-                    <div
+                    <div key={`${debSearch}-${difficultyFilter}-${pinnedOnly}`}
                       onClick={e => {
                         if (bulkMode && e.target === e.currentTarget) { setBulkMode(false); setSelected2(new Set()); }
                       }}
-                      style={{display:'flex',flexDirection:'column',gap:8}}>
+                      style={{display:'flex',flexDirection:'column',gap:8,
+                        animation:`medbook-fade-in ${MOTION.fast} ${MOTION.ease}`}}>
                       {sysEntries.map(entry=>(
                         <SelectableCard
                           key={entry.id}
@@ -844,6 +903,28 @@ const SelectableCard = React.memo(function SelectableCard({ entry, color, bulkMo
   );
 });
 
+// Entry-list-shaped loading placeholder (batch 5) — shown instead of the
+// generic spinner specifically while the destination is the list or search
+// view, so the loading state already hints at what's about to appear.
+function EntryListSkeleton({ t }) {
+  return (
+    <div style={{maxWidth:680,margin:'0 auto',display:'flex',flexDirection:'column',gap:8}}>
+      {[0,1,2,3,4].map(i => (
+        <div key={i} className="mb-skeleton" style={{background:t.surface,border:`1px solid ${t.border}`,
+          borderLeft:`4px solid ${t.surface3}`, borderRadius:RADIUS.md, padding:`${SPACE.md+1}px ${SPACE.lg}px`,
+          animationDelay:`${i*80}ms`}}>
+          <div style={{width:`${60-i*4}%`,height:14,background:t.surface3,borderRadius:RADIUS.sm}} />
+          <div style={{display:'flex',gap:6,marginTop:8}}>
+            <div style={{width:60,height:16,background:t.surface3,borderRadius:RADIUS.pill}} />
+            <div style={{width:44,height:16,background:t.surface3,borderRadius:RADIUS.pill}} />
+          </div>
+          <div style={{width:'85%',height:11,background:t.surface3,borderRadius:RADIUS.sm,marginTop:9}} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Spinner({ track='#e5e7eb', accent='#2563eb' }) {
   // The reduced-motion media query in index.html collapses this animation's
   // duration to effectively 0 for anyone with that OS preference set — no
@@ -859,4 +940,50 @@ function Spinner({ track='#e5e7eb', accent='#2563eb' }) {
 function bb(color) {
   return {fontSize:FONT.size.sm,background:`${color}10`,border:`1px solid ${color}30`,
     color,borderRadius:RADIUS.sm,padding:'5px 10px',cursor:'pointer',fontWeight:FONT.weight.semibold};
+}
+
+// Small icon + text empty/prompt state, shared by Global Search's two
+// blank moments (nothing typed yet / no matches) — matches the icon-based
+// empty-state treatment the per-system list already uses (batch 4).
+function EmptyHint({ t, Icon, text }) {
+  return (
+    <div style={{textAlign:'center',paddingTop:40,paddingBottom:8}}>
+      <div style={{width:44,height:44,borderRadius:RADIUS.xl2,background:t.surface3,
+        display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 10px'}}>
+        <Icon size={19} style={{color:t.text4}} />
+      </div>
+      <div style={{color:t.text4,fontSize:FONT.size.base}}>{text}</div>
+    </div>
+  );
+}
+
+// Difficulty + pinned filters (batch 5), shared by the per-system list and
+// Global Search. Purely a client-side narrowing of whatever list the caller
+// already computed — no data fetching, no navigation changes.
+function FilterChips({ t, difficultyFilter, setDifficultyFilter, pinnedOnly, setPinnedOnly }) {
+  return (
+    <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',marginBottom:10}}>
+      {['All', ...DIFFICULTY].map(d => {
+        const active = difficultyFilter===d;
+        const c = d==='All' ? t.text3 : (DIFF_COLOR[d] || t.text3);
+        return (
+          <button key={d} className="mb-chip" onClick={()=>setDifficultyFilter(d)} style={{
+            fontSize:FONT.size.xs, fontWeight:FONT.weight.semibold, cursor:'pointer',
+            borderRadius:RADIUS.pill, padding:'4px 11px',
+            background:active?`${c}1f`:'transparent', color:active?c:t.text4,
+            border:`1px solid ${active?`${c}44`:t.border}`}}>
+            {d}
+          </button>
+        );
+      })}
+      <span style={{width:1,height:14,background:t.border,margin:'0 2px',flexShrink:0}} />
+      <button className="mb-chip" onClick={()=>setPinnedOnly(p=>!p)} style={{
+        fontSize:FONT.size.xs, fontWeight:FONT.weight.semibold, cursor:'pointer',
+        borderRadius:RADIUS.pill, padding:'4px 11px', display:'flex', alignItems:'center', gap:4,
+        background:pinnedOnly?t.navActiveBg:'transparent', color:pinnedOnly?t.navActiveText:t.text4,
+        border:`1px solid ${pinnedOnly?t.navActiveBorder:t.border}`}}>
+        📌 Pinned
+      </button>
+    </div>
+  );
 }
