@@ -1,5 +1,19 @@
 import { useState } from 'react';
-import { useTheme } from '../lib/theme';
+import { useTheme, MOTION } from '../lib/theme';
+
+// Animated collapse/expand (batch 6) — a CSS-grid-rows trick rather than a
+// JS-measured max-height: the row track animates between 0fr and 1fr, so the
+// content never needs its pixel height measured up front and reflows for
+// free if it changes (e.g. switching into edit mode) while open. The inner
+// wrapper's overflow:hidden is what actually clips it mid-transition.
+function Collapse({ open, children }) {
+  return (
+    <div style={{ display:'grid', gridTemplateRows: open ? '1fr' : '0fr',
+      transition:`grid-template-rows ${MOTION.normal} ${MOTION.ease}` }}>
+      <div style={{ overflow:'hidden', minHeight:0 }}>{children}</div>
+    </div>
+  );
+}
 
 /**
  * AISections — renders the six Gemini-generated sections beneath the user's Review.
@@ -64,11 +78,13 @@ export default function AISections({
                 {isEditing ? 'Done' : 'Edit'}
               </button>
               <span style={{ fontSize:11, color:t.text4, transform:isOpen?'rotate(90deg)':'none',
-                transition:'transform .15s' }}>▶</span>
+                transition:`transform ${MOTION.fast} ${MOTION.ease}` }}>▶</span>
             </div>
 
-            {/* Body */}
-            {isOpen && (
+            {/* Body — always mounted so Collapse can animate between the two
+                states; previously this was `isOpen && (...)`, unmounting the
+                content instantly instead of animating it. */}
+            <Collapse open={isOpen}>
               <div style={{ padding:'0 14px 12px' }}>
                 {isEditing ? (
                   <>
@@ -102,7 +118,7 @@ export default function AISections({
                   </ul>
                 )}
               </div>
-            )}
+            </Collapse>
           </div>
         );
       })}
@@ -172,10 +188,10 @@ function FlashcardSection({ cards, onChange, onAddToDeck, onAddAllToDeck, deckAd
           </button>
         )}
         <span style={{ fontSize:11, color:t.text4, transform:open?'rotate(90deg)':'none',
-          transition:'transform .15s' }}>▶</span>
+          transition:`transform ${MOTION.fast} ${MOTION.ease}` }}>▶</span>
       </div>
 
-      {open && (
+      <Collapse open={open}>
         <div style={{ padding:'0 14px 12px' }}>
           {cards.length === 0 ? (
             <div style={{ fontSize:12, color:t.text4, fontStyle:'italic' }}>
@@ -226,7 +242,7 @@ function FlashcardSection({ cards, onChange, onAddToDeck, onAddAllToDeck, deckAd
             </div>
           )}
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }

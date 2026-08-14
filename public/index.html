@@ -92,6 +92,109 @@
       @keyframes medbook-skeleton-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 0.9; } }
       .mb-skeleton { animation: medbook-skeleton-pulse 1.4s ease-in-out infinite; }
 
+      /* Entry detail/editor screen (batch 6) — action toolbar buttons, image
+         thumbnails, the lightbox modal, and a shared spinner. Kept here for
+         the same reason as .mb-entrycard/.mb-chip above: shared rules
+         instead of per-instance <style> tags. */
+      .mb-detailbtn { transition: filter 120ms ease, transform 120ms ease, opacity 120ms ease; }
+      .mb-detailbtn:hover:not(:disabled) { filter: brightness(0.97); }
+      body.medbook-dark .mb-detailbtn:hover:not(:disabled) { filter: brightness(1.18); }
+      .mb-detailbtn:active:not(:disabled) { transform: scale(0.96); }
+
+      .mb-detailimg { transition: transform 160ms ease, box-shadow 160ms ease; }
+      .mb-detailimg:hover { transform: scale(1.03); box-shadow: 0 4px 12px rgba(0,0,0,.12); }
+      body.medbook-dark .mb-detailimg:hover { box-shadow: 0 4px 14px rgba(0,0,0,.45); }
+
+      /* Entry detail responsive shell (tablet/laptop pass). Mobile is
+         untouched below 768px — same single 680px column as before. From
+         768px up the shell widens and, when the entry has images, splits
+         into a main reading column + a sticky image rail, so a laptop
+         window isn't just a stretched phone layout. Widths/columns live
+         here rather than inline so they can be media-queried at all —
+         inline styles can't respond to viewport size on their own. */
+      .mb-detail-shell { max-width: 680px; margin: 0 auto; }
+      .mb-detail-shell-narrow { max-width: 680px; margin: 0 auto; }
+      @media (min-width: 768px) {
+        .mb-detail-shell { max-width: 1160px; }
+        .mb-detail-shell-narrow { max-width: 760px; }
+      }
+
+      .mb-detail-grid { display: block; }
+      .mb-detail-side { margin-top: 14px; }
+      @media (min-width: 768px) {
+        .mb-detail-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 300px;
+          gap: 24px;
+          align-items: start;
+        }
+        /* No images — one flexible reading column instead of the two-column
+           split, capped and centred rather than stretched to the full
+           1160px shell. The header now lives INSIDE this column (merged
+           into the reading pane), so there's only one thing to width-
+           constrain here, not two that need to be kept in sync. */
+        .mb-detail-grid.mb-detail-grid--single {
+          grid-template-columns: minmax(0, 1fr);
+          max-width: 760px;
+          margin: 0 auto;
+        }
+        .mb-detail-side { margin-top: 0; position: sticky; top: 20px; }
+      }
+
+      /* Compact sticky context bar (long entries) — appears once the header
+         has scrolled out of view. The "anchor" is always mounted with
+         height:0, so toggling the bar inside it never reflows the content
+         below (no jump when it appears/disappears); the visible bar is
+         absolutely positioned to fill that zero-height anchor. Horizontal
+         bleed matches .mb-detail-card's own padding so it spans the card's
+         full width once stuck, at both breakpoints. */
+      .mb-detail-stickybar-anchor { position: sticky; top: 0; height: 0; margin: 0 -20px; }
+      .mb-detail-stickybar {
+        position: absolute; top: 0; left: 0; right: 0;
+        display: flex; align-items: center; gap: 10px;
+        padding: 8px 20px;
+      }
+      @media (min-width: 768px) {
+        .mb-detail-stickybar-anchor { margin: 0 -28px; }
+        .mb-detail-stickybar { padding: 8px 28px; }
+      }
+
+      /* Image gallery inside the detail screen — a horizontal scroll strip
+         on mobile (unchanged), a compact 2-up grid once it has room to
+         breathe in the sidebar rail. */
+      .mb-detail-images {
+        display: flex; gap: 10px; overflow-x: auto;
+        -webkit-overflow-scrolling: touch; padding-bottom: 8px;
+        scroll-snap-type: x mandatory;
+      }
+      .mb-detail-images img { height: 180px; width: auto; max-width: 80vw; flex-shrink: 0; scroll-snap-align: start; }
+      @media (min-width: 768px) {
+        .mb-detail-images { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; overflow: visible; padding-bottom: 0; }
+        .mb-detail-images img { height: auto; width: 100%; max-width: none; aspect-ratio: 4 / 3; }
+      }
+
+      .mb-detail-card { padding: 18px 20px; }
+      @media (min-width: 768px) {
+        .mb-detail-card { padding: 26px 28px; }
+      }
+
+      /* Lightbox entrance — the scrim fades, the image/controls pop in
+         slightly scaled up. Runs automatically on mount, same pattern as
+         medbook-fade-in above. */
+      @keyframes medbook-pop-in {
+        from { opacity: 0; transform: scale(0.94); }
+        to   { opacity: 1; transform: scale(1); }
+      }
+
+      @keyframes medbook-spin { to { transform: rotate(360deg); } }
+
+      /* One-shot "confirmed" pulse — Reviewed/Save button feedback. */
+      @keyframes medbook-pulse-once {
+        0%   { transform: scale(1); }
+        40%  { transform: scale(1.06); }
+        100% { transform: scale(1); }
+      }
+
       /* Animation philosophy: subtle, functional micro-interactions only,
          120–250ms, transform/opacity. Anyone with reduced-motion set gets
          them collapsed to instant, everywhere, with no per-component work. */
