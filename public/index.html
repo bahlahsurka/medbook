@@ -46,6 +46,29 @@
       body.medbook-dark ::-webkit-scrollbar-thumb { background: #3a404b; }
       input, textarea, button, select { font-family: inherit; }
 
+      /* Keyboard-focus ring. Most interactive elements in the app set inline
+         outline:none with no replacement (an accessibility gap flagged in the
+         UI audit) — an inline style wins over this rule wherever that's still
+         true, so this covers everything else and is the default new
+         components should rely on rather than adding their own outline:none. */
+      :focus-visible {
+        outline: 2px solid #2563eb;
+        outline-offset: 2px;
+      }
+      body.medbook-dark :focus-visible { outline-color: #3b82f6; }
+
+      /* Animation philosophy: subtle, functional micro-interactions only,
+         120–250ms, transform/opacity. Anyone with reduced-motion set gets
+         them collapsed to instant, everywhere, with no per-component work. */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.001ms !important;
+          scroll-behavior: auto !important;
+        }
+      }
+
       /* ===== Native (Capacitor) only — scoped to body.cap-native ===== */
 
       /* Kill accidental pull-to-refresh and rubber-band reload. */
