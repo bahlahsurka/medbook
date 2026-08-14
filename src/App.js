@@ -47,7 +47,8 @@ export default function App() {
   const [fetching, setFetching]       = useState(false);
   const [fetchErr, setFetchErr]       = useState('');
   const [activeSystem, setAS]         = useState('Internal Medicine');
-  const [view, setView]               = useState('list');
+  // Dashboard is the landing screen (batch 3) — was 'list' (the notebook).
+  const [view, setView]               = useState('stats');
   const [selected, setSelected]       = useState(null);
   // Pre-existing bug found while wiring up the animated collapse below:
   // this always defaulted to false with nothing ever setting it true on
@@ -612,7 +613,15 @@ export default function App() {
 
               {view==='review' && <ReviewQueue allEntries={entries} onReviewed={onReviewed} />}
               {view==='cards'  && <FlashCards userId={session.user.id} userSystems={userSystems} />}
-              {view==='stats'  && <Dashboard entries={entries} userSystems={userSystems} />}
+              {view==='stats'  && (
+                <Dashboard entries={entries} userSystems={userSystems}
+                  onOpenEntry={e=>{ setAS(e.system); openEntry(e); }}
+                  onNavigateSystem={sys=>navigate(sys,'list')}
+                  onStartReview={()=>switchView('review')}
+                  onAddEntry={()=>switchView('add')}
+                  onStudyFlashcards={()=>switchView('cards')}
+                  onGlobalSearch={()=>switchView('search')} />
+              )}
 
               {view==='add' && (
                 <AddEntry activeSystem={activeSystem} color={color}
