@@ -709,17 +709,32 @@ export default function App() {
               )}
 
               {view==='list' && (
-                <div style={{maxWidth:680,margin:'0 auto',position:'relative'}}>
+                <div style={{maxWidth:680,margin:'0 auto',position:'relative'}}
+                  onClick={e => {
+                    // Same "tap blank space to exit bulk mode" affordance as
+                    // the list wrapper below, but covering the WHOLE column
+                    // (filters row + toolbar row included) — without this,
+                    // adding the filter row created a new patch of
+                    // blank-looking space that silently did nothing when
+                    // tapped, which is exactly what broke the exit gesture.
+                    if (bulkMode && e.target === e.currentTarget) { setBulkMode(false); setSelected2(new Set()); }
+                  }}>
 
-                  {/* Filters */}
-                  {(entries[activeSystem]||[]).length>0 && (
+                  {/* Filters — hidden during bulk select: filtering mid-
+                      selection is confusing (could hide already-selected
+                      items), and hiding it hands back the blank space the
+                      tap-to-exit gesture relies on. */}
+                  {!bulkMode && (entries[activeSystem]||[]).length>0 && (
                     <FilterChips t={t} difficultyFilter={difficultyFilter} setDifficultyFilter={setDifficultyFilter}
                       pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} />
                   )}
 
                   {/* Bulk toolbar */}
                   {sysEntries.length>0 && (
-                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
+                    <div onClick={e => {
+                        if (bulkMode && e.target === e.currentTarget) { setBulkMode(false); setSelected2(new Set()); }
+                      }}
+                      style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
                       <button className="mb-bulkbtn" onClick={()=>{ setBulkMode(p=>!p); setSelected2(new Set()); }}
                         style={{fontSize:FONT.size.sm,
                           background:bulkMode?t.navActiveBg:t.surface3,
