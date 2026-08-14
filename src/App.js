@@ -742,6 +742,22 @@ export default function App() {
                           color:bulkMode?t.navActiveText:t.text3,fontWeight:FONT.weight.semibold}}>
                         {bulkMode?`☑ ${selected2.size} selected`:'☑ Select'}
                       </button>
+                      {/* Explicit, always-visible exit — the "tap blank
+                          space to exit" gesture underneath this toolbar has
+                          proven unreliable enough (twice) that it needs a
+                          real button, not just a bigger blank hit target.
+                          Same effect as tapping the toggle button above;
+                          this is purely about giving it its own unmissable
+                          affordance. */}
+                      {bulkMode && (
+                        <button className="mb-bulkbtn" onClick={()=>{ setBulkMode(false); setSelected2(new Set()); }}
+                          style={{fontSize:FONT.size.sm, background:t.dangerBg,
+                            border:`1px solid ${t.dangerBorder}`, borderRadius:RADIUS.sm,
+                            padding:'5px 10px', cursor:'pointer', color:t.danger,
+                            fontWeight:FONT.weight.semibold, display:'flex', alignItems:'center', gap:4}}>
+                          <IconX size={12} /> Done
+                        </button>
+                      )}
                       {bulkMode && selected2.size>0 && (<>
                         <button className="mb-bulkbtn" onClick={()=>bulkPin(true)} style={bb('#d97706')}>📌 Pin</button>
                         <button className="mb-bulkbtn" onClick={()=>bulkPin(false)} style={bb('#6b7280')}>Unpin</button>
