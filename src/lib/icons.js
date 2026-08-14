@@ -121,6 +121,12 @@ export function IconChevronLeft({ size=16, style, className }) {
   </Svg>;
 }
 
+export function IconChevronRight({ size=16, style, className }) {
+  return <Svg size={size} style={style} className={className}>
+    <polyline points="9 18 15 12 9 6" />
+  </Svg>;
+}
+
 export function IconChevronDown({ size=14, style, className }) {
   return <Svg size={size} style={style} className={className}>
     <polyline points="6 9 12 15 18 9" />
@@ -146,5 +152,52 @@ export function IconPlus({ size=16, style, className }) {
   return <Svg size={size} style={style} className={className}>
     <line x1="12" y1="5" x2="12" y2="19" />
     <line x1="5" y1="12" x2="19" y2="12" />
+  </Svg>;
+}
+
+// --- Added for the Entry detail/editor screen (batch 6) --------------------
+
+export function IconEdit({ size=14, style, className }) {
+  return <Svg size={size} style={style} className={className}>
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+  </Svg>;
+}
+
+export function IconCheck({ size=14, style, className }) {
+  return <Svg size={size} style={style} className={className}>
+    <polyline points="20 6 9 17 4 12" />
+  </Svg>;
+}
+
+export function IconTrash({ size=14, style, className }) {
+  return <Svg size={size} style={style} className={className}>
+    <polyline points="3 6 5 6 21 6" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+  </Svg>;
+}
+
+// A pushpin rather than a map-marker — reads more clearly at 14px as
+// "pinned to the top" rather than "location".
+export function IconPin({ size=14, style, className }) {
+  return <Svg size={size} style={style} className={className}>
+    <path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6z" />
+    <line x1="12" y1="17" x2="12" y2="22" />
+  </Svg>;
+}
+
+export function IconImages({ size=14, style, className }) {
+  return <Svg size={size} style={style} className={className}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <circle cx="8.5" cy="8.5" r="1.5" />
+    <polyline points="21 15 16 10 5 21" />
+  </Svg>;
+}
+
+// Four-point sparkle — stands in for the ✨ emoji on the AI Analyze action so
+// it renders identically across platforms/themes like the rest of this set.
+export function IconSparkle({ size=14, style, className }) {
+  return <Svg size={size} style={style} className={className}>
+    <path d="M12 3 L13.6 9.4 L20 11 L13.6 12.6 L12 19 L10.4 12.6 L4 11 L10.4 9.4 Z" />
   </Svg>;
 }

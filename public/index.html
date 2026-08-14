@@ -92,6 +92,36 @@
       @keyframes medbook-skeleton-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 0.9; } }
       .mb-skeleton { animation: medbook-skeleton-pulse 1.4s ease-in-out infinite; }
 
+      /* Entry detail/editor screen (batch 6) — action toolbar buttons, image
+         thumbnails, the lightbox modal, and a shared spinner. Kept here for
+         the same reason as .mb-entrycard/.mb-chip above: shared rules
+         instead of per-instance <style> tags. */
+      .mb-detailbtn { transition: filter 120ms ease, transform 120ms ease, opacity 120ms ease; }
+      .mb-detailbtn:hover:not(:disabled) { filter: brightness(0.97); }
+      body.medbook-dark .mb-detailbtn:hover:not(:disabled) { filter: brightness(1.18); }
+      .mb-detailbtn:active:not(:disabled) { transform: scale(0.96); }
+
+      .mb-detailimg { transition: transform 160ms ease, box-shadow 160ms ease; }
+      .mb-detailimg:hover { transform: scale(1.03); box-shadow: 0 4px 12px rgba(0,0,0,.12); }
+      body.medbook-dark .mb-detailimg:hover { box-shadow: 0 4px 14px rgba(0,0,0,.45); }
+
+      /* Lightbox entrance — the scrim fades, the image/controls pop in
+         slightly scaled up. Runs automatically on mount, same pattern as
+         medbook-fade-in above. */
+      @keyframes medbook-pop-in {
+        from { opacity: 0; transform: scale(0.94); }
+        to   { opacity: 1; transform: scale(1); }
+      }
+
+      @keyframes medbook-spin { to { transform: rotate(360deg); } }
+
+      /* One-shot "confirmed" pulse — Reviewed/Save button feedback. */
+      @keyframes medbook-pulse-once {
+        0%   { transform: scale(1); }
+        40%  { transform: scale(1.06); }
+        100% { transform: scale(1); }
+      }
+
       /* Animation philosophy: subtle, functional micro-interactions only,
          120–250ms, transform/opacity. Anyone with reduced-motion set gets
          them collapsed to instant, everywhere, with no per-component work. */
