@@ -447,7 +447,22 @@ export default function App() {
   if (!session) return <Auth />;
 
   return (
-    <div style={{display:'flex',height:'100vh',background:t.bg,overflow:'hidden'}}>
+    <div onClick={e => {
+        // "Click anywhere on screen except the entries" to exit bulk mode
+        // — one delegated handler for the whole app (sidebar included, not
+        // just the main pane) rather than several e.target===e.currentTarget
+        // checks scattered across nested wrapper divs, which required a
+        // click to land on exact background pixels of one specific element
+        // and kept missing in practice. This instead asks a simpler
+        // question of whatever was actually clicked: is it a card, or a
+        // form control that needs the click for its own purpose (the
+        // Move-to <select>, Pin/Delete/Select toggle buttons, search
+        // inputs, sidebar buttons)? Anything else exits bulk mode.
+        if (bulkMode && !e.target.closest('[data-bulk-card], button, select, input, a, textarea')) {
+          setBulkMode(false); setSelected2(new Set());
+        }
+      }}
+      style={{display:'flex',height:'100vh',background:t.bg,overflow:'hidden'}}>
 
       {/* Toast */}
       {toast && (
@@ -617,14 +632,6 @@ export default function App() {
 
         {/* Content — scrollRef attached here for scroll restoration */}
         <div ref={scrollRef}
-          onClick={e => {
-            // Tapping genuinely blank space (not a card, not a button — this
-            // fires only when the click landed directly on this pane, never
-            // when it bubbled up from a child) exits bulk mode. Previously
-            // the only way out was scrolling back up to the toolbar, which
-            // is exactly the friction being fixed here.
-            if (bulkMode && e.target === e.currentTarget) { setBulkMode(false); setSelected2(new Set()); }
-          }}
           style={{flex:1,overflowY:'auto',padding:isMobile?'14px 12px':'20px'}}>
 
           {fetching && (
@@ -709,32 +716,21 @@ export default function App() {
               )}
 
               {view==='list' && (
-                <div style={{maxWidth:680,margin:'0 auto',position:'relative'}}
-                  onClick={e => {
-                    // Same "tap blank space to exit bulk mode" affordance as
-                    // the list wrapper below, but covering the WHOLE column
-                    // (filters row + toolbar row included) — without this,
-                    // adding the filter row created a new patch of
-                    // blank-looking space that silently did nothing when
-                    // tapped, which is exactly what broke the exit gesture.
-                    if (bulkMode && e.target === e.currentTarget) { setBulkMode(false); setSelected2(new Set()); }
-                  }}>
+                <div style={{maxWidth:680,margin:'0 auto',position:'relative'}}>
 
-                  {/* Filters — hidden during bulk select: filtering mid-
-                      selection is confusing (could hide already-selected
-                      items), and hiding it hands back the blank space the
-                      tap-to-exit gesture relies on. */}
-                  {!bulkMode && (entries[activeSystem]||[]).length>0 && (
+                  {/* Filters — stays mounted at bulk-mode toggle, just
+                      disabled in place (see FilterChips) so nothing shifts.
+                      Exiting bulk mode by clicking its now-inert background
+                      is handled by the one delegated handler on the Main
+                      pane above, not by FilterChips itself. */}
+                  {(entries[activeSystem]||[]).length>0 && (
                     <FilterChips t={t} difficultyFilter={difficultyFilter} setDifficultyFilter={setDifficultyFilter}
-                      pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} />
+                      pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} disabled={bulkMode} />
                   )}
 
                   {/* Bulk toolbar */}
                   {sysEntries.length>0 && (
-                    <div onClick={e => {
-                        if (bulkMode && e.target === e.currentTarget) { setBulkMode(false); setSelected2(new Set()); }
-                      }}
-                      style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
                       <button className="mb-bulkbtn" onClick={()=>{ setBulkMode(p=>!p); setSelected2(new Set()); }}
                         style={{fontSize:FONT.size.sm,
                           background:bulkMode?t.navActiveBg:t.surface3,
@@ -789,9 +785,6 @@ export default function App() {
                     </div>
                   ) : (
                     <div key={`${debSearch}-${difficultyFilter}-${pinnedOnly}`}
-                      onClick={e => {
-                        if (bulkMode && e.target === e.currentTarget) { setBulkMode(false); setSelected2(new Set()); }
-                      }}
                       style={{display:'flex',flexDirection:'column',gap:8,
                         animation:`medbook-fade-in ${MOTION.fast} ${MOTION.ease}`}}>
                       {sysEntries.map(entry=>(
@@ -876,7 +869,7 @@ const SelectableCard = React.memo(function SelectableCard({ entry, color, bulkMo
   };
 
   return (
-    <div style={{position:'relative',outline:isSelected?`2px solid ${color}`:'none',
+    <div data-bulk-card style={{position:'relative',outline:isSelected?`2px solid ${color}`:'none',
       borderRadius:RADIUS.md,cursor:'pointer',
       WebkitUserSelect:'none',userSelect:'none',
       // Subtle press feedback so a tap always feels registered (A4).
@@ -960,9 +953,21 @@ function EmptyHint({ t, Icon, text }) {
 // Difficulty + pinned filters (batch 5), shared by the per-system list and
 // Global Search. Purely a client-side narrowing of whatever list the caller
 // already computed — no data fetching, no navigation changes.
-function FilterChips({ t, difficultyFilter, setDifficultyFilter, pinnedOnly, setPinnedOnly }) {
+// `disabled` (bulk mode) greys the chips out and makes them inert in
+// place — deliberately NOT unmounting this row when bulk mode toggles.
+// An earlier version hid it entirely, which shifted the toolbar and list
+// up by this row's height at the exact moment bulk mode activates —
+// disorienting on its own, and it could shift a card into the spot a
+// blank-space exit tap was aimed at, or vice versa. Same layout at every
+// moment, only interactivity changes. With pointer-events:none while
+// disabled, a tap here passes straight through to whatever's underneath,
+// which is how it ends up triggering the Main pane's delegated exit
+// handler like any other non-card, non-control area does.
+function FilterChips({ t, difficultyFilter, setDifficultyFilter, pinnedOnly, setPinnedOnly, disabled }) {
   return (
-    <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',marginBottom:10}}>
+    <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',marginBottom:10,
+        opacity:disabled?0.45:1, pointerEvents:disabled?'none':'auto',
+        transition:`opacity ${MOTION.fast} ${MOTION.ease}`}}>
       {['All', ...DIFFICULTY].map(d => {
         const active = difficultyFilter===d;
         const c = d==='All' ? t.text3 : (DIFF_COLOR[d] || t.text3);
