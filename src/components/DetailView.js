@@ -101,7 +101,7 @@ const EditHighlightOverlay = React.forwardRef(function EditHighlightOverlay({ te
 // Small circular icon-button used throughout the lightbox chrome.
 function LbBtn({ onClick, title, style, children }) {
   return (
-    <button className="mb-detailbtn" onClick={onClick} title={title} style={{
+    <button className="mb-detailbtn" onClick={onClick} title={title} aria-label={title} style={{
       background:'rgba(255,255,255,.15)', border:'none', color:'#fff',
       cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
       ...style
@@ -159,7 +159,11 @@ function Lightbox({ images, start, onClose }) {
           <IconChevronRight size={22} />
         </LbBtn>
       </>}
-      <img src={images[idx]} alt=""
+      {/* key={idx} — a fresh element per image means the pop-in animation
+          below replays on every prev/next, not just the initial open, so
+          navigating between images gets a lightweight transition instead
+          of an instant swap. */}
+      <img key={idx} src={images[idx]} alt=""
         style={{maxWidth:'90vw',maxHeight:'85vh',borderRadius:RADIUS.md,objectFit:'contain',
           display:'block',animation:'medbook-pop-in 200ms cubic-bezier(0.4,0,0.2,1)'}}
         onClick={e=>e.stopPropagation()} />
@@ -181,28 +185,71 @@ function SavedChip({ t, children='Saved' }) {
   );
 }
 
-// Icon + label action pill. Colour comes entirely from the theme's semantic
-// tokens (t.ok/t.accent/t.warn/t.danger/t.text2 + their *Bg/*Border pairs),
-// so — unlike the old hand-tinted version this replaces — dark mode is
-// correct by construction instead of an ad hoc `${color}22` approximation.
-function ActionButton({ t, icon, children, onClick, tone='neutral', disabled, pulse }) {
+// Quiet icon-only entry-toolbar button. Colour comes entirely from the
+// theme's semantic tokens (t.ok/t.accent/t.warn/t.danger/t.text3 +
+// t.surface2/t.border), so dark mode is correct by construction rather
+// than an ad hoc `${color}22` approximation. No visible label — the
+// tooltip/aria-label carries it, deliberately: a row of five bold
+// coloured pills reads as loud "dashboard" chrome, working against the
+// reading-workspace direction this polish pass asked for. Sized to match
+// the Prev/Next nav buttons elsewhere on this screen. The same shape can
+// take future actions (bookmark, AI Analyze, …) later without a redesign.
+function ActionButton({ t, icon, label, onClick, tone='neutral', disabled, pulse }) {
   const map = {
-    ok:      { color:t.ok,     bg:t.okBg,        border:t.okBorder },
-    accent:  { color:t.accent, bg:t.navActiveBg, border:t.navActiveBorder },
-    warn:    { color:t.warn,   bg:t.warnBg,      border:t.warnBorder },
-    danger:  { color:t.danger, bg:t.dangerBg,    border:t.dangerBorder },
-    neutral: { color:t.text2,  bg:t.surface2,    border:t.border },
+    ok:      { color:t.ok,     bg:t.surface2, border:t.border },
+    accent:  { color:t.accent, bg:t.surface2, border:t.border },
+    warn:    { color:t.warn,   bg:t.warnBg,   border:t.warnBorder },
+    danger:  { color:t.danger, bg:t.surface2, border:t.border },
+    neutral: { color:t.text3,  bg:t.surface2, border:t.border },
   };
   const c = map[tone] || map.neutral;
   return (
-    <button className="mb-detailbtn" onClick={onClick} disabled={disabled} style={{
-      display:'flex', alignItems:'center', gap:6,
+    <button className="mb-detailbtn" onClick={onClick} disabled={disabled}
+      title={label} aria-label={label} style={{
+      width:34, height:34, flexShrink:0,
+      display:'flex', alignItems:'center', justifyContent:'center',
       background:c.bg, border:`1px solid ${c.border}`, color:c.color,
-      borderRadius:RADIUS.sm+1, padding:'8px 14px', fontSize:FONT.size.sm,
-      fontWeight:FONT.weight.semibold, fontFamily:'Inter,sans-serif',
-      cursor:disabled?'not-allowed':'pointer', opacity:disabled?.6:1,
+      borderRadius:RADIUS.sm+2, cursor:disabled?'not-allowed':'pointer',
+      opacity:disabled?.5:1,
       animation:pulse?'medbook-pulse-once 320ms ease':'none'}}>
-      {icon}{children}
+      {icon}
+    </button>
+  );
+}
+
+// Gallery thumbnail — fades in once its (lazily-loaded) image actually
+// loads, rather than popping in abruptly or showing a broken/blank box.
+// No skeleton box behind it: on the mobile horizontal strip each image's
+// natural aspect ratio gives it a different width, so a same-sized
+// placeholder can't stand in for it without either guessing wrong or
+// causing a reflow once the real size is known — a plain opacity fade
+// avoids that without adding layout complexity.
+function GalleryThumb({ t, src, onClick }) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <img src={src} alt="" className="mb-detailimg" onClick={onClick}
+      loading="lazy" onLoad={()=>setLoaded(true)}
+      style={{borderRadius:RADIUS.md,border:`1px solid ${t.border}`,cursor:'pointer',
+        objectFit:'contain',background:t.surface2,
+        opacity:loaded?1:0,transition:'opacity 200ms ease'}} />
+  );
+}
+
+// The "Highlight" toggle — used both in the Review Notes section header and
+// (compact) in the sticky bar, so both read as the same control rather than
+// two independently-styled buttons.
+function HighlightToggle({ t, on, onClick, compact }) {
+  return (
+    <button className="mb-detailbtn"
+      onMouseDown={e=>e.preventDefault()} onTouchStart={e=>e.preventDefault()}
+      onClick={onClick}
+      style={{fontSize:FONT.size.xs,background:on?t.hlBtnBg:t.surface3,
+        border:`1px solid ${on?t.hlBtnBorder:t.border}`,
+        borderRadius:RADIUS.sm-1,padding:compact?'5px 10px':'3px 10px',cursor:'pointer',
+        display:'flex',alignItems:'center',gap:5,flexShrink:0,
+        color:on?t.hlBtnText:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
+        transition:'background 150ms ease, border-color 150ms ease, color 150ms ease'}}>
+      <IconEdit size={11} /> {on?'Done':'Highlight'}
     </button>
   );
 }
@@ -265,6 +312,24 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const editTaRef = useRef();
   const editOverlayRef = useRef();
   const notesRef  = useRef();
+
+  // Compact sticky context bar (long-entry navigation) — appears once the
+  // header has scrolled out of view, so a long Review has a way back to
+  // System/Highlight without scrolling up. Driven by IntersectionObserver
+  // watching a 1px sentinel placed right after the header, NOT a scroll
+  // listener: the observer only fires on the one boundary crossing, so this
+  // stays cheap regardless of how long the entry is or how much the user
+  // scrolls — no per-pixel scroll math anywhere. See its render site for
+  // the zero-reflow trick used to mount it.
+  const [showStickyBar, setShowStickyBar] = useState(false);
+  const headerSentinelRef = useRef(null);
+  useEffect(() => {
+    const el = headerSentinelRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(([e]) => setShowStickyBar(!e.isIntersecting), { threshold: 0 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   const syncEditOverlay = useCallback(() => {
     if (editOverlayRef.current && editTaRef.current) {
@@ -776,12 +841,15 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   // ── VIEW MODE ──────────────────────────────────────────────────────────
   // Width/columns are driven by the .mb-detail-shell/.mb-detail-grid CSS
   // classes (public/index.html) rather than inline styles, specifically so
-  // they can respond to viewport size — mobile stays the original single
-  // 680px column; tablet/laptop (≥768px) get a wider shell and, once there
-  // are images, a two-column layout with a sticky image rail instead of a
-  // stretched single column. A quick fade-in on mount smooths switching
-  // between entries via prev/next, since this component remounts (`key`)
-  // each time.
+  // they can respond to viewport size — mobile stays a single column;
+  // tablet/laptop (≥768px) get a wider shell and, once there are images, a
+  // two-column layout with a sticky image rail. A quick fade-in on mount
+  // smooths switching between entries via prev/next, since this component
+  // remounts (`key`) each time.
+  //
+  // The System/Title/meta/toolbar header and the Review Notes section are
+  // ONE merged, lightly-contained "reading pane" (was two separate bordered+
+  // shadowed cards) — see its own comment below for why.
   return (
     <div className="mb-detail-shell" style={{fontFamily:'Inter,sans-serif',animation:'medbook-fade-in 200ms ease'}}>
       {lb!==null && <Lightbox images={entry.images} start={lb} onClose={()=>setLb(null)} />}
@@ -832,113 +900,135 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         )}
       </div>
 
-      {/* Header card + grid are wrapped together (below) only when there
-          are no images — narrowing/centring as one unit rather than the
-          header staying full shell width while the single-column grid
-          beneath it shrinks on its own. With images, both already span
-          the same combined width naturally, so no wrapper is needed. */}
-      <div className={hasImages ? undefined : 'mb-detail-single-col'}>
+      <div className={`mb-detail-grid${hasImages ? '' : ' mb-detail-grid--single'}`}>
+      <div className="mb-detail-main" style={{display:'flex',flexDirection:'column',gap:SPACE.md+2,minWidth:0}}>
 
-      <div className="mb-detail-card" style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
-        marginBottom:SPACE.md+2,borderTop:`3px solid ${color}`,
-        boxShadow:elevation(t,'sm')}}>
+      {/* ---- Reading pane: System / Title / meta+toolbar / Review Notes ----
+          Merged into ONE lightly-contained block (previously two separate
+          bordered+shadowed cards) so the entry reads as a single continuous
+          page rather than stacked dashboard slabs. Softer border, no
+          shadow, and a smaller radius than the AI/Images cards below it
+          keep this the visually lightest element on the screen, on
+          purpose — the medical content should carry the weight, not the
+          container around it. */}
+      <div className="mb-detail-card" style={{background:t.surface,
+        border:`1px solid ${t.border}`,borderRadius:RADIUS.md}}>
 
-        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:SPACE.sm,flexWrap:'wrap'}}>
-          <span style={{fontSize:FONT.size.xs,fontWeight:FONT.weight.medium,background:`${color}12`,color,
-            borderRadius:RADIUS.sm-2,padding:'2px 8px',border:`1px solid ${color}25`}}>{entry.system}</span>
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6,flexWrap:'wrap'}}>
+          <span style={{fontSize:FONT.size.sm,fontWeight:FONT.weight.semibold,color}}>{entry.system}</span>
           {savedFlash && <SavedChip t={t} />}
         </div>
 
-        <div style={{fontSize:FONT.size.xl2,fontWeight:FONT.weight.bold,color:t.text,
+        <div style={{fontSize:FONT.size.xl3,fontWeight:FONT.weight.bold,color:t.text,
           lineHeight:FONT.leading.tight,marginBottom:SPACE.md}}>
           {entry.title}
           {entry.pinned && <IconPin size={16} style={{marginLeft:8,color:t.warn,verticalAlign:-2}} />}
         </div>
 
         {/* Difficulty is intentionally not shown here — see the same note
-            in EntryCard.js. It's still fully editable in Edit mode. */}
-        <div style={{display:'flex',flexWrap:'wrap',gap:SPACE.sm,alignItems:'center',marginBottom:SPACE.lg}}>
-          <span style={{fontSize:FONT.size.xs,color:t.text4}}>{fmt(entry.created_at)}</span>
-          {entry.review_count>0 && (
-            <span style={{fontSize:FONT.size.xs,color:t.ok,fontWeight:FONT.weight.semibold}}>
-              ✓ Reviewed {entry.review_count}×{entry.last_reviewed&&` · Last: ${fmt(entry.last_reviewed)}`}
-            </span>
-          )}
-        </div>
+            in EntryCard.js. It's still fully editable in Edit mode. Meta
+            and the entry toolbar share a row: compact, and it keeps the
+            header short enough to start reading without much scrolling. */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,flexWrap:'wrap'}}>
+          <span style={{fontSize:FONT.size.xs,color:t.text4}}>
+            {fmt(entry.created_at)}
+            {entry.review_count>0 && (
+              <> · <span style={{color:t.ok,fontWeight:FONT.weight.semibold}}>
+                Reviewed {entry.review_count}×{entry.last_reviewed&&` · Last: ${fmt(entry.last_reviewed)}`}
+              </span></>
+            )}
+          </span>
 
-        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-          <ActionButton t={t} tone="ok" icon={<IconCheck size={13} />} onClick={markReviewed} pulse={reviewedFlash}>
-            Reviewed
-          </ActionButton>
-          <ActionButton t={t} tone="accent" icon={<IconEdit size={13} />} onClick={()=>setEditing(true)}>
-            Edit
-          </ActionButton>
-          <ActionButton t={t} tone={entry.pinned?'warn':'neutral'} icon={<IconPin size={13} />} onClick={togglePin}>
-            {entry.pinned?'Unpin':'Pin'}
-          </ActionButton>
-          <ActionButton t={t} tone="neutral" icon={<IconDownload size={13} />} onClick={exportPDF}>
-            PDF
-          </ActionButton>
-          <ActionButton t={t} tone="danger" icon={<IconTrash size={13} />} onClick={deleteEntry} disabled={deleting}>
-            {deleting?'…':'Delete'}
-          </ActionButton>
-        </div>
-      </div>
-
-      <div className={`mb-detail-grid${hasImages ? '' : ' mb-detail-grid--single'}`}>
-      <div className="mb-detail-main" style={{display:'flex',flexDirection:'column',gap:SPACE.md+2,minWidth:0}}>
-
-      {entry.notes && (
-        <div className="mb-detail-card" style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
-          boxShadow:elevation(t,'sm')}}>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
-            marginBottom:SPACE.md,flexWrap:'wrap',gap:8}}>
-            <div style={{fontSize:FONT.size.micro,color:t.text4,letterSpacing:.8,fontWeight:FONT.weight.semibold,textTransform:'uppercase'}}>
-              Review Notes
-            </div>
-            <button className="mb-detailbtn"
-              onMouseDown={e=>e.preventDefault()} onTouchStart={e=>e.preventDefault()}
-              onClick={()=>setHVOn(p=>!p)}
-              style={{fontSize:FONT.size.xs,background:hlViewOn?t.hlBtnBg:t.surface3,
-                border:`1px solid ${hlViewOn?t.hlBtnBorder:t.border}`,
-                borderRadius:RADIUS.sm-1,padding:'3px 10px',cursor:'pointer',display:'flex',
-                alignItems:'center',gap:5,
-                color:hlViewOn?t.hlBtnText:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif'}}>
-              <IconEdit size={11} /> {hlViewOn?'Done':'Highlight'}
-            </button>
+          <div style={{display:'flex',gap:6,flexShrink:0}}>
+            <ActionButton t={t} tone="ok" icon={<IconCheck size={14} />} label="Mark reviewed"
+              onClick={markReviewed} pulse={reviewedFlash} />
+            <ActionButton t={t} tone="accent" icon={<IconEdit size={14} />} label="Edit entry"
+              onClick={()=>setEditing(true)} />
+            <ActionButton t={t} tone={entry.pinned?'warn':'neutral'} icon={<IconPin size={14} />}
+              label={entry.pinned?'Unpin entry':'Pin entry'} onClick={togglePin} />
+            <ActionButton t={t} tone="neutral" icon={<IconDownload size={14} />} label="Export as PDF"
+              onClick={exportPDF} />
+            <ActionButton t={t} tone="danger" label={deleting?'Deleting…':'Delete entry'}
+              onClick={deleteEntry} disabled={deleting}
+              icon={deleting
+                ? <span style={{display:'inline-block',width:12,height:12,border:`2px solid ${t.border}`,
+                    borderTop:`2px solid ${t.danger}`,borderRadius:RADIUS.circle,
+                    animation:'medbook-spin .7s linear infinite'}} />
+                : <IconTrash size={14} />} />
           </div>
-          {hlViewOn && (
-            <>
-              {/* Static toolbar — always available, and the reliable path on mobile
-                  where the OS selection bubble can crowd the floating bar. */}
-              <HLToolbar
-                onApply={applyViewHL}
-                onRemove={removeViewHL}
-                onClearAll={clearAllViewHL}
-                hasSelection={viewHasSel}
-              />
-              <div style={{fontSize:FONT.size.xs,color:t.text4,marginBottom:SPACE.sm}}>
-                Select text, then tap a colour here — or use the bar that pops up above your selection.
+        </div>
+
+        {/* Sentinel for the sticky compact bar just below — its DOM position
+            right after the header (before Review Notes) is what makes
+            IntersectionObserver report "scrolled past the header" at the
+            right moment, with no scroll math involved. 1px tall, inert. */}
+        <div ref={headerSentinelRef} aria-hidden="true" style={{height:1}} />
+
+        {/* Zero-height sticky anchor: always mounted (so it never causes a
+            reflow when the bar appears/disappears), only the bar INSIDE it
+            is conditionally rendered and absolutely positioned to fill it.
+            Bleeds to the card's edges via the CSS class (negative margin
+            matching .mb-detail-card's own padding). */}
+        <div className="mb-detail-stickybar-anchor" style={{zIndex:Z.dropdown}}>
+          {showStickyBar && (
+            <div className="mb-detail-stickybar" style={{background:t.surface,
+              borderBottom:`1px solid ${t.border}`,boxShadow:elevation(t,'sm'),
+              animation:'medbook-fade-in 160ms ease'}}>
+              <button className="mb-detailbtn" onClick={onBack} title={`Back to ${entry.system}`}
+                aria-label={`Back to ${entry.system}`} style={{background:'none',border:'none',
+                color:t.text3,cursor:'pointer',display:'flex',alignItems:'center',padding:4,flexShrink:0}}>
+                <IconChevronLeft size={16} />
+              </button>
+              <div style={{flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+                fontSize:FONT.size.sm,fontWeight:FONT.weight.semibold,color:t.text2}}>
+                {entry.title}
               </div>
-            </>
+              <HighlightToggle t={t} on={hlViewOn} onClick={()=>setHVOn(p=>!p)} compact />
+            </div>
           )}
-          {/* maxWidth keeps line length from running away on very wide
-              monitors, without touching notesRef's structure —
-              readSelection()'s character-offset math walks notesRef's text
-              content, which this doesn't change. 720px comfortably fills
-              the tablet/laptop main column (~836px with the image rail,
-              ~760px without) rather than stranding the text in a fraction
-              of a much wider card the way a tighter, editorial-style
-              measure would. On mobile the card is already narrower than
-              this, so it has no effect there. */}
-          <div ref={notesRef}
-            data-selectable={hlViewOn ? 'true' : 'false'}
-            style={{lineHeight:1.9,fontSize:FONT.size.md,color:t.text2,maxWidth:720,
-            userSelect:hlViewOn?'text':'auto'}}>
-            <RenderedNotes text={entry.notes} highlights={viewHL} />
-          </div>
         </div>
-      )}
+
+        {entry.notes && (
+          <>
+            <div style={{height:1,background:t.border,margin:`${SPACE.lg}px 0`}} />
+
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
+              marginBottom:SPACE.md,flexWrap:'wrap',gap:8}}>
+              <div style={{fontSize:FONT.size.micro,color:t.text4,letterSpacing:.8,fontWeight:FONT.weight.semibold,textTransform:'uppercase'}}>
+                Review Notes
+              </div>
+              <HighlightToggle t={t} on={hlViewOn} onClick={()=>setHVOn(p=>!p)} />
+            </div>
+            {hlViewOn && (
+              <>
+                {/* Static toolbar — always available, and the reliable path on mobile
+                    where the OS selection bubble can crowd the floating bar. */}
+                <HLToolbar
+                  onApply={applyViewHL}
+                  onRemove={removeViewHL}
+                  onClearAll={clearAllViewHL}
+                  hasSelection={viewHasSel}
+                />
+                <div style={{fontSize:FONT.size.xs,color:t.text4,marginBottom:SPACE.sm}}>
+                  Select text, then tap a colour here — or use the bar that pops up above your selection.
+                </div>
+              </>
+            )}
+            {/* maxWidth keeps line length comfortable rather than running the
+                full width of a wide tablet/laptop column, without touching
+                notesRef's structure — readSelection()'s character-offset
+                math walks notesRef's text content, which this doesn't
+                change. On mobile the card is already narrower than this,
+                so it has no effect there. */}
+            <div ref={notesRef}
+              data-selectable={hlViewOn ? 'true' : 'false'}
+              style={{lineHeight:1.9,fontSize:FONT.size.md,color:t.text2,maxWidth:640,
+              userSelect:hlViewOn?'text':'auto'}}>
+              <RenderedNotes text={entry.notes} highlights={viewHL} />
+            </div>
+          </>
+        )}
+      </div>
 
       {/* ---- AI analysis (Sprint 2) ------------------------------------------
           Sits BELOW the Review so your own notes always read first.
@@ -1049,9 +1139,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             </div>
             <div className="mb-detail-images">
               {entry.images.map((url,i)=>(
-                <img key={i} src={url} alt="" className="mb-detailimg" onClick={()=>setLb(i)}
-                  style={{borderRadius:RADIUS.md,border:`1px solid ${t.border}`,cursor:'pointer',
-                    objectFit:'contain',background:t.surface2}} />
+                <GalleryThumb key={i} t={t} src={url} onClick={()=>setLb(i)} />
               ))}
             </div>
           </div>
@@ -1059,8 +1147,6 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
       )}
 
       </div>{/* /.mb-detail-grid */}
-
-      </div>{/* /.mb-detail-single-col (no-op wrapper when hasImages) */}
     </div>
   );
 }
