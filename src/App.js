@@ -5,7 +5,7 @@ import { SYS_COLOR } from './lib/constants';
 import { useScrollRestore } from './lib/useScrollRestore';
 import { useDebouncedValue } from './lib/useDebouncedValue';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation, BREAKPOINT } from './lib/theme';
-import { IconMenu, IconX, IconChevronLeft } from './lib/icons';
+import { IconMenu, IconX, IconChevronLeft, IconRepeat, IconPlus, IconInbox } from './lib/icons';
 import Auth from './components/Auth';
 import Sidebar from './components/Sidebar';
 import EntryCard from './components/EntryCard';
@@ -397,6 +397,18 @@ export default function App() {
   const color = userSystems.find(s=>s.name===activeSystem)?.color
     || SYS_COLOR[activeSystem] || '#2563eb';
 
+  // Small header progress readout for the active system's entry list
+  // (batch 4) — same "due"/"reviewed" definitions ReviewQueue and Dashboard
+  // already use, just sliced to the one system currently open.
+  const activeSystemProgress = useMemo(() => {
+    const list = entries[activeSystem] || [];
+    const now = new Date();
+    return {
+      due: list.filter(e => e.next_review && new Date(e.next_review) <= now).length,
+      reviewed: list.filter(e => e.review_count > 0).length,
+    };
+  }, [entries, activeSystem]);
+
   // Recovery takes priority over everything else, including an active
   // session — a recovery-flow sign-in still makes `session` truthy below,
   // which is exactly what was routing people straight into the app instead
@@ -478,6 +490,12 @@ export default function App() {
             .mb-headerbtn:hover { background: ${t.surface2}; }
             .mb-headerbtn:active { transform: scale(0.92); }
             .mb-actionbtn-ghost:active { transform: scale(0.96); }
+            .mb-headerbtn2 { transition: filter ${MOTION.fast} ${MOTION.ease}, transform ${MOTION.fast} ${MOTION.ease}; }
+            .mb-headerbtn2:hover { filter: brightness(0.97); }
+            .mb-headerbtn2:active { transform: scale(0.96); }
+            .mb-bulkbtn { transition: background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}, transform ${MOTION.fast} ${MOTION.ease}; }
+            .mb-bulkbtn:active { transform: scale(0.96); }
+            .mb-hero-cta:active { transform: scale(0.97); }
           `}</style>
           <button className="mb-headerbtn" onClick={()=>setSB(p=>!p)} title={sidebarOpen?'Close sidebar':'Open sidebar'}
             style={{background:'none',border:'none',
@@ -504,7 +522,17 @@ export default function App() {
               <div style={{width:7,height:7,borderRadius:RADIUS.circle,background:color,flexShrink:0}} />
               <span style={{fontSize:FONT.size.md,fontWeight:FONT.weight.bold,color:t.text,
                 overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{activeSystem}</span>
-              {view==='list' && <span style={{fontSize:FONT.size.xs,color:t.text4,flexShrink:0}}>{sysEntries.length}</span>}
+              {view==='list' && (
+                <span style={{fontSize:FONT.size.xs,color:t.text4,flexShrink:0,whiteSpace:'nowrap'}}>
+                  {sysEntries.length}
+                  {!isMobile && sysEntries.length>0 && (
+                    <>
+                      {activeSystemProgress.due>0 && <span style={{color:t.accent,fontWeight:FONT.weight.semibold}}> · {activeSystemProgress.due} due</span>}
+                      {' · '}{activeSystemProgress.reviewed}/{sysEntries.length} reviewed
+                    </>
+                  )}
+                </span>
+              )}
             </>
           )}
 
@@ -513,31 +541,33 @@ export default function App() {
           {view==='list' && !isMobile && (
             <input value={search} onChange={e=>setSearch(e.target.value)}
               placeholder="Search notes…"
-              style={{background:t.surface2,border:`1px solid ${t.border}`,borderRadius:7,
-                color:t.text,padding:'7px 12px',fontSize:13,width:180,outline:'none'}} />
+              style={{background:t.surface2,border:`1px solid ${t.border}`,borderRadius:RADIUS.sm+1,
+                color:t.text,padding:'7px 12px',fontSize:FONT.size.base,width:180,outline:'none'}} />
           )}
           {view==='search' && (
             <input value={globalSearch} onChange={e=>setGS(e.target.value)}
               placeholder="Search all systems…" autoFocus
-              style={{background:t.surface2,border:`1px solid ${t.border}`,borderRadius:7,
-                color:t.text,padding:'7px 12px',fontSize:13,outline:'none',
+              style={{background:t.surface2,border:`1px solid ${t.border}`,borderRadius:RADIUS.sm+1,
+                color:t.text,padding:'7px 12px',fontSize:FONT.size.base,outline:'none',
                 width:isMobile?'100%':260,flex:isMobile?1:'none'}} />
           )}
 
           {view==='list' && (
             <div style={{display:'flex',gap:8,flexShrink:0}}>
               {(entries[activeSystem]||[]).length>0 && (
-                <button onClick={()=>setSysReview(true)} style={{
+                <button className="mb-headerbtn2" onClick={()=>setSysReview(true)} style={{
                   background:t.surface2,color:t.text2,border:`1px solid ${t.border}`,
-                  borderRadius:7,padding:isMobile?'8px 10px':'8px 14px',
-                  fontSize:13,fontWeight:600,cursor:'pointer'}}>
-                  {isMobile?'🔁':'🔁 Review'}
+                  borderRadius:RADIUS.sm+1,padding:isMobile?'8px 10px':'8px 14px',
+                  fontSize:FONT.size.base,fontWeight:FONT.weight.semibold,cursor:'pointer',
+                  display:'flex',alignItems:'center',gap:6}}>
+                  <IconRepeat size={13} />{!isMobile && 'Review'}
                 </button>
               )}
-              <button onClick={()=>{ setView('add'); setSB(false); }} style={{background:color,color:'#fff',
-                border:'none',borderRadius:7,padding:isMobile?'8px 14px':'8px 16px',
-                fontSize:13,fontWeight:600,cursor:'pointer'}}>
-                {isMobile?'+':'+ Add Entry'}
+              <button className="mb-headerbtn2" onClick={()=>{ setView('add'); setSB(false); }} style={{background:color,color:'#fff',
+                border:'none',borderRadius:RADIUS.sm+1,padding:isMobile?'8px 14px':'8px 16px',
+                fontSize:FONT.size.base,fontWeight:FONT.weight.semibold,cursor:'pointer',
+                display:'flex',alignItems:'center',gap:6}}>
+                <IconPlus size={13} />{!isMobile && 'Add Entry'}
               </button>
             </div>
           )}
@@ -559,8 +589,8 @@ export default function App() {
             <input value={search} onChange={e=>setSearch(e.target.value)}
               placeholder={`Search ${activeSystem}…`}
               style={{width:'100%',background:t.surface2,border:`1px solid ${t.border}`,
-                borderRadius:7,color:t.text,padding:'8px 12px',
-                fontSize:13,outline:'none',boxSizing:'border-box'}} />
+                borderRadius:RADIUS.sm+1,color:t.text,padding:'8px 12px',
+                fontSize:FONT.size.base,outline:'none',boxSizing:'border-box'}} />
           </div>
         )}
 
@@ -649,31 +679,30 @@ export default function App() {
                   {/* Bulk toolbar */}
                   {sysEntries.length>0 && (
                     <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
-                      <button onClick={()=>{ setBulkMode(p=>!p); setSelected2(new Set()); }}
-                        style={{fontSize:12,
+                      <button className="mb-bulkbtn" onClick={()=>{ setBulkMode(p=>!p); setSelected2(new Set()); }}
+                        style={{fontSize:FONT.size.sm,
                           background:bulkMode?t.navActiveBg:t.surface3,
                           border:`1px solid ${bulkMode?t.navActiveBorder:t.border}`,
-                          borderRadius:6,padding:'5px 12px',cursor:'pointer',
-                          color:bulkMode?t.navActiveText:t.text3,fontWeight:600,fontFamily:'Inter,sans-serif'}}>
+                          borderRadius:RADIUS.sm,padding:'5px 12px',cursor:'pointer',
+                          color:bulkMode?t.navActiveText:t.text3,fontWeight:FONT.weight.semibold}}>
                         {bulkMode?`☑ ${selected2.size} selected`:'☑ Select'}
                       </button>
                       {bulkMode && selected2.size>0 && (<>
-                        <button onClick={()=>bulkPin(true)} style={bb('#d97706')}>📌 Pin</button>
-                        <button onClick={()=>bulkPin(false)} style={bb('#6b7280')}>Unpin</button>
+                        <button className="mb-bulkbtn" onClick={()=>bulkPin(true)} style={bb('#d97706')}>📌 Pin</button>
+                        <button className="mb-bulkbtn" onClick={()=>bulkPin(false)} style={bb('#6b7280')}>Unpin</button>
                         <select onChange={e=>{if(e.target.value){bulkMove(e.target.value);e.target.value='';}}}
                           defaultValue=""
-                          style={{fontSize:12,border:`1px solid ${t.border}`,borderRadius:6,
-                            padding:'5px 10px',cursor:'pointer',color:t.text2,
-                            fontFamily:'Inter,sans-serif',background:t.surface}}>
+                          style={{fontSize:FONT.size.sm,border:`1px solid ${t.border}`,borderRadius:RADIUS.sm,
+                            padding:'5px 10px',cursor:'pointer',color:t.text2,background:t.surface}}>
                           <option value="" disabled>Move to…</option>
                           {userSystems.filter(s=>s.name!==activeSystem).map(s=>(
                             <option key={s.name} value={s.name}>{s.name}</option>
                           ))}
                         </select>
-                        <button onClick={bulkDelete} style={bb('#dc2626')}>🗑 Delete</button>
+                        <button className="mb-bulkbtn" onClick={bulkDelete} style={bb('#dc2626')}>🗑 Delete</button>
                       </>)}
                       {bulkMode && selected2.size===0 && (
-                        <span style={{fontSize:12,color:t.text4}}>
+                        <span style={{fontSize:FONT.size.sm,color:t.text4}}>
                           {isMobile?'Tap cards to select':'Click or right-click to select'}
                         </span>
                       )}
@@ -681,16 +710,22 @@ export default function App() {
                   )}
 
                   {sysEntries.length===0 ? (
-                    <div style={{textAlign:'center',padding:'60px 20px'}}>
-                      <div style={{fontSize:40,marginBottom:12}}>📋</div>
-                      <div style={{fontSize:14,color:t.text3}}>
+                    <div style={{textAlign:'center',padding:'60px 20px',
+                      animation:`medbook-fade-in ${MOTION.normal} ${MOTION.ease}`}}>
+                      <div style={{width:56,height:56,borderRadius:RADIUS.xl2,background:t.surface3,
+                        display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 14px'}}>
+                        <IconInbox size={24} style={{color:t.text4}} />
+                      </div>
+                      <div style={{fontSize:FONT.size.base,color:t.text3}}>
                         {search?'No entries match your search':`No entries yet for ${activeSystem}`}
                       </div>
                       {!search && (
-                        <button onClick={()=>{ setView('add'); setSB(false); }} style={{marginTop:16,
-                          background:color,color:'#fff',border:'none',borderRadius:8,
-                          padding:'10px 22px',fontSize:13,fontWeight:600,cursor:'pointer'}}>
-                          + Add First Entry
+                        <button className="mb-hero-cta" onClick={()=>{ setView('add'); setSB(false); }} style={{marginTop:16,
+                          background:color,color:'#fff',border:'none',borderRadius:RADIUS.md,
+                          padding:'10px 22px',fontSize:FONT.size.base,fontWeight:FONT.weight.semibold,cursor:'pointer',
+                          display:'inline-flex',alignItems:'center',gap:7,
+                          transition:`transform ${MOTION.fast} ${MOTION.ease}`}}>
+                          <IconPlus size={14} /> Add First Entry
                         </button>
                       )}
                     </div>
@@ -717,12 +752,14 @@ export default function App() {
 
                   {/* Mobile FAB */}
                   {isMobile && !bulkMode && (
-                    <button onClick={()=>setQuickAdd(true)} style={{
+                    <button className="mb-hero-cta" onClick={()=>setQuickAdd(true)} style={{
                       position:'fixed',bottom:24,right:20,width:56,height:56,
-                      borderRadius:'50%',background:color,color:'#fff',border:'none',
-                      fontSize:26,cursor:'pointer',
-                      boxShadow:'0 4px 16px rgba(0,0,0,.2)',zIndex:100,
-                      display:'flex',alignItems:'center',justifyContent:'center'}}>+</button>
+                      borderRadius:RADIUS.circle,background:color,color:'#fff',border:'none',
+                      cursor:'pointer',boxShadow:elevation(t,'lg'),zIndex:100,
+                      display:'flex',alignItems:'center',justifyContent:'center',
+                      transition:`transform ${MOTION.fast} ${MOTION.ease}`}}>
+                      <IconPlus size={22} />
+                    </button>
                   )}
                 </div>
               )}
@@ -781,22 +818,25 @@ const SelectableCard = React.memo(function SelectableCard({ entry, color, bulkMo
 
   return (
     <div style={{position:'relative',outline:isSelected?`2px solid ${color}`:'none',
-      borderRadius:8,cursor:'pointer',
+      borderRadius:RADIUS.md,cursor:'pointer',
       WebkitUserSelect:'none',userSelect:'none',
       // Subtle press feedback so a tap always feels registered (A4).
+      // Touch/press handling itself (below) is untouched from before —
+      // only these cosmetic values moved onto tokens.
       transform: pressed ? 'scale(0.985)' : 'scale(1)',
-      transition:'outline .1s, transform .08s ease'}}
+      transition:`outline ${MOTION.fast} ${MOTION.ease}, transform ${MOTION.fast} ${MOTION.ease}`}}
       onClick={handleClick}
       onContextMenu={e=>{e.preventDefault();fired.current=true;onStartBulk(entry.id);}}
       onMouseDown={()=>setPressed(true)} onMouseUp={()=>setPressed(false)} onMouseLeave={()=>setPressed(false)}
       onTouchStart={startPress} onTouchEnd={endPress} onTouchMove={trackMove}>
       {bulkMode && (
         <div style={{position:'absolute',top:10,left:10,zIndex:10,width:22,height:22,
-          borderRadius:5,background:isSelected?color:t.surface,
+          borderRadius:RADIUS.sm,background:isSelected?color:t.surface,
           border:`2px solid ${isSelected?color:t.borderStrong}`,
           display:'flex',alignItems:'center',justifyContent:'center',
-          boxShadow:'0 1px 3px rgba(0,0,0,.15)',pointerEvents:'none'}}>
-          {isSelected&&<span style={{color:'#fff',fontSize:13,fontWeight:700}}>✓</span>}
+          boxShadow:elevation(t,'sm'),pointerEvents:'none',
+          transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}`}}>
+          {isSelected&&<span style={{color:'#fff',fontSize:FONT.size.sm,fontWeight:FONT.weight.bold}}>✓</span>}
         </div>
       )}
       <EntryCard entry={entry} color={color} />
@@ -817,6 +857,6 @@ function Spinner({ track='#e5e7eb', accent='#2563eb' }) {
 }
 
 function bb(color) {
-  return {fontSize:12,background:`${color}10`,border:`1px solid ${color}30`,
-    color,borderRadius:6,padding:'5px 10px',cursor:'pointer',fontWeight:600,fontFamily:'Inter,sans-serif'};
+  return {fontSize:FONT.size.sm,background:`${color}10`,border:`1px solid ${color}30`,
+    color,borderRadius:RADIUS.sm,padding:'5px 10px',cursor:'pointer',fontWeight:FONT.weight.semibold};
 }

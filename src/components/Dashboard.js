@@ -1,19 +1,9 @@
 import { useMemo } from 'react';
-import { SYS_COLOR } from '../lib/constants';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
+import { computeSystemStats } from '../lib/systemStats';
+import { timeAgo } from '../lib/timeAgo';
 import EntryCard from './EntryCard';
 import { IconRepeat, IconCards, IconSearch, IconPlus, IconChart } from '../lib/icons';
-
-function timeAgo(date) {
-  const min = Math.floor((Date.now() - date.getTime()) / 60000);
-  if (min < 1) return 'just now';
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  if (day < 7) return `${day}d ago`;
-  return date.toLocaleDateString('en-GB', { day:'2-digit', month:'short' });
-}
 
 function greetingFor(hour) {
   if (hour < 5)  return 'Still up?';
@@ -42,22 +32,7 @@ export default function Dashboard({ entries, userSystems, onOpenEntry, onNavigat
     const reviewedCount = all.filter(e => e.review_count > 0).length;
     const recent = [...all].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5);
 
-    const bySystem = (userSystems || []).map(s => {
-      const list = entries[s.name] || [];
-      const lastStudied = list.reduce((max, e) => {
-        if (!e.last_reviewed) return max;
-        const d = new Date(e.last_reviewed);
-        return (!max || d > max) ? d : max;
-      }, null);
-      return {
-        name: s.name,
-        color: s.color || SYS_COLOR[s.name] || t.accent,
-        count: list.length,
-        reviewedCount: list.filter(e => e.review_count > 0).length,
-        dueCount: list.filter(e => e.next_review && new Date(e.next_review) <= now).length,
-        lastStudied,
-      };
-    }).filter(s => s.count > 0);
+    const bySystem = computeSystemStats(entries, userSystems, t.accent).filter(s => s.count > 0);
 
     const recentlyStudied = bySystem
       .filter(s => s.lastStudied)
