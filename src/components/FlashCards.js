@@ -5,6 +5,8 @@ import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { SYS_COLOR } from '../lib/constants';
 import DeckBrowser from './ImportedDecks/DeckBrowser';
 import ImportWizard from './ImportedDecks/ImportWizard';
+import StudySession from './ImportedDecks/StudySession';
+import BrowseDeck from './ImportedDecks/BrowseDeck';
 
 // Sentinel key for cards with no system assigned (legacy cards, or anything
 // created before folders existed). Never stored in the DB as this string —
@@ -23,6 +25,7 @@ const AREA_TABS = [
 export default function FlashCards({ userId, userSystems }) {
   const { t } = useTheme();
   const [area, setArea] = useState('own');
+  const [importedSub, setImportedSub] = useState(null); // { mode: 'study'|'browse', deck } | null
   const [showImportWizard, setShowImportWizard] = useState(false);
   const [deckBrowserKey, setDeckBrowserKey] = useState(0); // bump to force DeckBrowser to reload after an import completes
   const [cards, setCards]     = useState([]);
@@ -260,20 +263,28 @@ export default function FlashCards({ userId, userSystems }) {
   // ── Imported Decks area ─────────────────────────────────────────────
   // A tab inside Flashcards, not a new Sidebar section. Everything below
   // this branch is the pre-existing "My Cards" feature, untouched.
-  if (area === 'imported') return (
-    <div style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
-      <AreaTabs t={t} area={area} setArea={setArea} />
-      <DeckBrowser key={deckBrowserKey} userId={userId}
-        onStudy={(deck) => window.alert(`Study "${deck.display_name}" — coming next (Phase L).`)}
-        onBrowse={(deck) => window.alert(`Browse "${deck.display_name}" — coming next (Phase K).`)}
-        onImportClick={() => setShowImportWizard(true)} />
-      {showImportWizard && (
-        <ImportWizard userId={userId}
-          onClose={() => setShowImportWizard(false)}
-          onImported={() => setDeckBrowserKey(k => k + 1)} />
-      )}
-    </div>
-  );
+  if (area === 'imported') {
+    if (importedSub?.mode === 'study') return (
+      <StudySession deck={importedSub.deck} userId={userId} onExit={() => setImportedSub(null)} />
+    );
+    if (importedSub?.mode === 'browse') return (
+      <BrowseDeck deck={importedSub.deck} userId={userId} onExit={() => setImportedSub(null)} />
+    );
+    return (
+      <div style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
+        <AreaTabs t={t} area={area} setArea={setArea} />
+        <DeckBrowser key={deckBrowserKey} userId={userId}
+          onStudy={(deck) => setImportedSub({ mode: 'study', deck })}
+          onBrowse={(deck) => setImportedSub({ mode: 'browse', deck })}
+          onImportClick={() => setShowImportWizard(true)} />
+        {showImportWizard && (
+          <ImportWizard userId={userId}
+            onClose={() => setShowImportWizard(false)}
+            onImported={() => setDeckBrowserKey(k => k + 1)} />
+        )}
+      </div>
+    );
+  }
 
   // ── Study mode ────────────────────────────────────────────────────────
   if (view === 'study' || view === 'studyOne') {
