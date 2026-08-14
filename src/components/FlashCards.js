@@ -3,14 +3,25 @@ import { supabase } from '../lib/supabase';
 import { useTheme } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { SYS_COLOR } from '../lib/constants';
+import DeckBrowser from './ImportedDecks/DeckBrowser';
 
 // Sentinel key for cards with no system assigned (legacy cards, or anything
 // created before folders existed). Never stored in the DB as this string —
 // the DB value is always NULL; this is purely a UI-side grouping key.
 const UNCAT = '__uncategorized__';
 
+// Top-level area within Flashcards. 'own' = the existing self-authored
+// flashcards feature (My Cards), untouched below. 'imported' = the new
+// Imported Decks area (Phase H) — deliberately a tab INSIDE Flashcards,
+// not a new Sidebar entry, per spec.
+const AREA_TABS = [
+  { id: 'own', label: 'My Cards' },
+  { id: 'imported', label: 'Imported Decks' },
+];
+
 export default function FlashCards({ userId, userSystems }) {
   const { t } = useTheme();
+  const [area, setArea] = useState('own');
   const [cards, setCards]     = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -243,6 +254,19 @@ export default function FlashCards({ userId, userSystems }) {
     </div>
   );
 
+  // ── Imported Decks area ─────────────────────────────────────────────
+  // A tab inside Flashcards, not a new Sidebar section. Everything below
+  // this branch is the pre-existing "My Cards" feature, untouched.
+  if (area === 'imported') return (
+    <div style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
+      <AreaTabs t={t} area={area} setArea={setArea} />
+      <DeckBrowser userId={userId}
+        onStudy={(deck) => window.alert(`Study "${deck.display_name}" — coming next (Phase L).`)}
+        onBrowse={(deck) => window.alert(`Browse "${deck.display_name}" — coming next (Phase K).`)}
+        onImportClick={() => window.alert('Import Anki Deck — coming next (Phase H1/H2).')} />
+    </div>
+  );
+
   // ── Study mode ────────────────────────────────────────────────────────
   if (view === 'study' || view === 'studyOne') {
     const isOne = view === 'studyOne';
@@ -398,10 +422,11 @@ export default function FlashCards({ userId, userSystems }) {
   // ── Folder list (top level) ─────────────────────────────────────────
   if (view === 'folders') return (
     <div style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
+      <AreaTabs t={t} area={area} setArea={setArea} />
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
         marginBottom:20, flexWrap:'wrap', gap:10 }}>
         <div style={{ fontSize:16, fontWeight:700, color:t.text }}>
-          Flashcards <span style={{ fontSize:13, color:t.text4, fontWeight:400 }}>({cards.length})</span>
+          My Cards <span style={{ fontSize:13, color:t.text4, fontWeight:400 }}>({cards.length})</span>
         </div>
         {cards.length > 0 && (
           <button onClick={studyEverything} style={B(t.accent)}>▶ Study Everything (Shuffled)</button>
@@ -601,6 +626,28 @@ export default function FlashCards({ userId, userSystems }) {
           );})}
         </div>
       )}
+    </div>
+  );
+}
+
+// Shared tab switcher between the two Flashcards areas. Only shown at each
+// area's top level (My Cards folders / Imported Decks root) — sub-flows
+// (add/edit/study, deck browse/study) use their own "← Back" convention,
+// same as the rest of the app.
+function AreaTabs({ t, area, setArea }) {
+  return (
+    <div style={{ display:'flex', gap:4, marginBottom:18, background:t.surface2,
+      border:`1px solid ${t.border}`, borderRadius:9, padding:3, width:'fit-content' }}>
+      {AREA_TABS.map(tab => (
+        <button key={tab.id} onClick={()=>setArea(tab.id)} style={{
+          background: area===tab.id ? t.surface : 'transparent',
+          color: area===tab.id ? t.text : t.text3,
+          border:'none', borderRadius:7, padding:'7px 16px', fontSize:13,
+          fontWeight:600, cursor:'pointer', fontFamily:'Inter,sans-serif',
+          boxShadow: area===tab.id ? `0 1px 2px ${t.shadow}` : 'none' }}>
+          {tab.label}
+        </button>
+      ))}
     </div>
   );
 }
