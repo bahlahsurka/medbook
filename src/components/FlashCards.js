@@ -4,6 +4,7 @@ import { useTheme } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { SYS_COLOR } from '../lib/constants';
 import DeckBrowser from './ImportedDecks/DeckBrowser';
+import ImportWizard from './ImportedDecks/ImportWizard';
 
 // Sentinel key for cards with no system assigned (legacy cards, or anything
 // created before folders existed). Never stored in the DB as this string —
@@ -22,6 +23,8 @@ const AREA_TABS = [
 export default function FlashCards({ userId, userSystems }) {
   const { t } = useTheme();
   const [area, setArea] = useState('own');
+  const [showImportWizard, setShowImportWizard] = useState(false);
+  const [deckBrowserKey, setDeckBrowserKey] = useState(0); // bump to force DeckBrowser to reload after an import completes
   const [cards, setCards]     = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -260,10 +263,15 @@ export default function FlashCards({ userId, userSystems }) {
   if (area === 'imported') return (
     <div style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
       <AreaTabs t={t} area={area} setArea={setArea} />
-      <DeckBrowser userId={userId}
+      <DeckBrowser key={deckBrowserKey} userId={userId}
         onStudy={(deck) => window.alert(`Study "${deck.display_name}" — coming next (Phase L).`)}
         onBrowse={(deck) => window.alert(`Browse "${deck.display_name}" — coming next (Phase K).`)}
-        onImportClick={() => window.alert('Import Anki Deck — coming next (Phase H1/H2).')} />
+        onImportClick={() => setShowImportWizard(true)} />
+      {showImportWizard && (
+        <ImportWizard userId={userId}
+          onClose={() => setShowImportWizard(false)}
+          onImported={() => setDeckBrowserKey(k => k + 1)} />
+      )}
     </div>
   );
 

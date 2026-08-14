@@ -147,10 +147,20 @@ export async function getActiveImportJob(userId) {
   return data;
 }
 
-export async function pollImportJob(jobId) {
+/**
+ * Read-only status poll — selects the import_jobs row directly. Deliberately
+ * NOT a call to /api/import-process: that endpoint does real work and
+ * already re-invokes itself (selfInvoke) to continue a job in the
+ * background. Hitting it again on a polling timer would race the chain it
+ * already started — the very class of concurrent-invocation bug this
+ * session's earlier fixes were about. One explicit POST (startProcessing,
+ * below) kicks the chain off; after that, the UI only ever reads.
+ */
+export async function getImportJob(jobId) {
   if (MOCK_MODE) return mock.jobs.active;
-  const res = await fetch(`/api/import-process?jobId=${jobId}`, { method: 'POST' });
-  return res.json();
+  const { data, error } = await supabase.from('import_jobs').select('*').eq('id', jobId).single();
+  if (error) throw new Error(error.message);
+  return data;
 }
 
 /* ------------------------------------------------------------------ */
