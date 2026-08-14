@@ -331,6 +331,27 @@ export default async function handler(req, res) {
           due_at: null,
         })).filter(r => r.note_id);
 
+        // DIAGNOSTIC: a real completed job (5d3e580e) ended up with 3591
+        // cards in the source SQLite (job.total_cards, read via COUNT(*) at
+        // extraction time) but 0 rows in imported_cards — meaning
+        // noteIdByAnkiId[String(c.nid)] came back undefined for every
+        // single card, in every batch, with no insert ever attempted and
+        // no error ever thrown. Log enough to see WHERE that mapping
+        // breaks the next time this runs, without spamming when it's fine.
+        if (cardBatch.length && cardRows.length < cardBatch.length) {
+          console.error('[import-process] card/note_id mapping dropped rows', {
+            jobId, cursor,
+            noteBatchLen: noteBatch.length,
+            insertedNotesLen: insertedNotes?.length ?? null,
+            cardBatchLen: cardBatch.length,
+            cardRowsLen: cardRows.length,
+            sampleAnkiNoteIds: ankiNoteIds.slice(0, 3),
+            sampleInsertedAnkiNoteIds: (insertedNotes || []).slice(0, 3).map(r => r.anki_note_id),
+            sampleCardNids: cardBatch.slice(0, 3).map(c => c.nid),
+            noteIdByAnkiIdKeyCount: Object.keys(noteIdByAnkiId).length,
+          });
+        }
+
         if (cardRows.length) {
           const { error: cErr } = await db.from('imported_cards').insert(cardRows);
           if (cErr) throw new Error(`Card insert failed: ${cErr.message}`);
