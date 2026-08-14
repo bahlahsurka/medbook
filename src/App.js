@@ -4,7 +4,7 @@ import { loadSystems, saveSystems, DEFAULT_SYSTEMS } from './lib/systems';
 import { SYS_COLOR } from './lib/constants';
 import { useScrollRestore } from './lib/useScrollRestore';
 import { useDebouncedValue } from './lib/useDebouncedValue';
-import { useTheme } from './lib/theme';
+import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation } from './lib/theme';
 import Auth from './components/Auth';
 import Sidebar from './components/Sidebar';
 import EntryCard from './components/EntryCard';
@@ -388,23 +388,23 @@ export default function App() {
 
   if (authLoading) return (
     <div style={{minHeight:'100vh',background:t.appBg,display:'flex',
-      alignItems:'center',justifyContent:'center',fontFamily:'Inter,sans-serif'}}>
-      <Spinner />
+      alignItems:'center',justifyContent:'center'}}>
+      <Spinner track={t.spinnerTrack} accent={t.accent} />
     </div>
   );
 
   if (!session) return <Auth />;
 
   return (
-    <div style={{display:'flex',height:'100vh',background:t.bg,
-      overflow:'hidden',fontFamily:'Inter,sans-serif'}}>
+    <div style={{display:'flex',height:'100vh',background:t.bg,overflow:'hidden'}}>
 
       {/* Toast */}
       {toast && (
-        <div onClick={()=>setToast(null)} style={{position:'fixed',bottom:20,right:20,zIndex:999,
-          background:toast.type==='err'?'#dc2626':toast.type==='warn'?'#d97706':'#16a34a',
-          color:'#fff',borderRadius:8,padding:'11px 18px',fontSize:13,fontWeight:600,
-          boxShadow:'0 4px 16px rgba(0,0,0,.2)',cursor:'pointer',
+        <div onClick={()=>setToast(null)} style={{position:'fixed',bottom:SPACE.xl,right:SPACE.xl,zIndex:Z.toast,
+          background:toast.type==='err'?t.danger:toast.type==='warn'?t.warn:t.ok,
+          color:'#fff',borderRadius:RADIUS.md,padding:'11px 18px',fontSize:FONT.size.base,fontWeight:FONT.weight.semibold,
+          boxShadow:elevation(t,'lg'),cursor:'pointer',
+          transition:`transform ${MOTION.normal} ${MOTION.ease}, opacity ${MOTION.normal} ${MOTION.ease}`,
           maxWidth:'calc(100vw - 40px)'}}>
           {toast.msg}
         </div>
@@ -416,7 +416,8 @@ export default function App() {
       {showSysReview && <SystemReview system={activeSystem} entries={entries[activeSystem]||[]} color={color} onReviewed={onReviewed} onClose={()=>setSysReview(false)} />}
 
       {isMobile && sidebarOpen && (
-        <div onClick={()=>setSB(false)} style={{position:'fixed',inset:0,background:t.overlay,zIndex:40}} />
+        <div onClick={()=>setSB(false)} style={{position:'fixed',inset:0,background:t.overlay,zIndex:Z.mobileScrim,
+          transition:`opacity ${MOTION.normal} ${MOTION.ease}`}} />
       )}
 
       <input ref={importRef} type="file" accept=".json" style={{display:'none'}} onChange={importJSON} />
@@ -425,8 +426,8 @@ export default function App() {
       <div style={{
         position:isMobile?'fixed':'relative',
         left:isMobile?(sidebarOpen?0:-260):'auto',
-        top:0,bottom:0,zIndex:50,width:240,flexShrink:0,
-        transition:isMobile?'left .2s ease':'none',
+        top:0,bottom:0,zIndex:Z.sidebar,width:240,flexShrink:0,
+        transition:isMobile?`left ${MOTION.normal} ${MOTION.ease}`:'none',
         display:(!isMobile&&!sidebarOpen)?'none':'block'
       }}>
         <Sidebar open={true} entries={entries} activeSystem={activeSystem}
@@ -442,22 +443,23 @@ export default function App() {
       <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minWidth:0}}>
 
         {/* Header */}
-        <div style={{display:'flex',alignItems:'center',gap:10,padding:'12px 16px',
+        <div style={{display:'flex',alignItems:'center',gap:SPACE.sm+2,padding:`${SPACE.md}px ${SPACE.lg}px`,
           borderBottom:`1px solid ${t.border}`,background:t.surface,flexShrink:0,
-          boxShadow:`0 1px 2px ${t.shadow}`}}>
+          boxShadow:elevation(t,'sm')}}>
           <button onClick={()=>setSB(p=>!p)} style={{background:'none',border:'none',
-            color:t.text3,cursor:'pointer',fontSize:18,padding:'2px 4px',flexShrink:0}}>☰</button>
+            color:t.text3,cursor:'pointer',fontSize:18,padding:'2px 4px',flexShrink:0,
+            borderRadius:RADIUS.sm,transition:`color ${MOTION.fast} ${MOTION.ease}`}}>☰</button>
 
-          {view==='stats'  && <span style={{fontWeight:700,color:t.text,fontSize:14}}>Dashboard</span>}
-          {view==='search' && <span style={{fontWeight:700,color:t.text,fontSize:14}}>Global Search</span>}
-          {view==='review' && <span style={{fontWeight:700,color:t.text,fontSize:14}}>Review Queue</span>}
-          {view==='cards'  && <span style={{fontWeight:700,color:t.text,fontSize:14}}>Flashcards</span>}
+          {view==='stats'  && <span style={{fontWeight:FONT.weight.bold,color:t.text,fontSize:FONT.size.md}}>Dashboard</span>}
+          {view==='search' && <span style={{fontWeight:FONT.weight.bold,color:t.text,fontSize:FONT.size.md}}>Global Search</span>}
+          {view==='review' && <span style={{fontWeight:FONT.weight.bold,color:t.text,fontSize:FONT.size.md}}>Review Queue</span>}
+          {view==='cards'  && <span style={{fontWeight:FONT.weight.bold,color:t.text,fontSize:FONT.size.md}}>Flashcards</span>}
           {['list','add','detail'].includes(view) && (
             <>
-              <div style={{width:7,height:7,borderRadius:'50%',background:color,flexShrink:0}} />
-              <span style={{fontSize:14,fontWeight:700,color:t.text,
+              <div style={{width:7,height:7,borderRadius:RADIUS.circle,background:color,flexShrink:0}} />
+              <span style={{fontSize:FONT.size.md,fontWeight:FONT.weight.bold,color:t.text,
                 overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{activeSystem}</span>
-              {view==='list' && <span style={{fontSize:11,color:t.text4,flexShrink:0}}>{sysEntries.length}</span>}
+              {view==='list' && <span style={{fontSize:FONT.size.xs,color:t.text4,flexShrink:0}}>{sysEntries.length}</span>}
             </>
           )}
 
@@ -742,6 +744,9 @@ const SelectableCard = React.memo(function SelectableCard({ entry, color, bulkMo
 });
 
 function Spinner({ track='#e5e7eb', accent='#2563eb' }) {
+  // The reduced-motion media query in index.html collapses this animation's
+  // duration to effectively 0 for anyone with that OS preference set — no
+  // per-component branching needed.
   return (
     <div style={{width:32,height:32,border:`3px solid ${track}`,borderTop:`3px solid ${accent}`,
       borderRadius:'50%',animation:'spin .8s linear infinite',margin:'0 auto'}}>
