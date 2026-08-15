@@ -1,20 +1,65 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
-import { useTheme } from '../lib/theme';
+import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { SYS_COLOR } from '../lib/constants';
+import { IconLayers, IconPlay, IconPlus, IconEdit, IconTrash, IconCheck, IconChevronLeft } from '../lib/icons';
 
 // Sentinel key for cards with no system assigned (legacy cards, or anything
 // created before folders existed). Never stored in the DB as this string —
 // the DB value is always NULL; this is purely a UI-side grouping key.
 const UNCAT = '__uncategorized__';
 
+// Shared field styling (add/edit forms) — tokenised, otherwise unchanged
+// from before this batch.
+function fieldStyles(t) {
+  return {
+    lbl: { fontSize:FONT.size.micro, color:t.text4, letterSpacing:.8, fontWeight:FONT.weight.semibold,
+      textTransform:'uppercase', display:'block', marginBottom:6 },
+    ta: { width:'100%', background:t.surface, border:`1px solid ${t.borderStrong}`, borderRadius:RADIUS.md,
+      color:t.text, padding:'10px 12px', fontSize:FONT.size.md, outline:'none',
+      boxSizing:'border-box', resize:'vertical', lineHeight:1.6, fontFamily:'Inter,sans-serif' },
+    select: { width:'100%', background:t.surface, border:`1px solid ${t.borderStrong}`,
+      borderRadius:RADIUS.md, color:t.text, padding:'10px 12px', fontSize:FONT.size.md, outline:'none',
+      boxSizing:'border-box', fontFamily:'Inter,sans-serif' },
+  };
+}
+
+function ErrBox({ t, msg }) {
+  return (
+    <div style={{ background:t.dangerBg, border:`1px solid ${t.dangerBorder}`,
+      borderRadius:RADIUS.md, padding:'10px 14px', fontSize:FONT.size.base, color:t.danger }}>{msg}</div>
+  );
+}
+
+// Primary/secondary/ghost/danger button — one small factory instead of the
+// same five inline style objects repeated at every call site, so every
+// button on this screen shares the same size/radius/weight scale.
+function Btn({ t, tone='primary', icon, children, ...props }) {
+  const map = {
+    primary: { background:t.accent, color:'#fff', border:'none' },
+    ok:      { background:t.ok,     color:'#fff', border:'none' },
+    ghost:   { background:t.surface3, color:t.text2, border:`1px solid ${t.border}` },
+    danger:  { background:t.dangerBg, color:t.danger, border:`1px solid ${t.dangerBorder}` },
+  };
+  const c = map[tone] || map.primary;
+  return (
+    <button className="mb-fc-btn" {...props} style={{
+      display:'inline-flex', alignItems:'center', justifyContent:'center', gap:7,
+      ...c, borderRadius:RADIUS.sm+1, padding:'10px 18px', fontSize:FONT.size.sm,
+      fontWeight:FONT.weight.semibold, cursor:'pointer', fontFamily:'Inter,sans-serif',
+      ...props.style }}>
+      {icon}{children}
+    </button>
+  );
+}
+
 export default function FlashCards({ userId, userSystems }) {
   const { t } = useTheme();
   const [cards, setCards]     = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // 'folders' = top-level system browser (the new landing view)
+  // 'folders' = top-level system browser (the landing view)
   // 'list'    = cards inside one folder/system
   // 'add' | 'edit' | 'study' | 'studyOne'
   const [view, setView]           = useState('folders');
@@ -22,8 +67,8 @@ export default function FlashCards({ userId, userSystems }) {
 
   // Bulk select — deliberately an explicit toggle button, NOT long-press.
   // The entry-list's long-press bulk mode has its own touch-sensitivity
-  // problems; reusing that pattern here would just import the same issue
-  // into a second screen. A "Select" button avoids it entirely.
+  // history; reusing that pattern here would just import the same class of
+  // issue into a second screen. A "Select" button avoids it entirely.
   const [bulkMode, setBulkMode]   = useState(false);
   const [selectedIds, setSelIds]  = useState(new Set());
   const [bulkTarget, setBulkTarget] = useState('');
@@ -48,21 +93,7 @@ export default function FlashCards({ userId, userSystems }) {
   const [editSystem, setEditSystem] = useState('');
   const [editSaving, setES]   = useState(false);
 
-  // Theme-aware style helpers
-  const B = (bg, color='#fff') => ({ background:bg, color, border:'none', borderRadius:8,
-    padding:'10px 20px', fontSize:13, fontWeight:600, cursor:'pointer', fontFamily:'Inter,sans-serif' });
-  const lbl = { fontSize:10, color:t.text4, letterSpacing:.8, fontWeight:600,
-    textTransform:'uppercase', display:'block', marginBottom:6 };
-  const ta  = { width:'100%', background:t.surface2, border:`1px solid ${t.borderStrong}`, borderRadius:8,
-    color:t.text, padding:'10px 12px', fontSize:14, outline:'none',
-    boxSizing:'border-box', resize:'vertical', lineHeight:1.6, fontFamily:'Inter,sans-serif' };
-  const selectStyle = { width:'100%', background:t.surface2, border:`1px solid ${t.borderStrong}`,
-    borderRadius:8, color:t.text, padding:'10px 12px', fontSize:14, outline:'none',
-    boxSizing:'border-box', fontFamily:'Inter,sans-serif' };
-  const ErrBox = ({ msg }) => (
-    <div style={{ background:t.dangerBg, border:`1px solid ${t.dangerBorder}`,
-      borderRadius:8, padding:'10px 14px', fontSize:13, color:t.danger }}>{msg}</div>
-  );
+  const F = fieldStyles(t);
 
   useEffect(() => {
     if (!userId) return;
@@ -230,15 +261,28 @@ export default function FlashCards({ userId, userSystems }) {
   const card = studyCards[studyIdx];
 
   // Keyboard: Space=reveal, Enter=Next (no difficulty rating here — this is a
-  // plain flip-through deck, not the spaced-repetition review queue).
+  // plain flip-through deck, not the spaced-repetition Review Queue).
   const inStudy = (view === 'study' || view === 'studyOne') && !done && !!card;
   useReviewKeyboard(inStudy, {
     flipped, onFlip: () => setFlipped(true),
     onNext: () => nextCard(),
   });
 
+  // Shared local styling — kept inline (as Dashboard.js does) since this
+  // screen mounts once at a time, not hundreds of times like EntryCard.
+  const localCss = `
+    .mb-fc-btn { transition: filter ${MOTION.fast} ${MOTION.ease}, transform ${MOTION.fast} ${MOTION.ease}; }
+    .mb-fc-btn:hover:not(:disabled) { filter: brightness(0.97); }
+    body.medbook-dark .mb-fc-btn:hover:not(:disabled) { filter: brightness(1.15); }
+    .mb-fc-btn:active:not(:disabled) { transform: scale(0.96); }
+    .mb-fc-row { transition: border-color ${MOTION.fast} ${MOTION.ease}, transform ${MOTION.fast} ${MOTION.ease}, box-shadow ${MOTION.fast} ${MOTION.ease}; }
+    .mb-fc-row:hover { border-color: ${t.borderStrong}; transform: translateY(-1px); }
+    .mb-fc-row:active { transform: scale(0.99); }
+    .mb-fc-fade { animation: medbook-fade-in ${MOTION.normal} ${MOTION.ease}; }
+  `;
+
   if (loading) return (
-    <div style={{ textAlign:'center', paddingTop:60, color:t.text4, fontFamily:'Inter,sans-serif' }}>
+    <div style={{ textAlign:'center', paddingTop:60, color:t.text4, fontFamily:'Inter,sans-serif', fontSize:FONT.size.sm }}>
       Loading flashcards…
     </div>
   );
@@ -249,58 +293,70 @@ export default function FlashCards({ userId, userSystems }) {
     const backTarget = () => { setView('list'); setDone(false); };
 
     if (done || (!card && studyCards.length > 0)) return (
-      <div style={{ maxWidth:500, margin:'0 auto', textAlign:'center',
-        paddingTop:60, fontFamily:'Inter,sans-serif' }}>
-        <div style={{ fontSize:40, marginBottom:16 }}>✅</div>
-        <div style={{ fontSize:17, fontWeight:700, color:t.text, marginBottom:8 }}>
-          {isOne ? 'Card reviewed!' : 'All done!'}
+      <div className="mb-fc-fade" style={{ maxWidth:480, margin:'0 auto', textAlign:'center',
+        paddingTop:'14vh', fontFamily:'Inter,sans-serif' }}>
+        <style>{localCss}</style>
+        <div style={{ width:52, height:52, borderRadius:RADIUS.xl2, background:t.okBg,
+          display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 18px' }}>
+          <IconCheck size={22} style={{ color:t.ok }} />
         </div>
-        {!isOne && <div style={{ fontSize:14, color:t.text3, marginBottom:24 }}>
-          You went through all {studyCards.length} cards.
+        <div style={{ fontSize:FONT.size.xl, fontWeight:FONT.weight.bold, color:t.text, marginBottom:8 }}>
+          {isOne ? 'Card reviewed' : 'All done!'}
+        </div>
+        {!isOne && <div style={{ fontSize:FONT.size.base, color:t.text3, marginBottom:26 }}>
+          You went through all {studyCards.length} card{studyCards.length!==1?'s':''}.
         </div>}
-        <div style={{ display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap' }}>
+        <div style={{ display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap', marginTop:isOne?18:0 }}>
           {!isOne && activeFolder !== null && (
-            <button onClick={studyThisFolder} style={B(t.accent)}>Shuffle & Restart</button>
+            <Btn t={t} tone="primary" icon={<IconPlay size={12} />} onClick={studyThisFolder}>
+              Shuffle &amp; Restart
+            </Btn>
           )}
-          <button onClick={activeFolder===null ? backToFolders : backTarget}
-            style={B(t.surface3,t.text2)}>
-            {activeFolder===null ? '← All Folders' : '← Back to List'}
-          </button>
+          <Btn t={t} tone="ghost" icon={<IconChevronLeft size={13} />}
+            onClick={activeFolder===null ? backToFolders : backTarget}>
+            {activeFolder===null ? 'All Folders' : 'Back to List'}
+          </Btn>
         </div>
       </div>
     );
 
     return (
-      <div style={{ maxWidth:560, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-          <button onClick={activeFolder===null ? backToFolders : backTarget}
-            style={{ background:'none', border:'none',
-            color:t.text3, cursor:'pointer', fontSize:13, fontWeight:500,
-            fontFamily:'Inter,sans-serif' }}>← Back</button>
-          {!isOne && <span style={{ fontSize:13, color:t.text3 }}>
+      <div className="mb-fc-fade" style={{ maxWidth:560, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
+        <style>{localCss}</style>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:SPACE.lg }}>
+          <button onClick={activeFolder===null ? backToFolders : backTarget} className="mb-fc-btn" style={{
+            background:'none', border:'none', color:t.text3, cursor:'pointer', fontSize:FONT.size.sm,
+            fontWeight:FONT.weight.medium, fontFamily:'Inter,sans-serif', padding:'4px 2px',
+            display:'flex', alignItems:'center', gap:4 }}>
+            <IconChevronLeft size={14} /> Back
+          </button>
+          {!isOne && <span style={{ fontSize:FONT.size.sm, color:t.text3, fontWeight:FONT.weight.medium }}>
             {studyIdx + 1} / {studyCards.length}
           </span>}
         </div>
 
         {!isOne && (
-          <div style={{ height:4, background:t.surface3, borderRadius:4, marginBottom:20 }}>
-            <div style={{ height:'100%', background:t.accent, borderRadius:4,
-              width:`${((studyIdx+1)/studyCards.length)*100}%`, transition:'width .3s' }} />
+          <div style={{ height:4, background:t.surface3, borderRadius:RADIUS.sm, marginBottom:SPACE.xl2 }}>
+            <div style={{ height:'100%', background:t.accent, borderRadius:RADIUS.sm,
+              width:`${((studyIdx+1)/studyCards.length)*100}%`, transition:`width ${MOTION.slow} ${MOTION.ease}` }} />
           </div>
         )}
 
-        <div style={{ background:t.surface, border:`1px solid ${t.border}`, borderRadius:14,
-          padding:28, minHeight:200, boxShadow:`0 2px 8px ${t.shadow}`, marginBottom:16 }}>
-          <div style={{ fontSize:10, color:t.text4, fontWeight:600,
-            textTransform:'uppercase', letterSpacing:.8, marginBottom:12 }}>Question</div>
-          <div style={{ fontSize:17, fontWeight:600, color:t.text, lineHeight:1.5 }}>
+        {/* The card IS the screen — minimal chrome around it, per the "card
+            as visual focus" direction. */}
+        <div key={studyIdx} className="mb-fc-fade" style={{ background:t.surface, border:`1px solid ${t.border}`,
+          borderRadius:RADIUS.lg, padding:SPACE.xl2, minHeight:220, boxShadow:elevation(t,'sm'),
+          marginBottom:SPACE.lg, display:'flex', flexDirection:'column', justifyContent:'center' }}>
+          <div style={{ fontSize:FONT.size.micro, color:t.text4, fontWeight:FONT.weight.semibold,
+            textTransform:'uppercase', letterSpacing:.8, marginBottom:SPACE.md }}>Question</div>
+          <div style={{ fontSize:FONT.size.xl, fontWeight:FONT.weight.semibold, color:t.text, lineHeight:1.5 }}>
             {card.question}
           </div>
           {flipped && (
-            <div style={{ marginTop:20, paddingTop:20, borderTop:`1px solid ${t.border}` }}>
-              <div style={{ fontSize:10, color:t.ok, fontWeight:600,
-                textTransform:'uppercase', letterSpacing:.8, marginBottom:12 }}>Answer</div>
-              <div style={{ fontSize:15, color:t.text2, lineHeight:1.7, whiteSpace:'pre-wrap' }}>
+            <div className="mb-fc-fade" style={{ marginTop:SPACE.xl2, paddingTop:SPACE.xl2, borderTop:`1px solid ${t.border}` }}>
+              <div style={{ fontSize:FONT.size.micro, color:t.ok, fontWeight:FONT.weight.semibold,
+                textTransform:'uppercase', letterSpacing:.8, marginBottom:SPACE.md }}>Answer</div>
+              <div style={{ fontSize:FONT.size.lg, color:t.text2, lineHeight:1.7, whiteSpace:'pre-wrap' }}>
                 {card.answer}
               </div>
             </div>
@@ -308,18 +364,20 @@ export default function FlashCards({ userId, userSystems }) {
         </div>
 
         {!flipped ? (
-          <button onClick={()=>setFlipped(true)} style={{ ...B(t.accent), width:'100%' }}>
-            Show Answer · Space
-          </button>
+          <Btn t={t} tone="primary" onClick={()=>setFlipped(true)} style={{ width:'100%', padding:'13px 18px' }}>
+            Show Answer <span style={{ opacity:.7, fontWeight:FONT.weight.regular }}>· Space</span>
+          </Btn>
         ) : (
           <div style={{ display:'flex', gap:10 }}>
-            {!isOne && <button onClick={nextCard} style={{ ...B(t.ok), flex:1 }}>
-              Next →
-            </button>}
-            <button onClick={activeFolder===null ? backToFolders : backTarget}
-              style={{ ...B(t.surface3,t.text2), flex:isOne?2:1 }}>
-              {isOne ? '← Back to List' : 'End Session'}
-            </button>
+            {!isOne && (
+              <Btn t={t} tone="ok" onClick={nextCard} style={{ flex:1, padding:'13px 18px' }}>
+                Next →
+              </Btn>
+            )}
+            <Btn t={t} tone="ghost" onClick={activeFolder===null ? backToFolders : backTarget}
+              style={{ flex:isOne?1:'0 0 auto', padding:'13px 18px' }}>
+              {isOne ? 'Back to List' : 'End Session'}
+            </Btn>
           </div>
         )}
       </div>
@@ -328,35 +386,40 @@ export default function FlashCards({ userId, userSystems }) {
 
   // ── Add mode ──────────────────────────────────────────────────────────
   if (view === 'add') return (
-    <div style={{ maxWidth:560, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
-      <div style={{ fontSize:16, fontWeight:700, color:t.text, marginBottom:20 }}>New Flashcard</div>
-      <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+    <div className="mb-fc-fade" style={{ maxWidth:560, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
+      <style>{localCss}</style>
+      <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.bold, color:t.text, marginBottom:SPACE.xl }}>
+        New Flashcard
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', gap:SPACE.lg-2 }}>
         <div>
-          <label style={lbl}>SYSTEM</label>
-          <select value={formSystem} onChange={e=>setFormSystem(e.target.value)} style={selectStyle}>
+          <label style={F.lbl}>System</label>
+          <select value={formSystem} onChange={e=>setFormSystem(e.target.value)} style={F.select}>
             <option value="">Choose a system…</option>
             {(userSystems||[]).map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
           </select>
         </div>
         <div>
-          <label style={lbl}>QUESTION</label>
+          <label style={F.lbl}>Question</label>
           <textarea value={q} onChange={e=>setQ(e.target.value)}
             placeholder="What is the mechanism of action of metformin?"
-            rows={3} style={ta} />
+            rows={3} style={F.ta} />
         </div>
         <div>
-          <label style={lbl}>ANSWER</label>
+          <label style={F.lbl}>Answer</label>
           <textarea value={a} onChange={e=>setA(e.target.value)}
             placeholder="Activates AMPK → decreases hepatic gluconeogenesis"
-            rows={4} style={ta} />
+            rows={4} style={F.ta} />
         </div>
-        {err && <ErrBox msg={err} />}
+        {err && <ErrBox t={t} msg={err} />}
         <div style={{ display:'flex', gap:10 }}>
-          <button onClick={addCard} disabled={saving} style={B(t.accent)}>
-            {saving?'Saving…':'+ Add Card'}
-          </button>
-          <button onClick={()=>{ activeFolder ? setView('list') : backToFolders(); setQ(''); setA(''); setErr(''); }}
-            style={B(t.surface3,t.text2)}>Cancel</button>
+          <Btn t={t} tone="primary" onClick={addCard} disabled={saving} icon={<IconPlus size={13} />}>
+            {saving?'Saving…':'Add Card'}
+          </Btn>
+          <Btn t={t} tone="ghost"
+            onClick={()=>{ activeFolder ? setView('list') : backToFolders(); setQ(''); setA(''); setErr(''); }}>
+            Cancel
+          </Btn>
         </div>
       </div>
     </div>
@@ -364,32 +427,35 @@ export default function FlashCards({ userId, userSystems }) {
 
   // ── Edit mode ─────────────────────────────────────────────────────────
   if (view === 'edit') return (
-    <div style={{ maxWidth:560, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
-      <div style={{ fontSize:16, fontWeight:700, color:t.text, marginBottom:20 }}>Edit Flashcard</div>
-      <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+    <div className="mb-fc-fade" style={{ maxWidth:560, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
+      <style>{localCss}</style>
+      <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.bold, color:t.text, marginBottom:SPACE.xl }}>
+        Edit Flashcard
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', gap:SPACE.lg-2 }}>
         <div>
-          <label style={lbl}>SYSTEM</label>
-          <select value={editSystem} onChange={e=>setEditSystem(e.target.value)} style={selectStyle}>
+          <label style={F.lbl}>System</label>
+          <select value={editSystem} onChange={e=>setEditSystem(e.target.value)} style={F.select}>
             <option value="">Uncategorized</option>
             {(userSystems||[]).map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
           </select>
         </div>
         <div>
-          <label style={lbl}>QUESTION</label>
-          <textarea value={editQ} onChange={e=>setEditQ(e.target.value)} rows={3} style={ta} />
+          <label style={F.lbl}>Question</label>
+          <textarea value={editQ} onChange={e=>setEditQ(e.target.value)} rows={3} style={F.ta} />
         </div>
         <div>
-          <label style={lbl}>ANSWER</label>
-          <textarea value={editA} onChange={e=>setEditA(e.target.value)} rows={4} style={ta} />
+          <label style={F.lbl}>Answer</label>
+          <textarea value={editA} onChange={e=>setEditA(e.target.value)} rows={4} style={F.ta} />
         </div>
-        {err && <ErrBox msg={err} />}
+        {err && <ErrBox t={t} msg={err} />}
         <div style={{ display:'flex', gap:10 }}>
-          <button onClick={saveEdit} disabled={editSaving} style={B(t.accent)}>
-            {editSaving?'Saving…':'✓ Save Changes'}
-          </button>
-          <button onClick={()=>{ setView('list'); setErr(''); }} style={B(t.surface3,t.text2)}>
+          <Btn t={t} tone="primary" onClick={saveEdit} disabled={editSaving} icon={<IconCheck size={13} />}>
+            {editSaving?'Saving…':'Save Changes'}
+          </Btn>
+          <Btn t={t} tone="ghost" onClick={()=>{ setView('list'); setErr(''); }}>
             Cancel
-          </button>
+          </Btn>
         </div>
       </div>
     </div>
@@ -397,51 +463,60 @@ export default function FlashCards({ userId, userSystems }) {
 
   // ── Folder list (top level) ─────────────────────────────────────────
   if (view === 'folders') return (
-    <div style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
+    <div className="mb-fc-fade" style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
+      <style>{localCss}</style>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-        marginBottom:20, flexWrap:'wrap', gap:10 }}>
-        <div style={{ fontSize:16, fontWeight:700, color:t.text }}>
-          Flashcards <span style={{ fontSize:13, color:t.text4, fontWeight:400 }}>({cards.length})</span>
+        marginBottom:SPACE.xl, flexWrap:'wrap', gap:10 }}>
+        <div>
+          <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.bold, color:t.text }}>Flashcards</div>
+          <div style={{ fontSize:FONT.size.xs, color:t.text4, marginTop:2 }}>
+            {cards.length} card{cards.length!==1?'s':''} across {folders.length} folder{folders.length!==1?'s':''}
+          </div>
         </div>
         {cards.length > 0 && (
-          <button onClick={studyEverything} style={B(t.accent)}>▶ Study Everything (Shuffled)</button>
+          <Btn t={t} tone="primary" icon={<IconPlay size={11} />} onClick={studyEverything}>
+            Study Everything
+          </Btn>
         )}
       </div>
 
       {cards.length === 0 ? (
         <div style={{ textAlign:'center', padding:'60px 20px' }}>
-          <div style={{ fontSize:40, marginBottom:12 }}>🃏</div>
-          <div style={{ fontSize:14, color:t.text3, marginBottom:16 }}>
+          <div style={{ width:52, height:52, borderRadius:RADIUS.xl2, background:t.navActiveBg,
+            display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 16px' }}>
+            <IconLayers size={22} style={{ color:t.accent }} />
+          </div>
+          <div style={{ fontSize:FONT.size.base, color:t.text3, marginBottom:18, lineHeight:1.6 }}>
             No flashcards yet. Add cards from AI Analysis, or create one manually below.
           </div>
-          <button onClick={openAdd} style={B(t.accent)}>+ Add First Card</button>
+          <Btn t={t} tone="primary" icon={<IconPlus size={13} />} onClick={openAdd}>Add First Card</Btn>
         </div>
       ) : (
-        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+        <div style={{ display:'flex', flexDirection:'column', gap:SPACE.sm }}>
           {folders.map(f => (
-            <button key={f.key} onClick={()=>openFolder(f.key)} style={{
-              display:'flex', alignItems:'center', gap:12, textAlign:'left',
-              background:t.surface, border:`1px solid ${t.border}`, borderRadius:10,
-              padding:'14px 18px', cursor:'pointer', boxShadow:`0 1px 2px ${t.shadow}`,
+            <button key={f.key} className="mb-fc-row" onClick={()=>openFolder(f.key)} style={{
+              display:'flex', alignItems:'center', gap:SPACE.md, textAlign:'left',
+              background:t.surface, border:`1px solid ${t.border}`, borderRadius:RADIUS.md,
+              padding:'14px 18px', cursor:'pointer', boxShadow:elevation(t,'sm'),
               fontFamily:'Inter,sans-serif' }}>
-              <div style={{ width:10, height:10, borderRadius:'50%', background:f.color, flexShrink:0 }} />
-              <div style={{ flex:1, fontSize:14, fontWeight:600,
+              <div style={{ width:9, height:9, borderRadius:RADIUS.circle, background:f.color, flexShrink:0 }} />
+              <div style={{ flex:1, fontSize:FONT.size.md, fontWeight:FONT.weight.semibold,
                 color: f.key===UNCAT ? t.text3 : t.text,
                 fontStyle: f.key===UNCAT ? 'italic' : 'normal' }}>
                 {f.label}
               </div>
-              <span style={{ fontSize:12, color:t.text4, background:t.surface3,
-                borderRadius:10, padding:'2px 9px', fontWeight:600 }}>{f.count}</span>
-              <span style={{ fontSize:13, color:t.text4 }}>›</span>
+              <span style={{ fontSize:FONT.size.xs, color:t.text4, background:t.surface3,
+                borderRadius:RADIUS.pill, padding:'2px 9px', fontWeight:FONT.weight.semibold }}>{f.count}</span>
+              <IconChevronLeft size={13} style={{ color:t.text4, transform:'rotate(180deg)' }} />
             </button>
           ))}
         </div>
       )}
 
       {cards.length > 0 && (
-        <button onClick={openAdd} style={{ ...B(t.ok), marginTop:16, width:'100%' }}>
-          + New Card
-        </button>
+        <Btn t={t} tone="ok" icon={<IconPlus size={13} />} onClick={openAdd} style={{ marginTop:SPACE.lg, width:'100%' }}>
+          New Card
+        </Btn>
       )}
     </div>
   );
@@ -452,63 +527,64 @@ export default function FlashCards({ userId, userSystems }) {
   const folderColor = folderMeta?.color || t.text4;
 
   return (
-    <div style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
-      <button onClick={backToFolders} style={{ background:'none', border:'none',
-        color:t.text3, cursor:'pointer', fontSize:13, fontWeight:500, marginBottom:14,
-        fontFamily:'Inter,sans-serif', padding:0 }}>← All Folders</button>
+    <div className="mb-fc-fade" style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
+      <style>{localCss}</style>
+      <button onClick={backToFolders} className="mb-fc-btn" style={{ background:'none', border:'none',
+        color:t.text3, cursor:'pointer', fontSize:FONT.size.sm, fontWeight:FONT.weight.medium, marginBottom:SPACE.md,
+        fontFamily:'Inter,sans-serif', padding:'4px 2px', display:'flex', alignItems:'center', gap:4 }}>
+        <IconChevronLeft size={14} /> All Folders
+      </button>
 
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-        marginBottom:14, flexWrap:'wrap', gap:10 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          <div style={{ width:10, height:10, borderRadius:'50%', background:folderColor, flexShrink:0 }} />
-          <div style={{ fontSize:16, fontWeight:700, color:t.text }}>
-            {folderLabel} <span style={{ fontSize:13, color:t.text4, fontWeight:400 }}>({folderCards.length})</span>
+        marginBottom:SPACE.lg, flexWrap:'wrap', gap:10 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:9 }}>
+          <div style={{ width:9, height:9, borderRadius:RADIUS.circle, background:folderColor, flexShrink:0 }} />
+          <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.bold, color:t.text }}>
+            {folderLabel} <span style={{ fontSize:FONT.size.sm, color:t.text4, fontWeight:FONT.weight.regular }}>({folderCards.length})</span>
           </div>
         </div>
         <div style={{ display:'flex', gap:8 }}>
           {folderCards.length > 0 && !bulkMode && (
-            <button onClick={studyThisFolder} style={B(t.accent)}>▶ Study (Shuffled)</button>
+            <Btn t={t} tone="primary" icon={<IconPlay size={11} />} onClick={studyThisFolder}>Study</Btn>
           )}
           {folderCards.length > 0 && (
-            <button onClick={()=> bulkMode ? exitBulk() : setBulkMode(true)} style={
-              bulkMode ? B(t.surface3,t.text2) : { ...B(t.surface2,t.text2), border:`1px solid ${t.border}` }
-            }>
+            <Btn t={t} tone={bulkMode ? 'ghost' : 'ghost'} onClick={()=> bulkMode ? exitBulk() : setBulkMode(true)}>
               {bulkMode ? 'Cancel' : 'Select'}
-            </button>
+            </Btn>
           )}
-          {!bulkMode && <button onClick={openAdd} style={B(t.ok)}>+ New Card</button>}
+          {!bulkMode && <Btn t={t} tone="ok" icon={<IconPlus size={12} />} onClick={openAdd}>New Card</Btn>}
         </div>
       </div>
 
       {/* Bulk action bar — appears once at least one card is checked. One
           request moves/deletes the whole batch, not a loop per card. */}
       {bulkMode && (
-        <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap',
-          background:t.surface2, border:`1px solid ${t.border}`, borderRadius:8,
-          padding:'10px 12px', marginBottom:14 }}>
-          <span style={{ fontSize:12.5, color:t.text3, fontWeight:600 }}>
+        <div className="mb-fc-fade" style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap',
+          background:t.surface2, border:`1px solid ${t.border}`, borderRadius:RADIUS.md,
+          padding:'10px 12px', marginBottom:SPACE.lg }}>
+          <span style={{ fontSize:FONT.size.sm, color:t.text3, fontWeight:FONT.weight.semibold }}>
             {selectedIds.size===0 ? 'Tap cards to select' : `${selectedIds.size} selected`}
           </span>
           {selectedIds.size > 0 && (
             <>
               <select value={bulkTarget} onChange={e=>setBulkTarget(e.target.value)}
-                style={{ fontSize:12, background:t.surface, border:`1px solid ${t.borderStrong}`,
-                  borderRadius:6, padding:'5px 8px', color:t.text, fontFamily:'Inter,sans-serif' }}>
+                style={{ fontSize:FONT.size.xs, background:t.surface, border:`1px solid ${t.borderStrong}`,
+                  borderRadius:RADIUS.sm, padding:'5px 8px', color:t.text, fontFamily:'Inter,sans-serif' }}>
                 <option value="">Move to…</option>
                 <option value={UNCAT}>Uncategorized</option>
                 {(userSystems||[]).map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
               </select>
-              <button onClick={bulkMove} disabled={!bulkTarget || bulkBusy} style={{
-                fontSize:12, fontWeight:600, fontFamily:'Inter,sans-serif',
+              <button className="mb-fc-btn" onClick={bulkMove} disabled={!bulkTarget || bulkBusy} style={{
+                fontSize:FONT.size.xs, fontWeight:FONT.weight.semibold, fontFamily:'Inter,sans-serif',
                 background: bulkTarget ? t.ok : t.surface3, color: bulkTarget ? '#fff' : t.text4,
-                border:'none', borderRadius:6, padding:'6px 12px',
+                border:'none', borderRadius:RADIUS.sm, padding:'6px 12px',
                 cursor: (bulkTarget && !bulkBusy) ? 'pointer' : 'default' }}>
                 {bulkBusy ? 'Moving…' : 'Move'}
               </button>
-              <button onClick={bulkDelete} disabled={bulkBusy} style={{
-                fontSize:12, fontWeight:600, fontFamily:'Inter,sans-serif',
+              <button className="mb-fc-btn" onClick={bulkDelete} disabled={bulkBusy} style={{
+                fontSize:FONT.size.xs, fontWeight:FONT.weight.semibold, fontFamily:'Inter,sans-serif',
                 background:t.dangerBg, color:t.danger, border:`1px solid ${t.dangerBorder}`,
-                borderRadius:6, padding:'6px 12px', cursor:bulkBusy?'default':'pointer' }}>
+                borderRadius:RADIUS.sm, padding:'6px 12px', cursor:bulkBusy?'default':'pointer' }}>
                 Delete
               </button>
             </>
@@ -516,11 +592,11 @@ export default function FlashCards({ userId, userSystems }) {
         </div>
       )}
 
-      {err && <div style={{marginBottom:14}}><ErrBox msg={err} /></div>}
+      {err && <div style={{marginBottom:SPACE.lg}}><ErrBox t={t} msg={err} /></div>}
 
       {activeFolder === UNCAT && folderCards.length > 0 && !bulkMode && (
-        <div style={{ background:t.warnBg, border:`1px solid ${t.warnBorder}`, borderRadius:8,
-          padding:'10px 14px', fontSize:12.5, color:t.warn, marginBottom:14 }}>
+        <div style={{ background:t.warnBg, border:`1px solid ${t.warnBorder}`, borderRadius:RADIUS.md,
+          padding:'10px 14px', fontSize:FONT.size.xs, color:t.warn, marginBottom:SPACE.lg, lineHeight:1.6 }}>
           These cards have no system assigned. Tap <strong>Select</strong> to move several at
           once, or use the dropdown on a single card to file it individually.
         </div>
@@ -528,68 +604,75 @@ export default function FlashCards({ userId, userSystems }) {
 
       {folderCards.length === 0 ? (
         <div style={{ textAlign:'center', padding:'60px 20px' }}>
-          <div style={{ fontSize:40, marginBottom:12 }}>🃏</div>
-          <div style={{ fontSize:14, color:t.text3, marginBottom:16 }}>
+          <div style={{ width:52, height:52, borderRadius:RADIUS.xl2, background:t.navActiveBg,
+            display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 16px' }}>
+            <IconLayers size={22} style={{ color:t.accent }} />
+          </div>
+          <div style={{ fontSize:FONT.size.base, color:t.text3, marginBottom:18 }}>
             No cards in {folderLabel} yet.
           </div>
-          <button onClick={openAdd} style={B(t.accent)}>+ Add a Card</button>
+          <Btn t={t} tone="primary" icon={<IconPlus size={13} />} onClick={openAdd}>Add a Card</Btn>
         </div>
       ) : (
-        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+        <div style={{ display:'flex', flexDirection:'column', gap:SPACE.sm+2 }}>
           {folderCards.map(c => {
             const isSel = selectedIds.has(c.id);
             return (
-            <div key={c.id}
+            <div key={c.id} className="mb-fc-row"
               onClick={bulkMode ? ()=>toggleSelect(c.id) : undefined}
               style={{ background:t.surface,
                 border:`1px solid ${isSel ? folderColor : t.border}`,
                 outline: isSel ? `2px solid ${folderColor}` : 'none',
-                borderRadius:10, padding:'16px 18px', boxShadow:`0 1px 2px ${t.shadow}`,
+                borderRadius:RADIUS.md, padding:'16px 18px', boxShadow:elevation(t,'sm'),
                 cursor: bulkMode ? 'pointer' : 'default' }}>
               <div style={{ display:'flex', justifyContent:'space-between',
-                alignItems:'flex-start', gap:10 }}>
+                alignItems:'flex-start', gap:SPACE.md }}>
                 {bulkMode && (
-                  <div style={{ width:20, height:20, borderRadius:5, flexShrink:0, marginTop:1,
+                  <div style={{ width:20, height:20, borderRadius:RADIUS.sm-1, flexShrink:0, marginTop:1,
                     background: isSel ? folderColor : t.surface,
                     border:`2px solid ${isSel ? folderColor : t.borderStrong}`,
-                    display:'flex', alignItems:'center', justifyContent:'center' }}>
-                    {isSel && <span style={{ color:'#fff', fontSize:12, fontWeight:700 }}>✓</span>}
+                    display:'flex', alignItems:'center', justifyContent:'center',
+                    transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}` }}>
+                    {isSel && <IconCheck size={11} style={{ color:'#fff' }} />}
                   </div>
                 )}
-                <div style={{ flex:1 }}>
-                  <div style={{ fontSize:13, fontWeight:600, color:t.text, marginBottom:6 }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:FONT.size.base, fontWeight:FONT.weight.semibold, color:t.text, marginBottom:6, lineHeight:1.5 }}>
                     {c.question}
                   </div>
-                  <div style={{ fontSize:12, color:t.text3, lineHeight:1.6 }}>{c.answer}</div>
+                  <div style={{ fontSize:FONT.size.sm, color:t.text3, lineHeight:1.6,
+                    overflow:'hidden', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' }}>
+                    {c.answer}
+                  </div>
                 </div>
                 {!bulkMode && (
                   <div style={{ display:'flex', flexDirection:'column', gap:6, flexShrink:0, alignItems:'flex-end' }}>
                     <div style={{ display:'flex', gap:6 }}>
-                      <button onClick={()=>studyOne(c)} style={{
+                      <button className="mb-fc-btn" onClick={()=>studyOne(c)} title="Review this card" style={{
                         background:t.navActiveBg, border:`1px solid ${t.navActiveBorder}`, color:t.navActiveText,
-                        borderRadius:6, padding:'5px 10px', fontSize:11,
-                        cursor:'pointer', fontWeight:600, fontFamily:'Inter,sans-serif' }}>
-                        ▶ Review
+                        borderRadius:RADIUS.sm, padding:'5px 9px', fontSize:FONT.size.xs,
+                        cursor:'pointer', display:'flex', alignItems:'center' }}>
+                        <IconPlay size={10} />
                       </button>
-                      <button onClick={()=>startEdit(c)} style={{
+                      <button className="mb-fc-btn" onClick={()=>startEdit(c)} title="Edit" style={{
                         background:t.surface2, border:`1px solid ${t.border}`, color:t.text2,
-                        borderRadius:6, padding:'5px 10px', fontSize:11,
-                        cursor:'pointer', fontWeight:600, fontFamily:'Inter,sans-serif' }}>
-                        ✎ Edit
+                        borderRadius:RADIUS.sm, padding:'5px 9px', fontSize:FONT.size.xs,
+                        cursor:'pointer', display:'flex', alignItems:'center' }}>
+                        <IconEdit size={10} />
                       </button>
-                      <button onClick={()=>deleteCard(c.id)} style={{
+                      <button className="mb-fc-btn" onClick={()=>deleteCard(c.id)} title="Delete" style={{
                         background:t.dangerBg, border:`1px solid ${t.dangerBorder}`, color:t.danger,
-                        borderRadius:6, padding:'5px 10px', fontSize:11,
-                        cursor:'pointer', fontWeight:600, fontFamily:'Inter,sans-serif' }}>
-                        Delete
+                        borderRadius:RADIUS.sm, padding:'5px 9px', fontSize:FONT.size.xs,
+                        cursor:'pointer', display:'flex', alignItems:'center' }}>
+                        <IconTrash size={10} />
                       </button>
                     </div>
                     {/* Fast re-file path — no need to open Edit just to fix a
                         miscategorized or legacy Uncategorized card. */}
                     <select value={c.system || ''} onChange={e=>quickMove(c, e.target.value)}
                       title="Move to a different system"
-                      style={{ fontSize:11, background:t.surface2, border:`1px solid ${t.border}`,
-                        borderRadius:6, padding:'4px 6px', color:t.text3, fontFamily:'Inter,sans-serif',
+                      style={{ fontSize:FONT.size.micro, background:t.surface2, border:`1px solid ${t.border}`,
+                        borderRadius:RADIUS.sm, padding:'4px 6px', color:t.text3, fontFamily:'Inter,sans-serif',
                         cursor:'pointer' }}>
                       <option value="">Uncategorized</option>
                       {(userSystems||[]).map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
