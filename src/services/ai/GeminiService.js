@@ -14,13 +14,18 @@ const API_KEY = process.env.REACT_APP_GEMINI_API_KEY;
 // deprecation date; 3.x is now current). Hardcoding one model name means this
 // breaks again every few months. Two defenses instead:
 //
-// 1. Default to `gemini-flash-latest` — a documented Google alias that is
-//    auto hot-swapped to the current Flash model, with 2 weeks' notice.
-//    This should rarely need touching.
+// 1. Default to a pinned, known-good model rather than the `gemini-flash-
+//    latest` alias. The alias sounded convenient (auto-hotswapped to
+//    Google's current Flash model, no maintenance) but that's exactly what
+//    bit us: it silently rolled onto Gemini 3.7 Flash, which turned out to
+//    carry a much tighter free-tier quota (RPM 5 / RPD 20, confirmed in
+//    Google AI Studio) than the older Flash models this app was built
+//    around (RPM ~10 / RPD ~250). Pinning a specific version trades "never
+//    needs touching" for "never silently degrades" — worth it after this.
 // 2. If the configured model 404s anyway (rollout ahead of docs, a bad
 //    override, etc.), automatically retry down a short list of known-good
 //    fallbacks before giving up.
-const MODEL = process.env.REACT_APP_GEMINI_MODEL || 'gemini-flash-latest';
+const MODEL = process.env.REACT_APP_GEMINI_MODEL || 'gemini-3.6-flash';
 const FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.5-flash'];
 
 function endpointFor(model) {
@@ -149,7 +154,11 @@ async function attemptModel(model, userPrompt, signal) {
         `Gemini rate limit reached on ${model}` +
         (isPro ? ' (Pro free tier allows only ~5 requests/minute). ' : '. ') +
         waitAdvice +
-        (isPro ? ' If this keeps happening, switching REACT_APP_GEMINI_MODEL back to gemini-flash-latest gives a much higher free limit.' : ''),
+        // NOTE: this used to suggest falling back to `gemini-flash-latest`
+        // for a higher limit — that alias is what silently rolled onto the
+        // tightly-quota'd 3.7 Flash in the first place, so it's no longer
+        // trustworthy advice. Nothing points back to it now.
+        (isPro ? ' If this keeps happening, a lighter-weight model may have a higher free limit — check REACT_APP_GEMINI_MODEL against Google AI Studio\'s current quotas.' : ''),
         isDaily ? 'quota_daily' : 'quota'
       );
     }
