@@ -496,6 +496,13 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     } catch (e) {
       // Entry is untouched on any failure.
       setAiErr(e.message || 'Analysis failed.');
+      // Refresh the usage estimate on failure too, not just success — a 429
+      // still burned a real request against the quota, and this is the only
+      // on-screen way to confirm exactly how many requests one click sent
+      // (previously this only updated after a successful Analyze, so a
+      // rate-limited click left the counter looking stale/untouched).
+      const usedModel = AIService.activeModel();
+      setUsageInfo({ model: usedModel, count: AIService.getRequestCount(), limits: limitsFor(usedModel) });
     } finally {
       setAiBusy(false);
       analyzeInFlight.current = false;

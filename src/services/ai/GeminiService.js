@@ -32,7 +32,7 @@ export class GeminiError extends Error {
   constructor(message, kind) {
     super(message);
     this.name = 'GeminiError';
-    this.kind = kind; // 'config' | 'quota' | 'auth' | 'network' | 'truncated' | 'empty' | 'api'
+    this.kind = kind; // 'config' | 'quota' | 'quota_daily' | 'auth' | 'network' | 'truncated' | 'empty' | 'api'
   }
 }
 
@@ -50,8 +50,14 @@ const DEV = process.env.NODE_ENV !== 'production';
 // of API calls per Analyze click can be verified rather than assumed.
 let requestCount = 0;
 
-/** Total Gemini requests made since page load. Also on window.__geminiRequests in dev. */
+/** Total Gemini requests made since page load. Also on window.__geminiRequests. */
 export function getRequestCount() { return requestCount; }
+
+// Actually expose it (the comment above promised this but nothing ever set
+// it) so the real request count can be checked from any browser's console —
+// the fastest way to confirm whether one Analyze click really sent one
+// request, without trusting a UI label.
+if (typeof window !== 'undefined') window.__geminiRequests = 0;
 
 /** Reset the counter (used when measuring a single click). */
 export function resetRequestCount() { requestCount = 0; }
@@ -59,6 +65,7 @@ export function resetRequestCount() { requestCount = 0; }
 /** One attempt against one specific model. Throws GeminiError on any failure. */
 async function attemptModel(model, userPrompt, signal) {
   const n = ++requestCount;
+  if (typeof window !== 'undefined') window.__geminiRequests = requestCount;
   const startedAt = Date.now();
   if (DEV) {
     // eslint-disable-next-line no-console
@@ -97,22 +104,53 @@ async function attemptModel(model, userPrompt, signal) {
 
   if (!res.ok) {
     let detail = '';
+    let details = null;
     try {
       const body = await res.json();
       detail = body?.error?.message || '';
+      details = body?.error?.details || null;
     } catch { /* non-JSON error body */ }
 
     if (res.status === 429) {
       // Free-tier ceilings are small and per-model: Pro ~5/min, Flash ~10/min,
       // Flash-Lite ~15/min. We deliberately do NOT retry or fall back here —
       // both would spend more of the quota that just ran out.
+      //
+      // Google's 429 body carries the REAL answer to "how long do I actually
+      // wait", via two structured detail types we can read straight out of
+      // `details` instead of guessing:
+      //   - google.rpc.QuotaFailure.violations[].quotaId — names which cap
+      //     was hit. A "PerDay" id means waiting a minute does nothing; the
+      //     daily cap only clears on Google's quota-day rollover.
+      //   - google.rpc.RetryInfo.retryDelay — the exact wait Google itself
+      //     recommends (e.g. "38s"), when Google chooses to send one.
+      // Falling back to the old "about a minute" guess only when neither is
+      // present keeps this correct instead of just less wrong.
+      const quotaFailure = details?.find(d => /QuotaFailure$/.test(d['@type'] || ''));
+      const retryInfo     = details?.find(d => /RetryInfo$/.test(d['@type'] || ''));
+      const violations = quotaFailure?.violations || [];
+      const isDaily  = violations.some(v => /PerDay/i.test(v.quotaId || ''));
+      const retryDelay = retryInfo?.retryDelay; // e.g. "38s"
+
       const isPro = /pro/i.test(model);
+      let waitAdvice;
+      if (isDaily) {
+        waitAdvice = "This is the DAILY free-tier cap, not the per-minute one — waiting a minute will NOT help. " +
+          "It only clears on Google's next quota-day rollover (Pacific time), so Analyze will keep failing until then.";
+      } else if (retryDelay) {
+        waitAdvice = `Google says to wait ${retryDelay}, then click Analyze once.`;
+      } else {
+        // Neither structured field was present — fall back to the documented
+        // per-minute ceiling as the best available guess.
+        waitAdvice = 'Wait about a minute, then click Analyze once.';
+      }
+
       throw new GeminiError(
         `Gemini rate limit reached on ${model}` +
         (isPro ? ' (Pro free tier allows only ~5 requests/minute). ' : '. ') +
-        'Wait about a minute, then click Analyze once.' +
+        waitAdvice +
         (isPro ? ' If this keeps happening, switching REACT_APP_GEMINI_MODEL back to gemini-flash-latest gives a much higher free limit.' : ''),
-        'quota'
+        isDaily ? 'quota_daily' : 'quota'
       );
     }
     // Google is migrating keys from Standard (AIza…) to Auth keys (AQ.Ab…).
