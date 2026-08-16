@@ -971,16 +971,15 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             right moment, with no scroll math involved. 1px tall, inert. */}
         <div ref={headerSentinelRef} aria-hidden="true" style={{height:1}} />
 
-        {/* Zero-height sticky anchor: always mounted (so it never causes a
-            reflow when the bar appears/disappears), only the bar INSIDE it
-            is conditionally rendered and absolutely positioned to fill it.
-            Bleeds to the card's edges via the CSS class (negative margin
-            matching .mb-detail-card's own padding). */}
-        <div className="mb-detail-stickybar-anchor" style={{zIndex:Z.dropdown}}>
-          {showStickyBar && (
+        {/* Sticky bar: a real (collapsing) row, not an overlay — see the CSS
+            comment on .mb-detail-stickybar-anchor for why. It genuinely
+            reserves space when open, so it pushes Review Notes down instead
+            of covering it. Content stays mounted at all times; only the
+            row's height animates. */}
+        <div className={`mb-detail-stickybar-anchor${showStickyBar ? ' is-open' : ''}`} style={{zIndex:Z.dropdown}}>
+          <div className="mb-detail-stickybar-inner">
             <div className="mb-detail-stickybar" style={{background:t.surface,
-              borderBottom:`1px solid ${t.border}`,boxShadow:elevation(t,'sm'),
-              animation:'medbook-fade-in 160ms ease'}}>
+              borderBottom:`1px solid ${t.border}`,boxShadow:elevation(t,'sm')}}>
               <button className="mb-detailbtn" onClick={onBack} title={`Back to ${entry.system}`}
                 aria-label={`Back to ${entry.system}`} style={{background:'none',border:'none',
                 color:t.text3,cursor:'pointer',display:'flex',alignItems:'center',padding:4,flexShrink:0}}>
@@ -992,7 +991,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
               </div>
               <HighlightToggle t={t} on={hlViewOn} onClick={()=>setHVOn(p=>!p)} compact />
             </div>
-          )}
+          </div>
         </div>
 
         {entry.notes && (

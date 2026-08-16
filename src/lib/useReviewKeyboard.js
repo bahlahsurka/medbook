@@ -8,6 +8,7 @@ import { useEffect } from 'react';
  *   g               → "good"
  *   h               → "hard"
  *   a               → "again"
+ *   ← (ArrowLeft)   → previous card, regardless of flip state
  *
  * Safety rules, because this listens globally on `document`:
  *   - Disabled while any input/textarea/contentEditable has focus, so typing
@@ -18,8 +19,11 @@ import { useEffect } from 'react';
  *
  * `handlers` — only the ones you pass are wired up, so FlashCards (which has
  * no difficulty rating) can supply just { onFlip, onNext } and skip the rest.
+ * `onPrev` is likewise optional — pass it to enable ← for "previous card";
+ * omit it (e.g. on the first card, where there's nothing to go back to) and
+ * ArrowLeft simply does nothing.
  */
-export function useReviewKeyboard(enabled, { flipped, onFlip, onAgain, onHard, onGood, onEasy, onNext }) {
+export function useReviewKeyboard(enabled, { flipped, onFlip, onAgain, onHard, onGood, onEasy, onNext, onPrev }) {
   useEffect(() => {
     if (!enabled) return;
 
@@ -37,6 +41,14 @@ export function useReviewKeyboard(enabled, { flipped, onFlip, onAgain, onHard, o
         e.preventDefault(); // stop the page from scrolling
         if (!flipped && onFlip) onFlip();
         else if (flipped && onNext && !onAgain && !onGood) onNext(); // flip-only screens: Space also advances
+        return;
+      }
+
+      // Unlike the rating/advance keys below, going back makes sense from
+      // either side of a card (question or answer), so this isn't gated on
+      // `flipped`.
+      if (e.key === 'ArrowLeft') {
+        if (onPrev) onPrev();
         return;
       }
 
@@ -63,5 +75,5 @@ export function useReviewKeyboard(enabled, { flipped, onFlip, onAgain, onHard, o
 
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [enabled, flipped, onFlip, onAgain, onHard, onGood, onEasy, onNext]);
+  }, [enabled, flipped, onFlip, onAgain, onHard, onGood, onEasy, onNext, onPrev]);
 }
