@@ -16,6 +16,15 @@ import { useEffect } from 'react';
  *   - Disabled while `enabled` is false (e.g. the screen isn't mounted, or a
  *     modal like the image lightbox is open on top of it).
  *   - Space is prevented from also scrolling the page (its normal behaviour).
+ *   - A focused <button> (from a mouse click on Previous/Pause/etc.) is
+ *     blurred before we act on a key this hook handles. A native button
+ *     activates on its OWN Enter/Space keypress too, so leaving one focused
+ *     meant the next Enter both rated/advanced the card via this hook AND
+ *     silently re-fired that button's onClick — e.g. click Previous, then
+ *     press Enter to rate: it advances, then immediately re-triggers
+ *     Previous, landing right back where you started. Blurring here fixes
+ *     it for every button on the screen, not just the ones we remember to
+ *     special-case with onMouseDown={preventDefault}.
  *
  * `handlers` — only the ones you pass are wired up, so FlashCards (which has
  * no difficulty rating) can supply just { onFlip, onNext } and skip the rest.
@@ -36,6 +45,15 @@ export function useReviewKeyboard(enabled, { flipped, onFlip, onAgain, onHard, o
     const onKeyDown = (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return; // don't fight browser shortcuts
       if (isTypingTarget(document.activeElement)) return;
+
+      // Only blur when we're actually about to act on this key — not on
+      // every keystroke, so normal Tab-based keyboard navigation between
+      // buttons is left alone.
+      const isHandledKey = e.code === 'Space' || e.key === 'ArrowLeft' ||
+        (flipped && ['Enter','g','G','h','H','a','A'].includes(e.key));
+      if (isHandledKey && document.activeElement?.tagName === 'BUTTON') {
+        document.activeElement.blur();
+      }
 
       if (e.code === 'Space') {
         e.preventDefault(); // stop the page from scrolling
