@@ -142,15 +142,26 @@
       }
 
       /* Compact sticky context bar (long entries) — appears once the header
-         has scrolled out of view. The "anchor" is always mounted with
-         height:0, so toggling the bar inside it never reflows the content
-         below (no jump when it appears/disappears); the visible bar is
-         absolutely positioned to fill that zero-height anchor. Horizontal
-         bleed matches .mb-detail-card's own padding so it spans the card's
-         full width once stuck, at both breakpoints. */
-      .mb-detail-stickybar-anchor { position: sticky; top: 0; height: 0; margin: 0 -20px; }
+         has scrolled out of view. FIXED from the original absolute-over-
+         zero-height-anchor version, which covered whatever content followed
+         it (a zero-height anchor reserves no space, so the absolutely
+         positioned bar drew directly on top of Review Notes below it).
+         Now the anchor itself is the sticky element and genuinely reserves
+         space via a grid-rows collapse (the same 0fr<->1fr trick as
+         AISections.js's Collapse) — when it opens, the row's real height
+         pushes the content below down instead of covering it, animating
+         smoothly rather than jumping. The inner content stays permanently
+         mounted; only the row's height is ever toggled, so nothing about
+         the bar's own state resets when it opens/closes. */
+      .mb-detail-stickybar-anchor {
+        position: sticky; top: 0;
+        display: grid; grid-template-rows: 0fr;
+        transition: grid-template-rows 200ms ease;
+        margin: 0 -20px;
+      }
+      .mb-detail-stickybar-anchor.is-open { grid-template-rows: 1fr; }
+      .mb-detail-stickybar-inner { overflow: hidden; min-height: 0; }
       .mb-detail-stickybar {
-        position: absolute; top: 0; left: 0; right: 0;
         display: flex; align-items: center; gap: 10px;
         padding: 8px 20px;
       }

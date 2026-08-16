@@ -258,14 +258,24 @@ export default function FlashCards({ userId, userSystems }) {
     else { setStudyIdx(p => p + 1); setFlipped(false); }
   };
 
+  // studyOne is always a single card, so there's never a previous card to
+  // go back to there — only wired up for the multi-card 'study' view.
+  const prevCard = () => {
+    if (studyIdx === 0) return;
+    setStudyIdx(p => p - 1);
+    setFlipped(false);
+  };
+
   const card = studyCards[studyIdx];
 
-  // Keyboard: Space=reveal, Enter=Next (no difficulty rating here — this is a
-  // plain flip-through deck, not the spaced-repetition Review Queue).
+  // Keyboard: Space=reveal, Enter=Next, ←=Previous (no difficulty rating
+  // here — this is a plain flip-through deck, not the spaced-repetition
+  // Review Queue).
   const inStudy = (view === 'study' || view === 'studyOne') && !done && !!card;
   useReviewKeyboard(inStudy, {
     flipped, onFlip: () => setFlipped(true),
     onNext: () => nextCard(),
+    onPrev: view === 'study' ? () => prevCard() : undefined,
   });
 
   // Shared local styling — kept inline (as Dashboard.js does) since this
@@ -330,9 +340,21 @@ export default function FlashCards({ userId, userSystems }) {
             display:'flex', alignItems:'center', gap:4 }}>
             <IconChevronLeft size={14} /> Back
           </button>
-          {!isOne && <span style={{ fontSize:FONT.size.sm, color:t.text3, fontWeight:FONT.weight.medium }}>
-            {studyIdx + 1} / {studyCards.length}
-          </span>}
+          {!isOne && (
+            <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+              <button className="mb-fc-btn" onClick={prevCard} disabled={studyIdx===0}
+                title="Previous card" aria-label="Previous card" style={{
+                background:t.surface2, border:`1px solid ${t.border}`,
+                color: studyIdx===0 ? t.text4 : t.text3, opacity: studyIdx===0 ? .45 : 1,
+                borderRadius:RADIUS.sm, width:28, height:28, cursor: studyIdx===0 ? 'default' : 'pointer',
+                display:'flex', alignItems:'center', justifyContent:'center' }}>
+                <IconChevronLeft size={12} />
+              </button>
+              <span style={{ fontSize:FONT.size.sm, color:t.text3, fontWeight:FONT.weight.medium, padding:'0 2px' }}>
+                {studyIdx + 1} / {studyCards.length}
+              </span>
+            </div>
+          )}
         </div>
 
         {!isOne && (

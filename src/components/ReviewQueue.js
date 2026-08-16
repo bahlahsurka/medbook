@@ -179,6 +179,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems }) {
     flipped, onFlip: () => setFlipped(true),
     onAgain: () => rate('again'), onHard: () => rate('hard'),
     onGood: () => rate('good'),   onEasy: () => rate('easy'),
+    onPrev: () => goPrev(),
   });
   const progress = total > 0 ? Math.round((sessionDone / total) * 100) : 0;
 
@@ -229,6 +230,18 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems }) {
   const skip = () => {
     if (idx + 1 >= total) setDone(true);
     else { setIdx(p => p + 1); setFlipped(false); }
+  };
+
+  // Re-view a prior card. Deliberately does NOT touch sessionDone/progress —
+  // those only move forward from an actual rating — so stepping back and
+  // forth can't inflate "reviewed" past how many cards were really rated.
+  // Re-rating a revisited card still works exactly like rating any other
+  // card (rate() reads the card's CURRENT scheduling state, so it's a
+  // normal "I take that back" correction, not a special case).
+  const goPrev = () => {
+    if (idx === 0) return;
+    setIdx(p => p - 1);
+    setFlipped(false);
   };
 
   const pauseSession = () => setEnded(true);
@@ -452,11 +465,22 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems }) {
         <Lightbox images={card.images} start={lightboxIdx} onClose={()=>setLightboxIdx(null)} />
       )}
 
-      {/* Header */}
+      {/* Header — deliberately lean: title, a prev/counter/pause cluster,
+          and the progress bar below carry all the state that used to be
+          spread across a title row PLUS a separate 3-pill stats row
+          (due/reviewed/%done, redundant with the bar and the counter here). */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:SPACE.md }}>
         <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.bold, color:t.text }}>Review Queue</div>
-        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-          <span style={{ fontSize:FONT.size.sm, color:t.text3, fontWeight:FONT.weight.medium }}>{idx + 1} / {total}</span>
+        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+          <button className="mb-rq-btn" onClick={goPrev} disabled={idx===0}
+            title="Previous card" aria-label="Previous card" style={{
+            fontSize:FONT.size.xs, background:t.surface2, border:`1px solid ${t.border}`,
+            color: idx===0 ? t.text4 : t.text3, opacity: idx===0 ? .45 : 1,
+            borderRadius:RADIUS.sm, width:30, height:30, cursor: idx===0 ? 'default' : 'pointer',
+            display:'flex', alignItems:'center', justifyContent:'center' }}>
+            <IconChevronLeft size={13} />
+          </button>
+          <span style={{ fontSize:FONT.size.sm, color:t.text3, fontWeight:FONT.weight.medium, padding:'0 2px' }}>{idx + 1} / {total}</span>
           <button className="mb-rq-btn" onClick={pauseSession} title="Pause session" aria-label="Pause session" style={{
             fontSize:FONT.size.xs, background:t.surface2, border:`1px solid ${t.border}`, color:t.text3,
             borderRadius:RADIUS.sm, width:30, height:30, cursor:'pointer',
@@ -466,14 +490,8 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems }) {
         </div>
       </div>
 
-      {/* Stats row */}
-      <div style={{ display:'flex', gap:8, marginBottom:SPACE.md, flexWrap:'wrap' }}>
-        <Pill t={t} label={`${dueCount} due`} tone="danger" />
-        <Pill t={t} label={`${sessionDone} reviewed`} tone="ok" />
-        <Pill t={t} label={`${progress}% done`} tone="accent" />
-      </div>
-
-      {/* Progress bar */}
+      {/* Progress bar — the single source of "how far am I", instead of a
+          bar plus a "%done" pill saying the same thing two ways. */}
       <div style={{ height:5, background:t.surface3, borderRadius:RADIUS.sm, marginBottom:SPACE.xl }}>
         <div style={{ height:'100%', background:t.accent, borderRadius:RADIUS.sm,
           width:`${progress}%`, transition:`width ${MOTION.slow} ${MOTION.ease}` }} />
@@ -575,18 +593,3 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems }) {
   );
 }
 
-function Pill({ t, label, tone='neutral' }) {
-  const map = {
-    danger:  { color:t.danger, bg:t.dangerBg, border:t.dangerBorder },
-    ok:      { color:t.ok,     bg:t.okBg,     border:t.okBorder },
-    accent:  { color:t.accent, bg:t.navActiveBg, border:t.navActiveBorder },
-    neutral: { color:t.text2,  bg:t.surface2, border:t.border },
-  };
-  const c = map[tone] || map.neutral;
-  return (
-    <span style={{ fontSize:FONT.size.xs, fontWeight:FONT.weight.semibold, background:c.bg, color:c.color,
-      border:`1px solid ${c.border}`, borderRadius:RADIUS.pill, padding:'3px 11px' }}>
-      {label}
-    </span>
-  );
-}
