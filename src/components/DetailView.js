@@ -6,6 +6,7 @@ import { useHighlight, clearRange } from '../lib/useHighlight';
 import { useTheme, SPACE, RADIUS, FONT, Z, elevation } from '../lib/theme';
 import { IconChevronLeft, IconChevronRight, IconEdit, IconCheck, IconTrash, IconPin,
   IconImages, IconSparkle, IconX, IconDownload, IconChart } from '../lib/icons';
+import { useStudySession } from '../lib/useStudySession';
 import HLToolbar from './HLToolbar';
 import HLPopover from './HLPopover';
 import AISections from './AISections';
@@ -266,6 +267,11 @@ function F({label,children}) {
 export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId, color: colorProp,
   onPrev, onNext, hasPrev, hasNext }) {
   const { t, isDark } = useTheme();
+
+  // Real Study Time data for Insights — counts the whole time this entry is
+  // open (mount to unmount/navigate-away), not just active typing. See
+  // useStudySession.js and SUPABASE_MIGRATION_INSIGHTS.sql.
+  useStudySession(true, userId, 'entry');
   const inp={display:'block',width:'100%',marginTop:8,background:t.surface,
     border:`1px solid ${t.borderStrong}`,borderRadius:RADIUS.md,color:t.text,padding:'10px 12px',
     fontSize:FONT.size.md,outline:'none',boxSizing:'border-box',fontFamily:'Inter,sans-serif'};

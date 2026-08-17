@@ -2,10 +2,10 @@ import { useMemo, useState } from 'react';
 import { useTheme, SPACE, RADIUS, FONT, MOTION } from '../lib/theme';
 import { computeSystemStats } from '../lib/systemStats';
 import { timeAgo } from '../lib/timeAgo';
-import { IconPulse, IconSearch, IconRepeat, IconCards, IconChart, IconSun, IconMoon,
+import { IconPulse, IconSearch, IconRepeat, IconCards, IconChart, IconTrendUp, IconSun, IconMoon,
   IconDownload, IconUpload, IconSettings, IconLogout, IconChevronDown } from '../lib/icons';
 
-const NAV_ICONS = { search: IconSearch, review: IconRepeat, cards: IconCards, stats: IconChart };
+const NAV_ICONS = { search: IconSearch, review: IconRepeat, cards: IconCards, stats: IconChart, insights: IconTrendUp };
 
 export default function Sidebar({ open, width=240, entries, activeSystem, setActiveSystem,
   view, setView, onExport, onImportClick, onLogout, onManageSystems,
@@ -111,10 +111,11 @@ export default function Sidebar({ open, width=240, entries, activeSystem, setAct
       {/* Nav */}
       <div style={{ padding:`${SPACE.sm}px ${SPACE.sm}px 2px`, flexShrink:0 }}>
         {[
-          { id:'search', label:'Global Search' },
-          { id:'review', label:'Review Queue' },
-          { id:'cards',  label:'Flashcards' },
-          { id:'stats',  label:'Dashboard' },
+          { id:'search',   label:'Global Search' },
+          { id:'review',   label:'Review Queue' },
+          { id:'cards',    label:'Flashcards' },
+          { id:'stats',    label:'Dashboard' },
+          { id:'insights', label:'Insights' },
         ].map(n => {
           const Icon = NAV_ICONS[n.id];
           const active = view===n.id;

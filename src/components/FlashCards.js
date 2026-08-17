@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
+import { useStudySession } from '../lib/useStudySession';
 import { SYS_COLOR } from '../lib/constants';
 import { IconLayers, IconPlay, IconPlus, IconEdit, IconTrash, IconCheck, IconChevronLeft } from '../lib/icons';
 
@@ -64,6 +65,10 @@ export default function FlashCards({ userId, userSystems }) {
   // 'add' | 'edit' | 'study' | 'studyOne'
   const [view, setView]           = useState('folders');
   const [activeFolder, setAF]     = useState(null); // system name, or UNCAT, or null (top level)
+
+  // Real Study Time data for Insights — only while actually flipping
+  // through cards, not while browsing folders or editing.
+  useStudySession(view === 'study' || view === 'studyOne', userId, 'flashcards');
 
   // Bulk select — deliberately an explicit toggle button, NOT long-press.
   // The entry-list's long-press bulk mode has its own touch-sensitivity

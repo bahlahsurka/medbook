@@ -20,6 +20,13 @@ export function computeSystemStats(entries, userSystems, fallbackColor = '#2563e
       count: list.length,
       reviewedCount: list.filter(e => e.review_count > 0).length,
       dueCount: list.filter(e => e.next_review && new Date(e.next_review) <= now).length,
+      // Real, derived signal (used by Insights' "Needs attention" ranking) —
+      // NOT a retention calculation. An entry whose interval is still sitting
+      // at the SM-2 floor despite having been reviewed more than once has had
+      // its interval reset at least once, which only happens on an "Again"
+      // rating in calcNext() — a coarse but genuine sign of struggling recall,
+      // derived from real review_count/review_interval, not fabricated.
+      strugglingCount: list.filter(e => (e.review_count||0) > 1 && (e.review_interval||1) <= 1).length,
       lastStudied,
     };
   });

@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR } from '../lib/constants';
 import { buildHighlightParts, resolveHL } from '../lib/highlights';
@@ -6,6 +6,7 @@ import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation } from '../lib/them
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue } from '../lib/reviewQueue';
 import { computeSystemStats } from '../lib/systemStats';
+import { useStudySession } from '../lib/useStudySession';
 import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
   IconX, IconZap } from '../lib/icons';
 
@@ -125,7 +126,7 @@ function StatPill({ t, value, label, tone='neutral' }) {
   );
 }
 
-export default function ReviewQueue({ allEntries, onReviewed, userSystems }) {
+export default function ReviewQueue({ allEntries, onReviewed, userSystems, initialFilterSystem, userId }) {
   const { t, isDark } = useTheme();
 
   // Always-current entries, WITHOUT making the queue rebuild on every rating.
@@ -149,6 +150,11 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems }) {
   const [ended, setEnded]       = useState(false); // user paused midway
   const [lightboxIdx, setLightboxIdx] = useState(null); // index into card.images, or null
 
+  // Real Study Time data for Insights — only while an actual review session
+  // is running (not the overview screen), and Pause genuinely stops the
+  // clock rather than quietly keeping it running in the background.
+  useStudySession(sessionStarted && !ended && !done, userId, 'review');
+
   // Same due/fresh definitions used everywhere else in the app (Dashboard,
   // reviewQueue.js's own buildCycledQueue) — filtering just chooses which
   // entries feed the UNCHANGED queue builder, it doesn't reimplement it.
@@ -168,6 +174,26 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems }) {
   }, [filterMode, filterSystem, filterEntries]);
 
   const backToOverview = () => setSessionStarted(false);
+
+  // Arriving from Insights' "Needs attention" — jump straight into a due
+  // session for that system, exactly like clicking a priority row on this
+  // screen's own overview already does.
+  //
+  // Inlines startNewSession's body instead of calling it directly: calling
+  // setFilterSystem below changes startNewSession's own identity (it's a
+  // useCallback that depends on filterSystem), which would make an
+  // [initialFilterSystem, startNewSession] dependency array fire this
+  // effect a second time right after the first — reshuffling the queue
+  // twice on landing. Depending on `filterEntries` instead (stable —  it's
+  // a useCallback with no deps) keeps this effect genuinely single-fire per
+  // navigation without needing an exhaustive-deps suppression.
+  useEffect(() => {
+    if (!initialFilterSystem) return;
+    setFilterSystem(initialFilterSystem);
+    setQueue(buildCycledQueue(filterEntries('due', initialFilterSystem)));
+    setIdx(0); setFlipped(false); setDone(false); setEnded(false); setSess(0);
+    setSessionStarted(true);
+  }, [initialFilterSystem, filterEntries]);
 
   const card = queue[idx];
   const total = queue.length;
@@ -222,6 +248,21 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems }) {
       return;
     }
     onReviewed({ ...card, ...updates });
+    // Real retention data for Insights — one row per rating. Fire-and-forget
+    // and never surfaced to the user: this is supplementary analytics, not
+    // part of the scheduling update above, so a missing table (migration
+    // not run yet) or a transient failure here must never block a review
+    // that already succeeded. See SUPABASE_MIGRATION_INSIGHTS.sql.
+    if (userId) {
+      supabase.from('review_log').insert({
+        user_id: userId, entry_id: card.id, system: card.system, rating,
+      }).then(({ error: logError }) => {
+        if (logError && process.env.NODE_ENV !== 'production') {
+          // eslint-disable-next-line no-console
+          console.warn('[ReviewQueue] review_log insert failed — has SUPABASE_MIGRATION_INSIGHTS.sql been run?', logError.message);
+        }
+      });
+    }
     setSess(p => p + 1);
     if (idx + 1 >= total) setDone(true);
     else { setIdx(p => p + 1); setFlipped(false); }
