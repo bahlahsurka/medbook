@@ -697,7 +697,7 @@ export default function App() {
               )}
 
               {view==='review' && <ReviewQueue allEntries={entries} onReviewed={onReviewed} userSystems={userSystems}
-                initialFilterSystem={reviewFilterSystem} />}
+                initialFilterSystem={reviewFilterSystem} userId={session.user.id} />}
               {view==='cards'  && <FlashCards userId={session.user.id} userSystems={userSystems} />}
               {view==='stats'  && (
                 <Dashboard entries={entries} userSystems={userSystems}
@@ -709,7 +709,7 @@ export default function App() {
                   onGlobalSearch={()=>switchView('search')} />
               )}
               {view==='insights' && (
-                <Insights entries={entries} userSystems={userSystems}
+                <Insights entries={entries} userSystems={userSystems} userId={session.user.id}
                   onNavigateSystem={sys=>navigate(sys,'list')}
                   onReviewSystem={sys=>{ setReviewFilterSystem(sys); switchView('review'); }} />
               )}
