@@ -12,6 +12,7 @@ import EntryCard from './components/EntryCard';
 import AddEntry from './components/AddEntry';
 import DetailView from './components/DetailView';
 import Dashboard from './components/Dashboard';
+import Insights from './components/Insights';
 import ManageSystems from './components/ManageSystems';
 import ReviewQueue from './components/ReviewQueue';
 import FlashCards from './components/FlashCards';
@@ -50,6 +51,13 @@ export default function App() {
   // Dashboard is the landing screen (batch 3) — was 'list' (the notebook).
   const [view, setView]               = useState('stats');
   const [selected, setSelected]       = useState(null);
+  // Set right before switchView('review') when a click needs to land the
+  // user in a specific system's due queue (Insights' "Needs attention" rows)
+  // instead of the plain Review Queue overview. ReviewQueue only reads this
+  // once, on mount (see its own initialFilterSystem effect) — no need to
+  // clear it after use, since ReviewQueue unmounts whenever `view` moves
+  // away from 'review' and the next navigation just overwrites it.
+  const [reviewFilterSystem, setReviewFilterSystem] = useState('');
   // Pre-existing bug found while wiring up the animated collapse below:
   // this always defaulted to false with nothing ever setting it true on
   // mount, so on tablet/desktop the sidebar was invisible (display:none)
@@ -553,6 +561,7 @@ export default function App() {
           {view==='search' && <span style={{fontWeight:FONT.weight.bold,color:t.text,fontSize:FONT.size.md}}>Global Search</span>}
           {view==='review' && <span style={{fontWeight:FONT.weight.bold,color:t.text,fontSize:FONT.size.md}}>Review Queue</span>}
           {view==='cards'  && <span style={{fontWeight:FONT.weight.bold,color:t.text,fontSize:FONT.size.md}}>Flashcards</span>}
+          {view==='insights' && <span style={{fontWeight:FONT.weight.bold,color:t.text,fontSize:FONT.size.md}}>Insights</span>}
           {['list','add','detail'].includes(view) && (
             <>
               <div style={{width:7,height:7,borderRadius:RADIUS.circle,background:color,flexShrink:0}} />
@@ -687,7 +696,8 @@ export default function App() {
                 </div>
               )}
 
-              {view==='review' && <ReviewQueue allEntries={entries} onReviewed={onReviewed} userSystems={userSystems} />}
+              {view==='review' && <ReviewQueue allEntries={entries} onReviewed={onReviewed} userSystems={userSystems}
+                initialFilterSystem={reviewFilterSystem} />}
               {view==='cards'  && <FlashCards userId={session.user.id} userSystems={userSystems} />}
               {view==='stats'  && (
                 <Dashboard entries={entries} userSystems={userSystems}
@@ -697,6 +707,11 @@ export default function App() {
                   onAddEntry={()=>switchView('add')}
                   onStudyFlashcards={()=>switchView('cards')}
                   onGlobalSearch={()=>switchView('search')} />
+              )}
+              {view==='insights' && (
+                <Insights entries={entries} userSystems={userSystems}
+                  onNavigateSystem={sys=>navigate(sys,'list')}
+                  onReviewSystem={sys=>{ setReviewFilterSystem(sys); switchView('review'); }} />
               )}
 
               {view==='add' && (

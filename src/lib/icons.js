@@ -244,3 +244,13 @@ export function IconZap({ size=14, style, className }) {
     </svg>
   );
 }
+
+// Upward trend line — Insights nav item. Deliberately distinct from
+// IconChart (plain bars, used for Dashboard) so the two entries read as
+// different destinations at a glance, not two icons for the same idea.
+export function IconTrendUp({ size=16, style, className }) {
+  return <Svg size={size} style={style} className={className}>
+    <polyline points="3 17 9 11 13 15 21 6" />
+    <polyline points="14 6 21 6 21 13" />
+  </Svg>;
+}

@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR } from '../lib/constants';
 import { buildHighlightParts, resolveHL } from '../lib/highlights';
@@ -125,7 +125,7 @@ function StatPill({ t, value, label, tone='neutral' }) {
   );
 }
 
-export default function ReviewQueue({ allEntries, onReviewed, userSystems }) {
+export default function ReviewQueue({ allEntries, onReviewed, userSystems, initialFilterSystem }) {
   const { t, isDark } = useTheme();
 
   // Always-current entries, WITHOUT making the queue rebuild on every rating.
@@ -168,6 +168,26 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems }) {
   }, [filterMode, filterSystem, filterEntries]);
 
   const backToOverview = () => setSessionStarted(false);
+
+  // Arriving from Insights' "Needs attention" — jump straight into a due
+  // session for that system, exactly like clicking a priority row on this
+  // screen's own overview already does.
+  //
+  // Inlines startNewSession's body instead of calling it directly: calling
+  // setFilterSystem below changes startNewSession's own identity (it's a
+  // useCallback that depends on filterSystem), which would make an
+  // [initialFilterSystem, startNewSession] dependency array fire this
+  // effect a second time right after the first — reshuffling the queue
+  // twice on landing. Depending on `filterEntries` instead (stable —  it's
+  // a useCallback with no deps) keeps this effect genuinely single-fire per
+  // navigation without needing an exhaustive-deps suppression.
+  useEffect(() => {
+    if (!initialFilterSystem) return;
+    setFilterSystem(initialFilterSystem);
+    setQueue(buildCycledQueue(filterEntries('due', initialFilterSystem)));
+    setIdx(0); setFlipped(false); setDone(false); setEnded(false); setSess(0);
+    setSessionStarted(true);
+  }, [initialFilterSystem, filterEntries]);
 
   const card = queue[idx];
   const total = queue.length;
