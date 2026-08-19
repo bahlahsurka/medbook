@@ -302,14 +302,20 @@ export default function Insights({ entries, userSystems, userId, onNavigateSyste
   }, [reviewLogs]);
 
   // Best/worst retained systems — real, only shown once there's enough
-  // logged data to say something meaningful (at least two distinct systems
-  // with a score this week).
+  // logged data to say something meaningful: at least two distinct systems
+  // with a score this week, AND an actual difference between them. Early on
+  // (few ratings, all Good/Easy) every system legitimately ties at 100% —
+  // showing "Best: X (100%) · Worst: Y (100%)" then is technically correct
+  // but reads like a bug, so a tie is treated as "nothing to compare yet"
+  // rather than displayed.
   const retentionSpread = useMemo(() => {
     if (!retention.real || !retention.bySystem) return null;
     const scored = Object.entries(retention.bySystem).filter(([, v]) => v != null);
     if (scored.length < 2) return null;
     scored.sort((a, b) => b[1] - a[1]);
-    return { best: scored[0], worst: scored[scored.length - 1] };
+    const best = scored[0], worst = scored[scored.length - 1];
+    if (best[1] === worst[1]) return null;
+    return { best, worst };
   }, [retention]);
 
   // ── Review consistency — real, derived from last_reviewed across entries ──
