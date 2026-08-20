@@ -4,6 +4,7 @@ import { loadSystems, saveSystems, DEFAULT_SYSTEMS } from './lib/systems';
 import { SYS_COLOR, DIFFICULTY, DIFF_COLOR } from './lib/constants';
 import { useScrollRestore } from './lib/useScrollRestore';
 import { useDebouncedValue } from './lib/useDebouncedValue';
+import { useStudySession } from './lib/useStudySession';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation, BREAKPOINT } from './lib/theme';
 import { IconMenu, IconX, IconChevronLeft, IconRepeat, IconPlus, IconInbox, IconSearch } from './lib/icons';
 import Auth from './components/Auth';
@@ -92,6 +93,17 @@ export default function App() {
 
   // Scroll restoration
   const { scrollRef, saveScroll, restoreScroll } = useScrollRestore();
+
+  // Study Time (Insights) — tracks TOTAL app usage time, not just time on
+  // specific "study" screens. Previously this was wired up per-screen
+  // (DetailView while viewing an entry, ReviewQueue during an active
+  // review, FlashCards while flipping through cards), which undercounted:
+  // adding entries, browsing the dashboard/lists, searching, and managing
+  // systems all counted as zero. Hoisting the single source of truth here
+  // means "active" is just "signed in and the tab is in front of you" —
+  // the hook's own visibilitychange/pagehide/heartbeat handling already
+  // takes care of pausing while backgrounded and persisting periodically.
+  useStudySession(!!session && !isRecovery, session?.user?.id, 'app');
 
   // Resize
   useEffect(() => {

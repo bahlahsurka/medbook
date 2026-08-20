@@ -22,9 +22,17 @@ const HEARTBEAT_MS = 60000;
  * SUPABASE_MIGRATION_INSIGHTS.sql — must be run once per Supabase project
  * before this actually persists anything).
  *
- * `active` toggles the timer on/off without unmounting the caller — e.g.
- * ReviewQueue passes `sessionStarted && !ended && !done` so Pause stops the
- * clock and Resume restarts it, all within the same component instance.
+ * Called once, app-wide, from App.js — `active` is just "signed in and the
+ * tab is in front of you" (`!!session && !isRecovery`), so this measures
+ * total app usage time rather than time on any one screen. It used to be
+ * called separately from DetailView/ReviewQueue/FlashCards with narrower
+ * `active` conditions scoped to each screen, which undercounted real usage
+ * (adding entries, browsing, searching, managing systems all counted as
+ * zero) — see the App.js call site for the current rationale.
+ *
+ * `active` toggles the timer on/off without unmounting the caller, so
+ * Pause-equivalent conditions (e.g. tab hidden) stop the clock and coming
+ * back resumes it, all within the same component instance.
  *
  * Three ways progress gets saved, so a session's time is never all-or-
  * nothing on one fragile event:
