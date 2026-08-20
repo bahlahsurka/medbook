@@ -6,7 +6,6 @@ import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation } from '../lib/them
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue } from '../lib/reviewQueue';
 import { computeSystemStats } from '../lib/systemStats';
-import { useStudySession } from '../lib/useStudySession';
 import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
   IconX, IconZap } from '../lib/icons';
 
@@ -149,11 +148,6 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   const [done, setDone]         = useState(false);
   const [ended, setEnded]       = useState(false); // user paused midway
   const [lightboxIdx, setLightboxIdx] = useState(null); // index into card.images, or null
-
-  // Real Study Time data for Insights — only while an actual review session
-  // is running (not the overview screen), and Pause genuinely stops the
-  // clock rather than quietly keeping it running in the background.
-  useStudySession(sessionStarted && !ended && !done, userId, 'review');
 
   // Same due/fresh definitions used everywhere else in the app (Dashboard,
   // reviewQueue.js's own buildCycledQueue) — filtering just chooses which

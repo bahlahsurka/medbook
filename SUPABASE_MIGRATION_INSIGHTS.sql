@@ -4,8 +4,9 @@
 --
 -- Adds the two tables the Insights page needs to replace its sample
 -- data with real numbers:
---   - study_sessions: how long you spend on DetailView/Review Queue/
---     Flashcards sessions, for the Study Time chart.
+--   - study_sessions: total app usage time (tracked app-wide from App.js
+--     while signed in and the tab is in front of you — not scoped to any
+--     one screen), for the Study Time chart.
 --   - review_log: one row per Review Queue rating (Again/Hard/Good/
 --     Easy), for real retention.
 -- Neither table is read by anything else in the app yet — existing
@@ -18,9 +19,10 @@ create table if not exists study_sessions (
   user_id          uuid references auth.users(id) on delete cascade not null,
   started_at       timestamptz not null,
   duration_seconds integer not null check (duration_seconds > 0),
-  -- Which screen the time was spent in: 'entry' | 'review' | 'flashcards'.
-  -- Not currently surfaced in the UI (Insights only sums durations), kept
-  -- for a future per-activity breakdown without needing another migration.
+  -- Free-text tag for the source of the session — currently always 'app'
+  -- (whole-app usage, tracked from App.js). Not surfaced in the UI
+  -- (Insights only sums durations), kept for a possible future
+  -- per-activity breakdown without needing another migration.
   context          text,
   created_at       timestamptz default now()
 );
