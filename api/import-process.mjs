@@ -125,6 +125,17 @@ export default async function handler(req, res) {
       if (cardCount !== job.imported_cards || noteCount !== job.imported_notes) {
         await updateJob(db, jobId, { imported_notes: noteCount, imported_cards: cardCount });
       }
+      // Self-heal: the source archive should already be gone (see the
+      // cleanupSourceArchive call in phase 3, below) — that's best-effort
+      // and, until now, failed completely silently on error, with no log
+      // line anywhere. Confirmed live: job 5d3e580e's 956MB .apkg was
+      // still sitting in Blob storage over a week after completion,
+      // eating 95% of the account's quota, with zero record of why the
+      // original delete didn't take. Retry it on every read of a
+      // completed job that still has a blob_url — cheap (one HTTP call)
+      // and safe (del() on an already-gone object just no-ops), and this
+      // time an actual failure gets logged instead of vanishing.
+      if (job.blob_url) await cleanupSourceArchive(db, jobId, job.blob_url);
       return res.status(200).json({
         status: 'completed', message: 'Already completed.', deckId: job.deck_id,
         notes: noteCount, cards: cardCount,
@@ -421,7 +432,7 @@ export default async function handler(req, res) {
       await refreshDeckCounts(db, userId, job.deck_id);
 
       // Only NOW is the temporary archive safe to remove (spec §11).
-      try { await del(job.blob_url); } catch { /* non-fatal: import already succeeded */ }
+      await cleanupSourceArchive(db, jobId, job.blob_url);
 
       await updateJob(db, jobId, {
         status: 'completed',
@@ -448,6 +459,25 @@ export default async function handler(req, res) {
     // The original .apkg is intentionally NOT deleted on failure, so a retry
     // never requires re-uploading a 900MB file.
     return res.status(500).json({ status: 'failed', error: err.message });
+  }
+}
+
+/**
+ * Delete the temporary source .apkg once it's no longer needed, and clear
+ * blob_url so nothing retries a delete that already succeeded. blob_url is
+ * NOT NULL in the schema, so '' (falsy, same as the `if (job.blob_url)`
+ * guards elsewhere check for) is the "already cleaned up" sentinel, not
+ * null. Failures are now LOGGED (previously silently swallowed — how a
+ * 956MB orphaned blob sat unnoticed for over a week, eating 95% of the
+ * account's storage quota with zero trace of why). Still non-fatal either
+ * way: a cleanup failure must never fail an otherwise-successful import.
+ */
+async function cleanupSourceArchive(db, jobId, blobUrl) {
+  try {
+    await del(blobUrl);
+    await updateJob(db, jobId, { blob_url: '' });
+  } catch (e) {
+    console.error('[import-process] failed to delete source archive', { jobId, blobUrl, message: e.message });
   }
 }
 
