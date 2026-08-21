@@ -462,15 +462,41 @@ async function countCardsForRoot(db, userId, rootDeckId) {
 }
 
 async function refreshDeckCounts(db, userId, rootDeckId) {
-  const { data: decks } = await db.from('imported_decks').select('id').eq('user_id', userId);
-  for (const d of (decks || [])) {
+  const { data: decks } = await db.from('imported_decks').select('id, parent_id').eq('user_id', userId);
+  const list = decks || [];
+
+  // Direct counts first — cards literally filed under that exact deck node.
+  const direct = {};
+  for (const d of list) {
     const { count: total } = await db.from('imported_cards')
       .select('*', { count: 'exact', head: true }).eq('deck_id', d.id);
     const { count: newCount } = await db.from('imported_cards')
       .select('*', { count: 'exact', head: true }).eq('deck_id', d.id).eq('state', 'new');
-    await db.from('imported_decks')
-      .update({ total_cards: total || 0, new_cards: newCount || 0 })
-      .eq('id', d.id);
+    direct[d.id] = { total: total || 0, new: newCount || 0 };
+  }
+
+  // Roll up bottom-up: a deck's DISPLAYED count is its own direct count
+  // plus every descendant's. Without this, any deck with children — most
+  // of all, the aggregate root — shows 0/0/0 even when its subdecks are
+  // full of cards, since cards only ever attach to the specific (often
+  // leaf) deck they're filed under, never to an ancestor. Same root-cause
+  // shape as #20's completion-count bug, just for the display rollup.
+  const childrenOf = {};
+  list.forEach(d => { (childrenOf[d.parent_id] ||= []).push(d.id); });
+  const memo = {};
+  function rollup(id) {
+    if (memo[id]) return memo[id];
+    let total = direct[id]?.total || 0, newCount = direct[id]?.new || 0;
+    for (const childId of (childrenOf[id] || [])) {
+      const c = rollup(childId);
+      total += c.total; newCount += c.new;
+    }
+    return (memo[id] = { total, new: newCount });
+  }
+
+  for (const d of list) {
+    const { total, new: newCount } = rollup(d.id);
+    await db.from('imported_decks').update({ total_cards: total, new_cards: newCount }).eq('id', d.id);
   }
 }
 
