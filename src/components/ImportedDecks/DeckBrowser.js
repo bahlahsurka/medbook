@@ -92,7 +92,7 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick }
 
   const doReset = async () => {
     if (!confirmReset) return;
-    await runAction(confirmReset, () => api.resetDeckProgress(confirmReset.id));
+    await runAction(confirmReset, () => api.resetDeckProgress(confirmReset.id, userId));
     setConfirmReset(null);
   };
 

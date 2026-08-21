@@ -118,22 +118,24 @@ export async function archiveDeck(deckId, archived = true) {
 
 /**
  * Reset only scheduling state for every card under this deck subtree —
- * cards/notes/media/tags/hierarchy untouched. Scoped through imported_notes
- * (root_deck_id) same as countCardsForRoot in api/import-process.mjs, since
- * imported_cards itself carries no root_deck_id of its own.
+ * cards/notes/media/tags/hierarchy untouched. `deckId` can be ANY node
+ * (root or a sub-deck — Reset Progress is offered at every depth, same as
+ * Rename/Archive/Delete), so this expands to the full descendant subtree
+ * and filters cards by deck_id directly, same fix as browseCards/
+ * getSessionCards — filtering via imported_notes.root_deck_id would only
+ * ever be correct when `deckId` already IS the true root.
  */
-export async function resetDeckProgress(rootDeckId) {
+export async function resetDeckProgress(deckId, userId) {
   if (MOCK_MODE) return;
-  const { data: noteRows, error: nErr } = await supabase.from('imported_notes')
-    .select('id').eq('root_deck_id', rootDeckId);
-  if (nErr) throw new Error(nErr.message);
-  const noteIds = (noteRows || []).map(n => n.id);
-  for (let i = 0; i < noteIds.length; i += 1000) {
-    const { error } = await supabase.from('imported_cards')
-      .update({ state: 'new', due_at: null, interval_days: 0, ease_factor: 2.5, review_count: 0, lapse_count: 0 })
-      .in('note_id', noteIds.slice(i, i + 1000));
-    if (error) throw new Error(error.message);
-  }
+  const deckIds = await collectDescendantDeckIds(userId, deckId);
+  const { error } = await supabase.from('imported_cards')
+    .update({ state: 'new', due_at: null, interval_days: 0, ease_factor: 2.5, review_count: 0, lapse_count: 0 })
+    .in('deck_id', deckIds);
+  if (error) throw new Error(error.message);
+  // Every card in the subtree just moved back to 'new' — recompute the
+  // whole subtree's counts rather than walking up from one leaf, since
+  // there's no single leaf here.
+  await refreshDeckCountsForSubtree(deckId, userId);
 }
 
 /**
@@ -258,7 +260,101 @@ export async function rateCard(card, rating) {
   const { data, error } = await supabase.from('imported_cards')
     .update(patch).eq('id', card.id).select().single();
   if (error) throw new Error(error.message);
+  // Fire-and-forget: the denormalized total/new/due_cards on imported_decks
+  // (what DeckBrowser actually renders — it never scans imported_cards
+  // itself) only ever got recomputed by the import pipeline. A rating
+  // changes a card's state/due_at without going anywhere near that, so
+  // counts silently went stale the moment anyone actually studied. Not
+  // awaited: refreshing counts shouldn't add latency to flipping cards,
+  // and a failure here shouldn't block a rating that already saved fine.
+  refreshDeckCountsAfterRating(card.deck_id).catch(() => {});
   return data;
+}
+
+/** Direct (own, not rolled-up) total/new/due for exactly one deck node. */
+async function directDeckCounts(id, nowIso = new Date().toISOString()) {
+  const { count: total } = await supabase.from('imported_cards')
+    .select('*', { count: 'exact', head: true }).eq('deck_id', id);
+  const { count: newCount } = await supabase.from('imported_cards')
+    .select('*', { count: 'exact', head: true }).eq('deck_id', id).eq('state', 'new');
+  const { count: dueCount } = await supabase.from('imported_cards')
+    .select('*', { count: 'exact', head: true }).eq('deck_id', id)
+    .in('state', ['learning', 'review']).lte('due_at', nowIso);
+  return { total: total || 0, new: newCount || 0, due: dueCount || 0 };
+}
+
+/**
+ * Recompute total/new/due_cards for the rated card's own deck, then roll
+ * that up through every ancestor to the root — same rollup shape as
+ * refreshDeckCounts in api/import-process.mjs, just scoped to one branch
+ * of the tree (walking up from a single leaf) instead of every deck a
+ * full import touches, since a single rating only ever moves one card.
+ */
+async function refreshDeckCountsAfterRating(deckId) {
+  const nowIso = new Date().toISOString();
+  let id = deckId;
+  const own = await directDeckCounts(id, nowIso);
+  await supabase.from('imported_decks')
+    .update({ total_cards: own.total, new_cards: own.new, due_cards: own.due }).eq('id', id);
+
+  // Walk up: each ancestor = its own direct count (cards filed literally on
+  // it, usually 0 for an aggregate node) + the sum of its immediate
+  // children's CURRENT stored rollups — those are already correct going
+  // into this loop, either from a prior pass or because we just wrote the
+  // leaf above, so this never needs to re-descend the whole subtree.
+  for (;;) {
+    const { data: row } = await supabase.from('imported_decks').select('parent_id').eq('id', id).single();
+    const parentId = row?.parent_id;
+    if (!parentId) break;
+    const ownParent = await directDeckCounts(parentId, nowIso);
+    const { data: kids } = await supabase.from('imported_decks')
+      .select('total_cards, new_cards, due_cards').eq('parent_id', parentId);
+    const sum = (kids || []).reduce((a, k) => ({
+      total: a.total + (k.total_cards || 0), new: a.new + (k.new_cards || 0), due: a.due + (k.due_cards || 0),
+    }), { total: 0, new: 0, due: 0 });
+    const rolled = { total: ownParent.total + sum.total, new: ownParent.new + sum.new, due: ownParent.due + sum.due };
+    await supabase.from('imported_decks')
+      .update({ total_cards: rolled.total, new_cards: rolled.new, due_cards: rolled.due }).eq('id', parentId);
+    id = parentId;
+  }
+}
+
+/**
+ * Full recompute for an entire subtree — every deck from `rootId` down —
+ * used after an operation that can touch many cards at once (reset), where
+ * walking a single leaf upward (refreshDeckCountsAfterRating) isn't enough
+ * because there's no single leaf: every deck in the subtree needs its own
+ * direct counts redone, then rolled up bottom-up (deepest first) so each
+ * parent sums already-correct children.
+ */
+async function refreshDeckCountsForSubtree(rootId, userId) {
+  const deckIds = await collectDescendantDeckIds(userId, rootId);
+  const { data: rows } = await supabase.from('imported_decks')
+    .select('id, parent_id').in('id', deckIds);
+  const list = rows || [];
+  const nowIso = new Date().toISOString();
+
+  const direct = {};
+  for (const d of list) direct[d.id] = await directDeckCounts(d.id, nowIso);
+
+  const childrenOf = {};
+  list.forEach(d => { (childrenOf[d.parent_id] ||= []).push(d.id); });
+  const memo = {};
+  function rollup(id) {
+    if (memo[id]) return memo[id];
+    let total = direct[id]?.total || 0, newCount = direct[id]?.new || 0, due = direct[id]?.due || 0;
+    for (const childId of (childrenOf[id] || [])) {
+      const c = rollup(childId);
+      total += c.total; newCount += c.new; due += c.due;
+    }
+    return (memo[id] = { total, new: newCount, due });
+  }
+
+  for (const d of list) {
+    const r = rollup(d.id);
+    await supabase.from('imported_decks')
+      .update({ total_cards: r.total, new_cards: r.new, due_cards: r.due }).eq('id', d.id);
+  }
 }
 
 /**
