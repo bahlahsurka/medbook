@@ -128,13 +128,6 @@ export default async function handler(req, res) {
       return res.status(200).json({
         status: 'completed', message: 'Already completed.', deckId: job.deck_id,
         notes: noteCount, cards: cardCount,
-        // Diagnostic: total_cards was recorded straight off the source
-        // SQLite (SELECT COUNT(*) FROM cards) at extraction time, before
-        // any insert/mapping logic ran. If this is nonzero while `cards`
-        // above is 0, the source genuinely had cards and they're being
-        // lost somewhere in the note_id/deck_id mapping during insert. If
-        // this is ALSO 0, the source extraction itself never saw them.
-        expectedCardsFromSource: job.total_cards,
       });
     }
 
@@ -331,13 +324,14 @@ export default async function handler(req, res) {
           due_at: null,
         })).filter(r => r.note_id);
 
-        // DIAGNOSTIC: a real completed job (5d3e580e) ended up with 3591
-        // cards in the source SQLite (job.total_cards, read via COUNT(*) at
-        // extraction time) but 0 rows in imported_cards — meaning
-        // noteIdByAnkiId[String(c.nid)] came back undefined for every
-        // single card, in every batch, with no insert ever attempted and
-        // no error ever thrown. Log enough to see WHERE that mapping
-        // breaks the next time this runs, without spamming when it's fine.
+        // DIAGNOSTIC: this was originally added chasing job 5d3e580e's
+        // "cards: 0" report — turned out to be a bad completion-count query
+        // (see countCardsForRoot below), not a note_id mapping failure; all
+        // 3591 cards had inserted correctly the whole time. Left in place
+        // as a genuine safety net: if noteIdByAnkiId[String(c.nid)] ever
+        // does come back undefined for a real card, this is what would
+        // catch it, without spamming logs on the common case where the
+        // mapping is fine.
         if (cardBatch.length && cardRows.length < cardBatch.length) {
           console.error('[import-process] card/note_id mapping dropped rows', {
             jobId, cursor,
