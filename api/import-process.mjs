@@ -324,6 +324,28 @@ export default async function handler(req, res) {
           due_at: null,
         })).filter(r => r.note_id);
 
+        // DIAGNOSTIC: this was originally added chasing job 5d3e580e's
+        // "cards: 0" report — turned out to be a bad completion-count query
+        // (see countCardsForRoot below), not a note_id mapping failure; all
+        // 3591 cards had inserted correctly the whole time. Left in place
+        // as a genuine safety net: if noteIdByAnkiId[String(c.nid)] ever
+        // does come back undefined for a real card, this is what would
+        // catch it, without spamming logs on the common case where the
+        // mapping is fine.
+        if (cardBatch.length && cardRows.length < cardBatch.length) {
+          console.error('[import-process] card/note_id mapping dropped rows', {
+            jobId, cursor,
+            noteBatchLen: noteBatch.length,
+            insertedNotesLen: insertedNotes?.length ?? null,
+            cardBatchLen: cardBatch.length,
+            cardRowsLen: cardRows.length,
+            sampleAnkiNoteIds: ankiNoteIds.slice(0, 3),
+            sampleInsertedAnkiNoteIds: (insertedNotes || []).slice(0, 3).map(r => r.anki_note_id),
+            sampleCardNids: cardBatch.slice(0, 3).map(c => c.nid),
+            noteIdByAnkiIdKeyCount: Object.keys(noteIdByAnkiId).length,
+          });
+        }
+
         if (cardRows.length) {
           const { error: cErr } = await db.from('imported_cards').insert(cardRows);
           if (cErr) throw new Error(`Card insert failed: ${cErr.message}`);

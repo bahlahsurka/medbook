@@ -4,11 +4,24 @@ import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { SYS_COLOR } from '../lib/constants';
 import { IconLayers, IconPlay, IconPlus, IconEdit, IconTrash, IconCheck, IconChevronLeft } from '../lib/icons';
+import DeckBrowser from './ImportedDecks/DeckBrowser';
+import ImportWizard from './ImportedDecks/ImportWizard';
+import StudySession from './ImportedDecks/StudySession';
+import BrowseDeck from './ImportedDecks/BrowseDeck';
 
 // Sentinel key for cards with no system assigned (legacy cards, or anything
 // created before folders existed). Never stored in the DB as this string —
 // the DB value is always NULL; this is purely a UI-side grouping key.
 const UNCAT = '__uncategorized__';
+
+// Top-level area within Flashcards. 'own' = the existing self-authored
+// flashcards feature (My Cards), untouched below. 'imported' = the new
+// Imported Decks area (Phase H) — deliberately a tab INSIDE Flashcards,
+// not a new Sidebar entry, per spec.
+const AREA_TABS = [
+  { id: 'own', label: 'My Cards' },
+  { id: 'imported', label: 'Imported Decks' },
+];
 
 // Shared field styling (add/edit forms) — tokenised, otherwise unchanged
 // from before this batch.
@@ -56,6 +69,10 @@ function Btn({ t, tone='primary', icon, children, ...props }) {
 
 export default function FlashCards({ userId, userSystems }) {
   const { t } = useTheme();
+  const [area, setArea] = useState('own');
+  const [importedSub, setImportedSub] = useState(null); // { mode: 'study'|'browse', deck } | null
+  const [showImportWizard, setShowImportWizard] = useState(false);
+  const [deckBrowserKey, setDeckBrowserKey] = useState(0); // bump to force DeckBrowser to reload after an import completes
   const [cards, setCards]     = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -297,6 +314,32 @@ export default function FlashCards({ userId, userSystems }) {
     </div>
   );
 
+  // ── Imported Decks area ─────────────────────────────────────────────
+  // A tab inside Flashcards, not a new Sidebar section. Everything below
+  // this branch is the pre-existing "My Cards" feature, untouched.
+  if (area === 'imported') {
+    if (importedSub?.mode === 'study') return (
+      <StudySession deck={importedSub.deck} userId={userId} onExit={() => setImportedSub(null)} />
+    );
+    if (importedSub?.mode === 'browse') return (
+      <BrowseDeck deck={importedSub.deck} userId={userId} onExit={() => setImportedSub(null)} />
+    );
+    return (
+      <div style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
+        <AreaTabs t={t} area={area} setArea={setArea} />
+        <DeckBrowser key={deckBrowserKey} userId={userId}
+          onStudy={(deck) => setImportedSub({ mode: 'study', deck })}
+          onBrowse={(deck) => setImportedSub({ mode: 'browse', deck })}
+          onImportClick={() => setShowImportWizard(true)} />
+        {showImportWizard && (
+          <ImportWizard userId={userId}
+            onClose={() => setShowImportWizard(false)}
+            onImported={() => setDeckBrowserKey(k => k + 1)} />
+        )}
+      </div>
+    );
+  }
+
   // ── Study mode ────────────────────────────────────────────────────────
   if (view === 'study' || view === 'studyOne') {
     const isOne = view === 'studyOne';
@@ -487,6 +530,7 @@ export default function FlashCards({ userId, userSystems }) {
   if (view === 'folders') return (
     <div className="mb-fc-fade" style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
       <style>{localCss}</style>
+      <AreaTabs t={t} area={area} setArea={setArea} />
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
         marginBottom:SPACE.xl, flexWrap:'wrap', gap:10 }}>
         <div>
@@ -706,6 +750,28 @@ export default function FlashCards({ userId, userSystems }) {
           );})}
         </div>
       )}
+    </div>
+  );
+}
+
+// Shared tab switcher between the two Flashcards areas. Only shown at each
+// area's top level (My Cards folders / Imported Decks root) — sub-flows
+// (add/edit/study, deck browse/study) use their own "← Back" convention,
+// same as the rest of the app.
+function AreaTabs({ t, area, setArea }) {
+  return (
+    <div style={{ display:'flex', gap:4, marginBottom:18, background:t.surface2,
+      border:`1px solid ${t.border}`, borderRadius:9, padding:3, width:'fit-content' }}>
+      {AREA_TABS.map(tab => (
+        <button key={tab.id} onClick={()=>setArea(tab.id)} style={{
+          background: area===tab.id ? t.surface : 'transparent',
+          color: area===tab.id ? t.text : t.text3,
+          border:'none', borderRadius:7, padding:'7px 16px', fontSize:13,
+          fontWeight:600, cursor:'pointer', fontFamily:'Inter,sans-serif',
+          boxShadow: area===tab.id ? `0 1px 2px ${t.shadow}` : 'none' }}>
+          {tab.label}
+        </button>
+      ))}
     </div>
   );
 }

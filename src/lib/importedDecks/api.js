@@ -1,0 +1,398 @@
+// lib/importedDecks/api.js
+//
+// Data layer for the Imported Decks feature. Mirrors the pattern already
+// used by lib/systems.js and lib/reviewQueue.js — components import plain
+// async functions from here rather than calling supabase inline, and pure
+// helpers (session ordering) stay separate from fetching.
+//
+// ── MOCK_MODE ──────────────────────────────────────────────────────────
+// Was `true` while two real gaps made live-backend calls unverified. Both
+// are now confirmed against the live schema, so this is real data:
+//
+//  1. due_cards now exists as a column on imported_decks (confirmed via
+//     information_schema). refreshDeckCounts in api/import-process.mjs
+//     still only writes total_cards/new_cards, not due_cards — harmless:
+//     every freshly-imported card starts as state:'new' with due_at:null
+//     (spec §9 — scheduling history is never imported), so due_cards is
+//     genuinely 0 for anything that hasn't been studied yet. The 42703
+//     fallback below stays as a real safety net either way.
+//
+//  2. RLS is confirmed in place on all four imported_* tables (own
+//     select/insert/update/delete, `auth.uid() = user_id`) — the same
+//     pattern the rest of the app already relies on through the anon-key
+//     browser client. Verified directly against the production project.
+export const MOCK_MODE = false;
+
+import { supabase } from '../supabase';
+import mock from './mockData';
+import { scheduler, buildSessionQuery } from '../srs/Scheduler';
+
+const PAGE_SIZE = 50;
+
+/**
+ * A deck node passed around the UI (from getRootDecks/getChildDecks) can be
+ * ANY depth — root or a nested sub-deck, both expose the same Study/Browse
+ * actions (see DeckBrowser's DeckNode). Cards attach to whichever specific
+ * (often leaf) deck they're filed under, not to an ancestor root — so
+ * "browse/study this node" has to mean this deck PLUS every deck under it,
+ * or a deck with children (including the aggregate root, which never holds
+ * cards directly) would silently look empty. This walks parent_id to
+ * collect that set. Decks are few per user (dozens, not thousands), so one
+ * flat query + in-memory BFS is cheap — no recursive SQL needed.
+ */
+async function collectDescendantDeckIds(userId, deckId) {
+  const { data, error } = await supabase.from('imported_decks')
+    .select('id, parent_id').eq('user_id', userId);
+  if (error) throw new Error(error.message);
+  const childrenOf = {};
+  (data || []).forEach(d => { (childrenOf[d.parent_id] ||= []).push(d.id); });
+  const ids = [deckId];
+  const queue = [deckId];
+  while (queue.length) {
+    const cur = queue.shift();
+    (childrenOf[cur] || []).forEach(c => { ids.push(c); queue.push(c); });
+  }
+  return ids;
+}
+
+/* ------------------------------------------------------------------ */
+/* Deck tree                                                           */
+/* ------------------------------------------------------------------ */
+
+export async function getRootDecks(userId) {
+  if (MOCK_MODE) return mock.rootDecks();
+
+  // due_cards: attempt the real column; if it 42703s (undefined_column),
+  // retry without it rather than surfacing a hard error for a documented
+  // schema gap. Either way, this is ONE query, not a per-render scan.
+  let { data, error } = await supabase.from('imported_decks')
+    .select('id, parent_id, full_name, display_name, is_root, total_cards, new_cards, due_cards, archived')
+    .eq('user_id', userId).is('parent_id', null).eq('archived', false)
+    .order('display_name');
+  if (error?.code === '42703') {
+    ({ data, error } = await supabase.from('imported_decks')
+      .select('id, parent_id, full_name, display_name, is_root, total_cards, new_cards, archived')
+      .eq('user_id', userId).is('parent_id', null).eq('archived', false)
+      .order('display_name'));
+    (data || []).forEach(d => { d.due_cards = null; }); // null = "unknown", not "zero"
+  }
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+export async function getChildDecks(userId, parentId) {
+  if (MOCK_MODE) return mock.childDecksOf(parentId);
+
+  let { data, error } = await supabase.from('imported_decks')
+    .select('id, parent_id, full_name, display_name, is_root, total_cards, new_cards, due_cards, archived')
+    .eq('user_id', userId).eq('parent_id', parentId).eq('archived', false)
+    .order('display_name');
+  if (error?.code === '42703') {
+    ({ data, error } = await supabase.from('imported_decks')
+      .select('id, parent_id, full_name, display_name, is_root, total_cards, new_cards, archived')
+      .eq('user_id', userId).eq('parent_id', parentId).eq('archived', false)
+      .order('display_name'));
+    (data || []).forEach(d => { d.due_cards = null; });
+  }
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+/* ------------------------------------------------------------------ */
+/* Deck actions — rename / archive / delete / reset progress            */
+/* ------------------------------------------------------------------ */
+
+export async function renameDeck(deckId, displayName) {
+  if (MOCK_MODE) return { id: deckId, display_name: displayName };
+  const { error } = await supabase.from('imported_decks')
+    .update({ display_name: displayName }).eq('id', deckId);
+  if (error) throw new Error(error.message);
+}
+
+export async function archiveDeck(deckId, archived = true) {
+  if (MOCK_MODE) return;
+  const { error } = await supabase.from('imported_decks')
+    .update({ archived }).eq('id', deckId);
+  if (error) throw new Error(error.message);
+}
+
+/**
+ * Reset only scheduling state for every card under this deck subtree —
+ * cards/notes/media/tags/hierarchy untouched. `deckId` can be ANY node
+ * (root or a sub-deck — Reset Progress is offered at every depth, same as
+ * Rename/Archive/Delete), so this expands to the full descendant subtree
+ * and filters cards by deck_id directly, same fix as browseCards/
+ * getSessionCards — filtering via imported_notes.root_deck_id would only
+ * ever be correct when `deckId` already IS the true root.
+ */
+export async function resetDeckProgress(deckId, userId) {
+  if (MOCK_MODE) return;
+  const deckIds = await collectDescendantDeckIds(userId, deckId);
+  const { error } = await supabase.from('imported_cards')
+    .update({ state: 'new', due_at: null, interval_days: 0, ease_factor: 2.5, review_count: 0, lapse_count: 0 })
+    .in('deck_id', deckIds);
+  if (error) throw new Error(error.message);
+  // Every card in the subtree just moved back to 'new' — recompute the
+  // whole subtree's counts rather than walking up from one leaf, since
+  // there's no single leaf here.
+  await refreshDeckCountsForSubtree(deckId, userId);
+}
+
+/**
+ * Delete a deck subtree. Per spec: imported cards/notes/deck hierarchy and
+ * THIS deck's imported media — never Review Entry media, never My Cards,
+ * never other imported decks. Mirrors MediaService.deleteDeckMedia's own
+ * scoping (by root_deck_id) for the media half; DB rows cascade via the
+ * ON DELETE CASCADE the schema comment in import-process.mjs says exists
+ * from imported_decks — deleting the root row is expected to cascade to
+ * imported_notes/imported_cards/imported_models for that root_deck_id.
+ * NOT yet verified against the live schema (see MOCK_MODE note above) —
+ * this only runs in MOCK_MODE today.
+ */
+export async function deleteDeck(rootDeckId) {
+  if (MOCK_MODE) return;
+  const { error } = await supabase.from('imported_decks').delete().eq('id', rootDeckId);
+  if (error) throw new Error(error.message);
+}
+
+/* ------------------------------------------------------------------ */
+/* Import jobs                                                         */
+/* ------------------------------------------------------------------ */
+
+export async function getActiveImportJob(userId) {
+  if (MOCK_MODE) return null; // components pass a mock job explicitly for dev states
+  const { data, error } = await supabase.from('import_jobs')
+    .select('*').eq('user_id', userId)
+    .in('status', ['pending', 'processing_metadata', 'importing_cards', 'importing_media', 'verifying', 'failed'])
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+/**
+ * Read-only status poll — selects the import_jobs row directly. Deliberately
+ * NOT a call to /api/import-process: that endpoint does real work and
+ * already re-invokes itself (selfInvoke) to continue a job in the
+ * background. Hitting it again on a polling timer would race the chain it
+ * already started — the very class of concurrent-invocation bug this
+ * session's earlier fixes were about. One explicit POST (startProcessing,
+ * below) kicks the chain off; after that, the UI only ever reads.
+ */
+export async function getImportJob(jobId) {
+  if (MOCK_MODE) return mock.jobs.active;
+  const { data, error } = await supabase.from('import_jobs').select('*').eq('id', jobId).single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+/* ------------------------------------------------------------------ */
+/* Browse — paginated, filtered, never a full-deck fetch                */
+/* ------------------------------------------------------------------ */
+
+export async function browseCards(deckId, { search, state, tag, page = 0, pageSize = PAGE_SIZE, userId } = {}) {
+  if (MOCK_MODE) return mock.browseCards({ deckId, search, state, tag, page, pageSize });
+
+  // `deckId` is whichever node the user is browsing (root or any sub-deck)
+  // — expand to its full subtree first (see collectDescendantDeckIds), then
+  // query cards directly by deck_id. Embed imported_notes (a real FK,
+  // imported_cards_note_id_fkey) in the same round trip for search/tag
+  // filtering AND the preview text — cards carry no text of their own.
+  const deckIds = await collectDescendantDeckIds(userId, deckId);
+
+  let cardQuery = supabase.from('imported_cards')
+    .select('id, deck_id, note_id, state, due_at, imported_notes!inner(sort_field, fields, tags)',
+      { count: 'exact' })
+    .in('deck_id', deckIds);
+  if (state) cardQuery = cardQuery.eq('state', state);
+  if (search?.trim()) cardQuery = cardQuery.ilike('imported_notes.sort_field', `%${search.trim()}%`);
+  if (tag) cardQuery = cardQuery.contains('imported_notes.tags', [tag]);
+  cardQuery = cardQuery.range(page * pageSize, page * pageSize + pageSize - 1);
+
+  const { data, error, count } = await cardQuery;
+  if (error) throw new Error(error.message);
+  const rows = (data || []).map(({ imported_notes, ...c }) => ({
+    ...c, sort_field: imported_notes?.sort_field, fields: imported_notes?.fields, tags: imported_notes?.tags,
+  }));
+  return { rows, total: count || 0 };
+}
+
+/** Distinct tags across a deck's whole subtree, for the Browse filter. */
+export async function getDeckTags(deckId, userId) {
+  if (MOCK_MODE) return [...new Set(mock.cards.flatMap(c => c.tags || []))].sort();
+  const deckIds = await collectDescendantDeckIds(userId, deckId);
+  const { data, error } = await supabase.from('imported_cards')
+    .select('imported_notes!inner(tags)').in('deck_id', deckIds);
+  if (error) throw new Error(error.message);
+  const set = new Set();
+  (data || []).forEach(r => (r.imported_notes?.tags || []).forEach(tg => set.add(tg)));
+  return [...set].sort();
+}
+
+/* ------------------------------------------------------------------ */
+/* Study session — thin wrapper around the EXISTING Scheduler, never a  */
+/* second ordering/scheduling implementation.                          */
+/* ------------------------------------------------------------------ */
+
+export async function getSessionCards(deckIds, { limit = 50, userId } = {}) {
+  if (MOCK_MODE) return mock.sessionCards(deckIds, limit);
+
+  // Same subtree-expansion as browseCards — "study this deck" has to
+  // include its descendants, or studying a node with children (including
+  // the aggregate root) would show zero cards even when its subdecks are
+  // full of them.
+  const expanded = await Promise.all(deckIds.map(id => collectDescendantDeckIds(userId, id)));
+  const allDeckIds = [...new Set(expanded.flat())];
+
+  const query = buildSessionQuery({ deckIds: allDeckIds, limit });
+  let q = supabase.from('imported_cards').select('*')
+    .in('deck_id', query.deckIds).neq('state', 'suspended')
+    .or(`due_at.lte.${query.nowIso},state.eq.new`);
+  for (const o of query.order) q = q.order(o.column, { ascending: o.ascending, nullsFirst: o.nullsFirst });
+  const { data, error } = await q.limit(query.limit);
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+/** Persist a rating via the existing scheduler — no interval math here. */
+export async function rateCard(card, rating) {
+  const patch = scheduler.calculateNextReview(card, rating);
+  if (MOCK_MODE) return { ...card, ...patch };
+  const { data, error } = await supabase.from('imported_cards')
+    .update(patch).eq('id', card.id).select().single();
+  if (error) throw new Error(error.message);
+  // Fire-and-forget: the denormalized total/new/due_cards on imported_decks
+  // (what DeckBrowser actually renders — it never scans imported_cards
+  // itself) only ever got recomputed by the import pipeline. A rating
+  // changes a card's state/due_at without going anywhere near that, so
+  // counts silently went stale the moment anyone actually studied. Not
+  // awaited: refreshing counts shouldn't add latency to flipping cards,
+  // and a failure here shouldn't block a rating that already saved fine.
+  refreshDeckCountsAfterRating(card.deck_id).catch(() => {});
+  return data;
+}
+
+/** Direct (own, not rolled-up) total/new/due for exactly one deck node. */
+async function directDeckCounts(id, nowIso = new Date().toISOString()) {
+  const { count: total } = await supabase.from('imported_cards')
+    .select('*', { count: 'exact', head: true }).eq('deck_id', id);
+  const { count: newCount } = await supabase.from('imported_cards')
+    .select('*', { count: 'exact', head: true }).eq('deck_id', id).eq('state', 'new');
+  const { count: dueCount } = await supabase.from('imported_cards')
+    .select('*', { count: 'exact', head: true }).eq('deck_id', id)
+    .in('state', ['learning', 'review']).lte('due_at', nowIso);
+  return { total: total || 0, new: newCount || 0, due: dueCount || 0 };
+}
+
+/**
+ * Recompute total/new/due_cards for the rated card's own deck, then roll
+ * that up through every ancestor to the root — same rollup shape as
+ * refreshDeckCounts in api/import-process.mjs, just scoped to one branch
+ * of the tree (walking up from a single leaf) instead of every deck a
+ * full import touches, since a single rating only ever moves one card.
+ */
+async function refreshDeckCountsAfterRating(deckId) {
+  const nowIso = new Date().toISOString();
+  let id = deckId;
+  const own = await directDeckCounts(id, nowIso);
+  await supabase.from('imported_decks')
+    .update({ total_cards: own.total, new_cards: own.new, due_cards: own.due }).eq('id', id);
+
+  // Walk up: each ancestor = its own direct count (cards filed literally on
+  // it, usually 0 for an aggregate node) + the sum of its immediate
+  // children's CURRENT stored rollups — those are already correct going
+  // into this loop, either from a prior pass or because we just wrote the
+  // leaf above, so this never needs to re-descend the whole subtree.
+  for (;;) {
+    const { data: row } = await supabase.from('imported_decks').select('parent_id').eq('id', id).single();
+    const parentId = row?.parent_id;
+    if (!parentId) break;
+    const ownParent = await directDeckCounts(parentId, nowIso);
+    const { data: kids } = await supabase.from('imported_decks')
+      .select('total_cards, new_cards, due_cards').eq('parent_id', parentId);
+    const sum = (kids || []).reduce((a, k) => ({
+      total: a.total + (k.total_cards || 0), new: a.new + (k.new_cards || 0), due: a.due + (k.due_cards || 0),
+    }), { total: 0, new: 0, due: 0 });
+    const rolled = { total: ownParent.total + sum.total, new: ownParent.new + sum.new, due: ownParent.due + sum.due };
+    await supabase.from('imported_decks')
+      .update({ total_cards: rolled.total, new_cards: rolled.new, due_cards: rolled.due }).eq('id', parentId);
+    id = parentId;
+  }
+}
+
+/**
+ * Full recompute for an entire subtree — every deck from `rootId` down —
+ * used after an operation that can touch many cards at once (reset), where
+ * walking a single leaf upward (refreshDeckCountsAfterRating) isn't enough
+ * because there's no single leaf: every deck in the subtree needs its own
+ * direct counts redone, then rolled up bottom-up (deepest first) so each
+ * parent sums already-correct children.
+ */
+async function refreshDeckCountsForSubtree(rootId, userId) {
+  const deckIds = await collectDescendantDeckIds(userId, rootId);
+  const { data: rows } = await supabase.from('imported_decks')
+    .select('id, parent_id').in('id', deckIds);
+  const list = rows || [];
+  const nowIso = new Date().toISOString();
+
+  const direct = {};
+  for (const d of list) direct[d.id] = await directDeckCounts(d.id, nowIso);
+
+  const childrenOf = {};
+  list.forEach(d => { (childrenOf[d.parent_id] ||= []).push(d.id); });
+  const memo = {};
+  function rollup(id) {
+    if (memo[id]) return memo[id];
+    let total = direct[id]?.total || 0, newCount = direct[id]?.new || 0, due = direct[id]?.due || 0;
+    for (const childId of (childrenOf[id] || [])) {
+      const c = rollup(childId);
+      total += c.total; newCount += c.new; due += c.due;
+    }
+    return (memo[id] = { total, new: newCount, due });
+  }
+
+  for (const d of list) {
+    const r = rollup(d.id);
+    await supabase.from('imported_decks')
+      .update({ total_cards: r.total, new_cards: r.new, due_cards: r.due }).eq('id', d.id);
+  }
+}
+
+/**
+ * Note + its model for ONE card — never the whole deck's notes/models,
+ * since a session/preview only ever renders one card at a time. Was
+ * previously inlined as a direct `mock.notes.find(...)` in both
+ * StudySession.js and BrowseDeck.js's CardPreviewModal, unconditionally
+ * (not even gated on MOCK_MODE) — meaning real cards would render against
+ * mock content. Centralized here to match every other real/mock branch.
+ */
+export async function getNoteAndModel(noteId) {
+  if (MOCK_MODE) {
+    const n = mock.notes.find(n => n.id === noteId) || null;
+    const m = n ? (mock.models.find(m => m.id === n.model_id) || mock.models[0]) : null;
+    return { note: n, model: m };
+  }
+  const { data: note, error: nErr } = await supabase.from('imported_notes')
+    .select('id, fields, tags, model_id').eq('id', noteId).single();
+  if (nErr) throw new Error(nErr.message);
+  const { data: model, error: mErr } = await supabase.from('imported_models')
+    .select('id, field_names, templates, css, is_cloze').eq('id', note.model_id).single();
+  if (mErr) throw new Error(mErr.message);
+  return { note, model };
+}
+
+/* ------------------------------------------------------------------ */
+/* Media — resolved server-side only. R2 signing needs a secret key,   */
+/* so the browser calls a thin API route wrapping MediaService itself  */
+/* rather than touching storage details directly (Phase J3).           */
+/* ------------------------------------------------------------------ */
+
+export async function resolveMedia(rootDeckId, filenames) {
+  if (MOCK_MODE) return mock.resolveMany(filenames);
+  if (!filenames?.length) return {};
+  const res = await fetch('/api/imported-media-resolve', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rootDeckId, filenames }),
+  });
+  if (!res.ok) return Object.fromEntries(filenames.map(f => [f, null]));
+  return res.json();
+}
