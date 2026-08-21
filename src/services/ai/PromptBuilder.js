@@ -13,9 +13,13 @@ export const PROMPT_VERSION = 'v1';
 export const FREE_TIER_LIMITS = {
   'gemini-2.5-pro':        { rpm: 5,  rpd: 100  },
   'gemini-2.5-flash':      { rpm: 10, rpd: 250  },
-  'gemini-flash-latest':   { rpm: 10, rpd: 250  },
+  'gemini-flash-latest':   { rpm: 10, rpd: 250  }, // the alias — see GeminiService.js for why we stopped defaulting to it
   'gemini-2.5-flash-lite': { rpm: 15, rpd: 1000 },
   'gemini-3.5-flash':      { rpm: 10, rpd: 250  },
+  // Confirmed directly in Google AI Studio (2026-08-15) — notably tighter
+  // than the older Flash models above; this is exactly why the default
+  // model was pinned instead of left on the auto-updating alias.
+  'gemini-3.6-flash':      { rpm: 5,  rpd: 20   },
 };
 export function limitsFor(model) {
   return FREE_TIER_LIMITS[model] || { rpm: null, rpd: null };

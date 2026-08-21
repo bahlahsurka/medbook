@@ -14,13 +14,18 @@ const API_KEY = process.env.REACT_APP_GEMINI_API_KEY;
 // deprecation date; 3.x is now current). Hardcoding one model name means this
 // breaks again every few months. Two defenses instead:
 //
-// 1. Default to `gemini-flash-latest` — a documented Google alias that is
-//    auto hot-swapped to the current Flash model, with 2 weeks' notice.
-//    This should rarely need touching.
+// 1. Default to a pinned, known-good model rather than the `gemini-flash-
+//    latest` alias. The alias sounded convenient (auto-hotswapped to
+//    Google's current Flash model, no maintenance) but that's exactly what
+//    bit us: it silently rolled onto Gemini 3.7 Flash, which turned out to
+//    carry a much tighter free-tier quota (RPM 5 / RPD 20, confirmed in
+//    Google AI Studio) than the older Flash models this app was built
+//    around (RPM ~10 / RPD ~250). Pinning a specific version trades "never
+//    needs touching" for "never silently degrades" — worth it after this.
 // 2. If the configured model 404s anyway (rollout ahead of docs, a bad
 //    override, etc.), automatically retry down a short list of known-good
 //    fallbacks before giving up.
-const MODEL = process.env.REACT_APP_GEMINI_MODEL || 'gemini-flash-latest';
+const MODEL = process.env.REACT_APP_GEMINI_MODEL || 'gemini-3.6-flash';
 const FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.5-flash'];
 
 function endpointFor(model) {
@@ -32,7 +37,7 @@ export class GeminiError extends Error {
   constructor(message, kind) {
     super(message);
     this.name = 'GeminiError';
-    this.kind = kind; // 'config' | 'quota' | 'auth' | 'network' | 'truncated' | 'empty' | 'api'
+    this.kind = kind; // 'config' | 'quota' | 'quota_daily' | 'auth' | 'network' | 'truncated' | 'empty' | 'api'
   }
 }
 
@@ -50,8 +55,14 @@ const DEV = process.env.NODE_ENV !== 'production';
 // of API calls per Analyze click can be verified rather than assumed.
 let requestCount = 0;
 
-/** Total Gemini requests made since page load. Also on window.__geminiRequests in dev. */
+/** Total Gemini requests made since page load. Also on window.__geminiRequests. */
 export function getRequestCount() { return requestCount; }
+
+// Actually expose it (the comment above promised this but nothing ever set
+// it) so the real request count can be checked from any browser's console —
+// the fastest way to confirm whether one Analyze click really sent one
+// request, without trusting a UI label.
+if (typeof window !== 'undefined') window.__geminiRequests = 0;
 
 /** Reset the counter (used when measuring a single click). */
 export function resetRequestCount() { requestCount = 0; }
@@ -59,6 +70,7 @@ export function resetRequestCount() { requestCount = 0; }
 /** One attempt against one specific model. Throws GeminiError on any failure. */
 async function attemptModel(model, userPrompt, signal) {
   const n = ++requestCount;
+  if (typeof window !== 'undefined') window.__geminiRequests = requestCount;
   const startedAt = Date.now();
   if (DEV) {
     // eslint-disable-next-line no-console
@@ -97,22 +109,57 @@ async function attemptModel(model, userPrompt, signal) {
 
   if (!res.ok) {
     let detail = '';
+    let details = null;
     try {
       const body = await res.json();
       detail = body?.error?.message || '';
+      details = body?.error?.details || null;
     } catch { /* non-JSON error body */ }
 
     if (res.status === 429) {
       // Free-tier ceilings are small and per-model: Pro ~5/min, Flash ~10/min,
       // Flash-Lite ~15/min. We deliberately do NOT retry or fall back here —
       // both would spend more of the quota that just ran out.
+      //
+      // Google's 429 body carries the REAL answer to "how long do I actually
+      // wait", via two structured detail types we can read straight out of
+      // `details` instead of guessing:
+      //   - google.rpc.QuotaFailure.violations[].quotaId — names which cap
+      //     was hit. A "PerDay" id means waiting a minute does nothing; the
+      //     daily cap only clears on Google's quota-day rollover.
+      //   - google.rpc.RetryInfo.retryDelay — the exact wait Google itself
+      //     recommends (e.g. "38s"), when Google chooses to send one.
+      // Falling back to the old "about a minute" guess only when neither is
+      // present keeps this correct instead of just less wrong.
+      const quotaFailure = details?.find(d => /QuotaFailure$/.test(d['@type'] || ''));
+      const retryInfo     = details?.find(d => /RetryInfo$/.test(d['@type'] || ''));
+      const violations = quotaFailure?.violations || [];
+      const isDaily  = violations.some(v => /PerDay/i.test(v.quotaId || ''));
+      const retryDelay = retryInfo?.retryDelay; // e.g. "38s"
+
       const isPro = /pro/i.test(model);
+      let waitAdvice;
+      if (isDaily) {
+        waitAdvice = "This is the DAILY free-tier cap, not the per-minute one — waiting a minute will NOT help. " +
+          "It only clears on Google's next quota-day rollover (Pacific time), so Analyze will keep failing until then.";
+      } else if (retryDelay) {
+        waitAdvice = `Google says to wait ${retryDelay}, then click Analyze once.`;
+      } else {
+        // Neither structured field was present — fall back to the documented
+        // per-minute ceiling as the best available guess.
+        waitAdvice = 'Wait about a minute, then click Analyze once.';
+      }
+
       throw new GeminiError(
         `Gemini rate limit reached on ${model}` +
         (isPro ? ' (Pro free tier allows only ~5 requests/minute). ' : '. ') +
-        'Wait about a minute, then click Analyze once.' +
-        (isPro ? ' If this keeps happening, switching REACT_APP_GEMINI_MODEL back to gemini-flash-latest gives a much higher free limit.' : ''),
-        'quota'
+        waitAdvice +
+        // NOTE: this used to suggest falling back to `gemini-flash-latest`
+        // for a higher limit — that alias is what silently rolled onto the
+        // tightly-quota'd 3.7 Flash in the first place, so it's no longer
+        // trustworthy advice. Nothing points back to it now.
+        (isPro ? ' If this keeps happening, a lighter-weight model may have a higher free limit — check REACT_APP_GEMINI_MODEL against Google AI Studio\'s current quotas.' : ''),
+        isDaily ? 'quota_daily' : 'quota'
       );
     }
     // Google is migrating keys from Standard (AIza…) to Auth keys (AQ.Ab…).

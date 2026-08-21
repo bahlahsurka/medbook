@@ -3,7 +3,9 @@ import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
 import { buildHighlightParts, resolveHL, adjustHighlights } from '../lib/highlights';
 import { useHighlight, clearRange } from '../lib/useHighlight';
-import { useTheme } from '../lib/theme';
+import { useTheme, SPACE, RADIUS, FONT, Z, elevation } from '../lib/theme';
+import { IconChevronLeft, IconChevronRight, IconEdit, IconCheck, IconTrash, IconPin,
+  IconImages, IconSparkle, IconX, IconDownload, IconChart } from '../lib/icons';
 import HLToolbar from './HLToolbar';
 import HLPopover from './HLPopover';
 import AISections from './AISections';
@@ -32,6 +34,22 @@ function storagePathFromUrl(url) {
   } catch { return null; }
 }
 
+// Small "flash" helper for save-confirmation UI feedback — true for `ms`,
+// then auto-clears. The timer is cleaned up on unmount so a fast prev/next
+// (which remounts DetailView via its `key`) can't warn about setting state
+// after unmount.
+function useFlash(ms = 1600) {
+  const [on, setOn] = useState(false);
+  const timer = useRef(null);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const fire = useCallback(() => {
+    setOn(true);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setOn(false), ms);
+  }, [ms]);
+  return [on, fire];
+}
+
 function RenderedNotes({ text, highlights }) {
   const { isDark } = useTheme();
   const parts = buildHighlightParts(text, highlights);
@@ -48,6 +66,10 @@ function RenderedNotes({ text, highlights }) {
 
 // Same always-opaque-text overlay used in AddEntry, so edit-mode highlighting
 // shows clean colour bands in both themes instead of washed-out text.
+// UNCHANGED from before this batch — its sizing/padding/line-height must
+// match the paired textarea's style exactly, character for character, or
+// highlight bands drift out of alignment with the text they're supposed to
+// sit behind.
 const EditHighlightOverlay = React.forwardRef(function EditHighlightOverlay({ text, highlights, isDark }, ref) {
   const parts = buildHighlightParts(text + '\n', highlights);
   return (
@@ -76,6 +98,17 @@ const EditHighlightOverlay = React.forwardRef(function EditHighlightOverlay({ te
   );
 });
 
+// Small circular icon-button used throughout the lightbox chrome.
+function LbBtn({ onClick, title, style, children }) {
+  return (
+    <button className="mb-detailbtn" onClick={onClick} title={title} aria-label={title} style={{
+      background:'rgba(255,255,255,.15)', border:'none', color:'#fff',
+      cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
+      ...style
+    }}>{children}</button>
+  );
+}
+
 function Lightbox({ images, start, onClose }) {
   const [idx, setIdx] = useState(start);
   const tx = useRef(null);
@@ -94,49 +127,149 @@ function Lightbox({ images, start, onClose }) {
   };
 
   return (
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.92)',zIndex:1000,
-      display:'flex',alignItems:'center',justifyContent:'center'}}
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.92)',zIndex:Z.lightbox,
+      display:'flex',alignItems:'center',justifyContent:'center',
+      animation:'medbook-scrim-in 180ms ease'}}
       onTouchStart={e=>{tx.current=e.touches[0].clientX;}}
       onTouchEnd={e=>{
         if(!tx.current)return;
         const dx=e.changedTouches[0].clientX-tx.current;
         if(dx<-50)next();else if(dx>50)prev();tx.current=null;
       }}>
-      <button onClick={onClose} style={{position:'absolute',top:16,right:20,
-        background:'rgba(255,255,255,.15)',border:'none',color:'#fff',fontSize:20,
-        cursor:'pointer',width:40,height:40,borderRadius:'50%',
-        display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
-      <button onClick={download} style={{position:'absolute',top:16,left:20,
-        background:'rgba(255,255,255,.15)',border:'none',color:'#fff',fontSize:12,
-        cursor:'pointer',padding:'8px 14px',borderRadius:8,fontWeight:600,fontFamily:'Inter,sans-serif'}}>
-        ⬇ Download
-      </button>
+      <LbBtn onClick={onClose} title="Close" style={{position:'absolute',top:16,right:20,
+        fontSize:20,width:40,height:40,borderRadius:RADIUS.circle}}>
+        <IconX size={18} />
+      </LbBtn>
+      <LbBtn onClick={download} title="Download" style={{position:'absolute',top:16,left:20,
+        fontSize:12,padding:'8px 14px',borderRadius:RADIUS.md,fontWeight:600,
+        fontFamily:'Inter,sans-serif',gap:6}}>
+        <IconDownload size={13} /> Download
+      </LbBtn>
       {images.length>1 && <>
         <div style={{position:'absolute',top:20,left:'50%',transform:'translateX(-50%)',
-          color:'#fff',fontSize:13,background:'rgba(0,0,0,.5)',padding:'4px 14px',borderRadius:20}}>
+          color:'#fff',fontSize:13,background:'rgba(0,0,0,.5)',padding:'4px 14px',borderRadius:RADIUS.pill}}>
           {idx+1}/{images.length}
         </div>
-        <button onClick={prev} style={{position:'absolute',left:12,background:'rgba(255,255,255,.15)',
-          border:'none',color:'#fff',fontSize:28,cursor:'pointer',width:44,height:44,
-          borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center'}}>‹</button>
-        <button onClick={next} style={{position:'absolute',right:12,background:'rgba(255,255,255,.15)',
-          border:'none',color:'#fff',fontSize:28,cursor:'pointer',width:44,height:44,
-          borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center'}}>›</button>
+        <LbBtn onClick={prev} title="Previous image" style={{position:'absolute',left:12,
+          fontSize:28,width:44,height:44,borderRadius:RADIUS.circle}}>
+          <IconChevronLeft size={22} />
+        </LbBtn>
+        <LbBtn onClick={next} title="Next image" style={{position:'absolute',right:12,
+          fontSize:28,width:44,height:44,borderRadius:RADIUS.circle}}>
+          <IconChevronRight size={22} />
+        </LbBtn>
       </>}
-      <img src={images[idx]} alt=""
-        style={{maxWidth:'90vw',maxHeight:'85vh',borderRadius:8,objectFit:'contain',display:'block'}}
+      {/* key={idx} — a fresh element per image means the pop-in animation
+          below replays on every prev/next, not just the initial open, so
+          navigating between images gets a lightweight transition instead
+          of an instant swap. */}
+      <img key={idx} src={images[idx]} alt=""
+        style={{maxWidth:'90vw',maxHeight:'85vh',borderRadius:RADIUS.md,objectFit:'contain',
+          display:'block',animation:'medbook-pop-in 200ms cubic-bezier(0.4,0,0.2,1)'}}
         onClick={e=>e.stopPropagation()} />
       <div onClick={onClose} style={{position:'absolute',inset:0,zIndex:-1}} />
     </div>
   );
 }
 
+// A small "✓ Saved" chip used as save-confirmation feedback wherever an
+// async save just completed. Purely visual — always driven by a useFlash().
+function SavedChip({ t, children='Saved' }) {
+  return (
+    <span style={{display:'flex',alignItems:'center',gap:4,fontSize:FONT.size.xs,
+      fontWeight:FONT.weight.semibold,color:t.ok,background:t.okBg,
+      border:`1px solid ${t.okBorder}`,borderRadius:RADIUS.pill,padding:'2px 9px',
+      animation:'medbook-fade-in 200ms ease'}}>
+      <IconCheck size={11} /> {children}
+    </span>
+  );
+}
+
+// Quiet icon-only entry-toolbar button. Colour comes entirely from the
+// theme's semantic tokens (t.ok/t.accent/t.warn/t.danger/t.text3 +
+// t.surface2/t.border), so dark mode is correct by construction rather
+// than an ad hoc `${color}22` approximation. No visible label — the
+// tooltip/aria-label carries it, deliberately: a row of five bold
+// coloured pills reads as loud "dashboard" chrome, working against the
+// reading-workspace direction this polish pass asked for. Sized to match
+// the Prev/Next nav buttons elsewhere on this screen. The same shape can
+// take future actions (bookmark, AI Analyze, …) later without a redesign.
+function ActionButton({ t, icon, label, onClick, tone='neutral', disabled, pulse }) {
+  const map = {
+    ok:      { color:t.ok,     bg:t.surface2, border:t.border },
+    accent:  { color:t.accent, bg:t.surface2, border:t.border },
+    warn:    { color:t.warn,   bg:t.warnBg,   border:t.warnBorder },
+    danger:  { color:t.danger, bg:t.surface2, border:t.border },
+    neutral: { color:t.text3,  bg:t.surface2, border:t.border },
+  };
+  const c = map[tone] || map.neutral;
+  return (
+    <button className="mb-detailbtn" onClick={onClick} disabled={disabled}
+      title={label} aria-label={label} style={{
+      width:34, height:34, flexShrink:0,
+      display:'flex', alignItems:'center', justifyContent:'center',
+      background:c.bg, border:`1px solid ${c.border}`, color:c.color,
+      borderRadius:RADIUS.sm+2, cursor:disabled?'not-allowed':'pointer',
+      opacity:disabled?.5:1,
+      animation:pulse?'medbook-pulse-once 320ms ease':'none'}}>
+      {icon}
+    </button>
+  );
+}
+
+// Gallery thumbnail — fades in once its (lazily-loaded) image actually
+// loads, rather than popping in abruptly or showing a broken/blank box.
+// No skeleton box behind it: on the mobile horizontal strip each image's
+// natural aspect ratio gives it a different width, so a same-sized
+// placeholder can't stand in for it without either guessing wrong or
+// causing a reflow once the real size is known — a plain opacity fade
+// avoids that without adding layout complexity.
+function GalleryThumb({ t, src, onClick }) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <img src={src} alt="" className="mb-detailimg" onClick={onClick}
+      loading="lazy" onLoad={()=>setLoaded(true)}
+      style={{borderRadius:RADIUS.md,border:`1px solid ${t.border}`,cursor:'pointer',
+        objectFit:'contain',background:t.surface2,
+        opacity:loaded?1:0,transition:'opacity 200ms ease'}} />
+  );
+}
+
+// The "Highlight" toggle — used both in the Review Notes section header and
+// (compact) in the sticky bar, so both read as the same control rather than
+// two independently-styled buttons.
+function HighlightToggle({ t, on, onClick, compact }) {
+  return (
+    <button className="mb-detailbtn"
+      onMouseDown={e=>e.preventDefault()} onTouchStart={e=>e.preventDefault()}
+      onClick={onClick}
+      style={{fontSize:FONT.size.xs,background:on?t.hlBtnBg:t.surface3,
+        border:`1px solid ${on?t.hlBtnBorder:t.border}`,
+        borderRadius:RADIUS.sm-1,padding:compact?'5px 10px':'3px 10px',cursor:'pointer',
+        display:'flex',alignItems:'center',gap:5,flexShrink:0,
+        color:on?t.hlBtnText:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
+        transition:'background 150ms ease, border-color 150ms ease, color 150ms ease'}}>
+      <IconEdit size={11} /> {on?'Done':'Highlight'}
+    </button>
+  );
+}
+
+function F({label,children}) {
+  const { t } = useTheme();
+  return <div>
+    <div style={{fontSize:FONT.size.micro,color:t.text4,letterSpacing:.8,
+      fontWeight:FONT.weight.semibold,textTransform:'uppercase'}}>{label}</div>
+    {children}
+  </div>;
+}
+
 export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId, color: colorProp,
   onPrev, onNext, hasPrev, hasNext }) {
   const { t, isDark } = useTheme();
+
   const inp={display:'block',width:'100%',marginTop:8,background:t.surface,
-    border:`1px solid ${t.borderStrong}`,borderRadius:8,color:t.text,padding:'10px 12px',
-    fontSize:14,outline:'none',boxSizing:'border-box',fontFamily:'Inter,sans-serif'};
+    border:`1px solid ${t.borderStrong}`,borderRadius:RADIUS.md,color:t.text,padding:'10px 12px',
+    fontSize:FONT.size.md,outline:'none',boxSizing:'border-box',fontFamily:'Inter,sans-serif'};
   const [lb,      setLb]      = useState(null);
   const [editing, setEditing] = useState(false);
   const [deleting,setDel]     = useState(false);
@@ -153,6 +286,12 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
 
   // View highlight state
   const [viewHL,   setVHL]   = useState(entry.highlights||[]);
+
+  // Save-confirmation feedback (batch 6) — purely additive UI state, doesn't
+  // change what's persisted or when. See useFlash() above.
+  const [savedFlash,    fireSavedFlash]    = useFlash();
+  const [aiSavedFlash,  fireAiSavedFlash]  = useFlash();
+  const [reviewedFlash, fireReviewedFlash] = useFlash(1400);
 
   // ---- AI (Sprint 2) --------------------------------------------------------
   // AI output lives entirely apart from `notes` (the Review). No AI code path
@@ -174,6 +313,24 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const editTaRef = useRef();
   const editOverlayRef = useRef();
   const notesRef  = useRef();
+
+  // Compact sticky context bar (long-entry navigation) — appears once the
+  // header has scrolled out of view, so a long Review has a way back to
+  // System/Highlight without scrolling up. Driven by IntersectionObserver
+  // watching a 1px sentinel placed right after the header, NOT a scroll
+  // listener: the observer only fires on the one boundary crossing, so this
+  // stays cheap regardless of how long the entry is or how much the user
+  // scrolls — no per-pixel scroll math anywhere. See its render site for
+  // the zero-reflow trick used to mount it.
+  const [showStickyBar, setShowStickyBar] = useState(false);
+  const headerSentinelRef = useRef(null);
+  useEffect(() => {
+    const el = headerSentinelRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(([e]) => setShowStickyBar(!e.isIntersecting), { threshold: 0 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   const syncEditOverlay = useCallback(() => {
     if (editOverlayRef.current && editTaRef.current) {
@@ -340,6 +497,13 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     } catch (e) {
       // Entry is untouched on any failure.
       setAiErr(e.message || 'Analysis failed.');
+      // Refresh the usage estimate on failure too, not just success — a 429
+      // still burned a real request against the quota, and this is the only
+      // on-screen way to confirm exactly how many requests one click sent
+      // (previously this only updated after a successful Analyze, so a
+      // rate-limited click left the counter looking stale/untouched).
+      const usedModel = AIService.activeModel();
+      setUsageInfo({ model: usedModel, count: AIService.getRequestCount(), limits: limitsFor(usedModel) });
     } finally {
       setAiBusy(false);
       analyzeInFlight.current = false;
@@ -354,6 +518,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     setAiDirty(false);
     onUpdated({ ...entry, ...payload });
     setAiBusy(false);
+    fireAiSavedFlash();
   };
 
   // Copy one AI flashcard into the permanent, user-owned Flashcards deck.
@@ -413,8 +578,8 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
 
   // colorProp comes from App (knows user's custom systems); SYS_COLOR is only a fallback.
   const color = colorProp || SYS_COLOR[entry.system] || '#2563eb';
-  const dc    = DIFF_COLOR[entry.difficulty]||'#6b7280';
   const fmt   = iso => new Date(iso).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  const hasImages = entry.images?.length > 0;
 
   const updateDB = async fields => {
     const {data,error} = await supabase.from('entries').update(fields).eq('id',entry.id).select().single();
@@ -424,17 +589,19 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
 
   // Marking reviewed must also advance the SM-2 schedule, otherwise the entry
   // stays permanently "due" and the review queue never lets it go.
-  const markReviewed = () => {
+  const markReviewed = async () => {
     const interval = Math.max(1, Math.round((entry.review_interval || 1) * (entry.ease_factor || 2.5)));
     const next = new Date();
     next.setDate(next.getDate() + interval);
-    return updateDB({
+    const ok = await updateDB({
       review_count:(entry.review_count||0)+1,
       last_reviewed:new Date().toISOString(),
       review_interval: interval,
       ease_factor: entry.ease_factor || 2.5,
       next_review: next.toISOString(),
     });
+    if (ok) fireReviewedFlash();
+    return ok;
   };
   const togglePin = () => updateDB({ pinned:!entry.pinned });
 
@@ -532,7 +699,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         title:editTitle.trim(), notes:trimmedNotes,
         difficulty:editDiff, images:allImgs, highlights:adjustedHighlights
       });
-      if (ok) { setVHL(adjustedHighlights); setEditing(false); setNI([]); }
+      if (ok) { setVHL(adjustedHighlights); setEditing(false); setNI([]); fireSavedFlash(); }
     } catch(e) { setErr(e.message); }
     setSaving(false);
   };
@@ -545,118 +712,154 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   };
 
   // ── EDIT MODE ──────────────────────────────────────────────────────────
+  // A narrower cap than view mode even on desktop — a form of stacked
+  // fields reads worse stretched to full width than a moderate column does.
   if (editing) return (
-    <div style={{maxWidth:680,margin:'0 auto',fontFamily:'Inter,sans-serif'}}>
-      <div style={{fontSize:15,fontWeight:700,color:t.text,marginBottom:20}}>
-        Editing — <span style={{color}}>{entry.system}</span>
+    <div className="mb-detail-shell-narrow" style={{fontFamily:'Inter,sans-serif'}}>
+      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:SPACE.lg+2}}>
+        <IconEdit size={15} style={{color:t.text3,flexShrink:0}} />
+        <div style={{fontSize:FONT.size.md,fontWeight:FONT.weight.bold,color:t.text}}>
+          Editing — <span style={{color}}>{entry.system}</span>
+        </div>
       </div>
-      <div style={{display:'flex',flexDirection:'column',gap:16}}>
-        <F label="TITLE *">
-          <input value={editTitle} onChange={e=>setET(e.target.value)} style={inp} autoFocus />
-        </F>
-        <F label="DIFFICULTY">
-          <div style={{display:'flex',gap:8,marginTop:8,flexWrap:'wrap'}}>
-            {DIFFICULTY.map(d=>(
-              <button key={d} onClick={()=>setED(d)} style={{
-                padding:'7px 16px',borderRadius:6,
-                border:`1px solid ${editDiff===d?DIFF_COLOR[d]:t.border}`,
-                cursor:'pointer',fontSize:13,fontWeight:600,fontFamily:'Inter,sans-serif',
-                background:editDiff===d?`${DIFF_COLOR[d]}1f`:t.surface,
-                color:editDiff===d?DIFF_COLOR[d]:t.text3}}>{d}</button>
-            ))}
-          </div>
-        </F>
-        <F label="REVIEW NOTES">
-          <div style={{display:'flex',alignItems:'center',gap:8,marginTop:8,marginBottom:6,flexWrap:'wrap'}}>
-            <button
-              onMouseDown={e=>e.preventDefault()} onTouchStart={e=>e.preventDefault()}
-              onClick={()=>setHEOn(p=>!p)}
-              style={{fontSize:11,background:hlEditOn?t.hlBtnBg:t.surface3,
-                border:`1px solid ${hlEditOn?t.hlBtnBorder:t.border}`,
-                borderRadius:5,padding:'4px 10px',cursor:'pointer',
-                color:hlEditOn?t.hlBtnText:t.text3,fontWeight:600,fontFamily:'Inter,sans-serif'}}>
-              🖊 {hlEditOn?'On':'Highlight'}
-            </button>
-            {editHl.highlights.length>0 && <span style={{fontSize:11,color:t.text4}}>{editHl.highlights.length} highlights</span>}
-          </div>
-          {hlEditOn && <HLToolbar onApply={editHl.applyHL} onRemove={editHl.removeHL} onClearAll={editHl.clearAllHL} hasSelection={editHl.hasSel} />}
-          {/* marginTop lives on the WRAPPER, not the textarea — otherwise the
-              textarea's own margin pushes its text 8px below the overlay bands. */}
-          <div style={{position:'relative', marginTop:8}}>
-            {editHl.highlights.length>0 && (
-              <EditHighlightOverlay ref={editOverlayRef} text={editNotes}
-                highlights={editHl.highlights} isDark={isDark} />
-            )}
-            <textarea ref={editTaRef} value={editNotes}
-              onChange={e=>{ editHl.handleTextChange(editNotes,e.target.value); setEN(e.target.value); }}
-              onSelect={editHl.onSelChange} onMouseUp={editHl.onSelChange}
-              onKeyUp={editHl.onSelChange} onTouchEnd={editHl.onSelChange}
-              onScroll={syncEditOverlay}
-              rows={8} style={{...inp,resize:'vertical',lineHeight:'1.7',
-                marginTop:0,
-                position:'relative',zIndex:1,
-                fontWeight:400, letterSpacing:'normal',
-                WebkitTextSizeAdjust:'100%', textSizeAdjust:'100%',
-                background: editHl.highlights.length>0 ? 'transparent' : t.surface,
-                caretColor:t.text, color:t.text}} />
-          </div>
-        </F>
-        {editImgs.length>0 && (
-          <F label="EXISTING IMAGES">
-            <div style={{display:'flex',flexWrap:'wrap',gap:10,marginTop:8}}>
-              {editImgs.map((url,i)=>(
-                <div key={i} style={{position:'relative'}}>
-                  <img src={url} alt="" style={{width:100,height:76,objectFit:'cover',borderRadius:7,border:`1px solid ${t.border}`}} />
-                  <button onClick={()=>setEI(p=>p.filter((_,j)=>j!==i))} style={{
-                    position:'absolute',top:-7,right:-7,background:'#dc2626',border:'none',
-                    borderRadius:'50%',width:20,height:20,fontSize:10,color:'#fff',
-                    cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
-                </div>
+
+      {/* Same card treatment as view mode below — editing reads as a
+          workspace panel rather than bare fields floating on the page. */}
+      <div style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
+        padding:SPACE.xl,boxShadow:elevation(t,'sm')}}>
+        <div style={{display:'flex',flexDirection:'column',gap:SPACE.lg+2}}>
+          <F label="TITLE *">
+            <input value={editTitle} onChange={e=>setET(e.target.value)} style={inp} autoFocus />
+          </F>
+          <F label="DIFFICULTY">
+            <div style={{display:'flex',gap:8,marginTop:8,flexWrap:'wrap'}}>
+              {DIFFICULTY.map(d=>(
+                <button key={d} className="mb-detailbtn" onClick={()=>setED(d)} style={{
+                  padding:'7px 16px',borderRadius:RADIUS.sm,
+                  border:`1px solid ${editDiff===d?DIFF_COLOR[d]:t.border}`,
+                  cursor:'pointer',fontSize:FONT.size.base,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
+                  background:editDiff===d?`${DIFF_COLOR[d]}1f`:t.surface,
+                  color:editDiff===d?DIFF_COLOR[d]:t.text3}}>{d}</button>
               ))}
             </div>
           </F>
-        )}
-        <F label="ADD MORE IMAGES">
-          <label style={{display:'inline-block',marginTop:8,background:t.surface3,
-            border:`1px solid ${t.border}`,borderRadius:7,padding:'8px 16px',
-            fontSize:13,cursor:'pointer',fontWeight:500,color:t.text2,fontFamily:'Inter,sans-serif'}}>
-            📷 Choose images
-            <input type="file" accept="image/*" multiple style={{display:'none'}}
-              onChange={e=>loadNewImgs(e.target.files)} />
-          </label>
-          {newImgs.length>0 && (
-            <div style={{display:'flex',flexWrap:'wrap',gap:10,marginTop:10}}>
-              {newImgs.map((img,i)=>(
-                <div key={i} style={{position:'relative'}}>
-                  <img src={img.preview} alt="" style={{width:100,height:76,objectFit:'cover',borderRadius:7,border:`1px solid ${t.border}`}} />
-                  <button onClick={()=>setNI(p=>p.filter((_,j)=>j!==i))} style={{
-                    position:'absolute',top:-7,right:-7,background:'#dc2626',border:'none',
-                    borderRadius:'50%',width:20,height:20,fontSize:10,color:'#fff',
-                    cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
-                </div>
-              ))}
+          <F label="REVIEW NOTES">
+            <div style={{display:'flex',alignItems:'center',gap:8,marginTop:8,marginBottom:6,flexWrap:'wrap'}}>
+              <button className="mb-detailbtn"
+                onMouseDown={e=>e.preventDefault()} onTouchStart={e=>e.preventDefault()}
+                onClick={()=>setHEOn(p=>!p)}
+                style={{fontSize:FONT.size.xs,background:hlEditOn?t.hlBtnBg:t.surface3,
+                  border:`1px solid ${hlEditOn?t.hlBtnBorder:t.border}`,
+                  borderRadius:RADIUS.sm-1,padding:'4px 10px',cursor:'pointer',display:'flex',
+                  alignItems:'center',gap:5,
+                  color:hlEditOn?t.hlBtnText:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif'}}>
+                <IconEdit size={11} /> {hlEditOn?'On':'Highlight'}
+              </button>
+              {editHl.highlights.length>0 && <span style={{fontSize:FONT.size.xs,color:t.text4}}>{editHl.highlights.length} highlights</span>}
             </div>
+            {hlEditOn && <HLToolbar onApply={editHl.applyHL} onRemove={editHl.removeHL} onClearAll={editHl.clearAllHL} hasSelection={editHl.hasSel} />}
+            {/* marginTop lives on the WRAPPER, not the textarea — otherwise the
+                textarea's own margin pushes its text 8px below the overlay bands. */}
+            <div style={{position:'relative', marginTop:8}}>
+              {editHl.highlights.length>0 && (
+                <EditHighlightOverlay ref={editOverlayRef} text={editNotes}
+                  highlights={editHl.highlights} isDark={isDark} />
+              )}
+              <textarea ref={editTaRef} value={editNotes}
+                onChange={e=>{ editHl.handleTextChange(editNotes,e.target.value); setEN(e.target.value); }}
+                onSelect={editHl.onSelChange} onMouseUp={editHl.onSelChange}
+                onKeyUp={editHl.onSelChange} onTouchEnd={editHl.onSelChange}
+                onScroll={syncEditOverlay}
+                rows={8} style={{...inp,resize:'vertical',lineHeight:'1.7',
+                  marginTop:0,
+                  position:'relative',zIndex:1,
+                  fontWeight:400, letterSpacing:'normal',
+                  WebkitTextSizeAdjust:'100%', textSizeAdjust:'100%',
+                  background: editHl.highlights.length>0 ? 'transparent' : t.surface,
+                  caretColor:t.text, color:t.text}} />
+            </div>
+          </F>
+          {editImgs.length>0 && (
+            <F label="EXISTING IMAGES">
+              <div style={{display:'flex',flexWrap:'wrap',gap:10,marginTop:8}}>
+                {editImgs.map((url,i)=>(
+                  <div key={i} style={{position:'relative'}}>
+                    <img src={url} alt="" className="mb-detailimg"
+                      style={{width:100,height:76,objectFit:'cover',borderRadius:RADIUS.sm+1,border:`1px solid ${t.border}`}} />
+                    <button className="mb-detailbtn" onClick={()=>setEI(p=>p.filter((_,j)=>j!==i))} style={{
+                      position:'absolute',top:-7,right:-7,background:t.danger,border:'none',
+                      borderRadius:RADIUS.circle,width:20,height:20,fontSize:10,color:'#fff',
+                      cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                      <IconX size={10} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </F>
           )}
-        </F>
-        {err && <div style={{background:t.dangerBg,border:`1px solid ${t.dangerBorder}`,borderRadius:8,padding:'10px 14px',fontSize:13,color:t.danger}}>{err}</div>}
-        <div style={{display:'flex',gap:10}}>
-          <button onClick={saveEdit} disabled={saving} style={{
-            background:color,color:'#fff',border:'none',borderRadius:8,padding:'11px 24px',
-            fontSize:14,fontWeight:600,cursor:saving?'not-allowed':'pointer',
-            opacity:saving?.7:1,fontFamily:'Inter,sans-serif'}}>
-            {saving?'Saving…':'✓ Save Changes'}
-          </button>
-          <button onClick={cancelEdit} style={{background:t.surface3,color:t.text3,
-            border:`1px solid ${t.border}`,borderRadius:8,padding:'11px 20px',
-            fontSize:14,cursor:'pointer',fontFamily:'Inter,sans-serif'}}>Cancel</button>
+          <F label="ADD MORE IMAGES">
+            <label style={{display:'inline-block',marginTop:8,background:t.surface3,
+              border:`1px solid ${t.border}`,borderRadius:RADIUS.sm+1,padding:'8px 16px',
+              fontSize:FONT.size.base,cursor:'pointer',fontWeight:FONT.weight.medium,color:t.text2,fontFamily:'Inter,sans-serif',
+              display:'inline-flex',alignItems:'center',gap:7}}>
+              <IconImages size={13} /> Choose images
+              <input type="file" accept="image/*" multiple style={{display:'none'}}
+                onChange={e=>loadNewImgs(e.target.files)} />
+            </label>
+            {newImgs.length>0 && (
+              <div style={{display:'flex',flexWrap:'wrap',gap:10,marginTop:10}}>
+                {newImgs.map((img,i)=>(
+                  <div key={i} style={{position:'relative'}}>
+                    <img src={img.preview} alt="" className="mb-detailimg"
+                      style={{width:100,height:76,objectFit:'cover',borderRadius:RADIUS.sm+1,border:`1px solid ${t.border}`}} />
+                    <button className="mb-detailbtn" onClick={()=>setNI(p=>p.filter((_,j)=>j!==i))} style={{
+                      position:'absolute',top:-7,right:-7,background:t.danger,border:'none',
+                      borderRadius:RADIUS.circle,width:20,height:20,fontSize:10,color:'#fff',
+                      cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                      <IconX size={10} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </F>
+          {err && <div style={{background:t.dangerBg,border:`1px solid ${t.dangerBorder}`,borderRadius:RADIUS.md,padding:'10px 14px',fontSize:FONT.size.base,color:t.danger}}>{err}</div>}
+          <div style={{display:'flex',gap:10}}>
+            <button className="mb-detailbtn" onClick={saveEdit} disabled={saving} style={{
+              background:color,color:'#fff',border:'none',borderRadius:RADIUS.md,padding:'11px 24px',
+              fontSize:FONT.size.md,fontWeight:FONT.weight.semibold,cursor:saving?'not-allowed':'pointer',
+              opacity:saving?.7:1,fontFamily:'Inter,sans-serif',
+              display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+              {saving ? <>
+                <span style={{display:'inline-block',width:14,height:14,
+                  border:'2px solid rgba(255,255,255,.4)',borderTop:'2px solid #fff',
+                  borderRadius:RADIUS.circle,animation:'medbook-spin .7s linear infinite'}} />
+                Saving…
+              </> : <><IconCheck size={14} /> Save Changes</>}
+            </button>
+            <button className="mb-detailbtn" onClick={cancelEdit} style={{background:t.surface3,color:t.text3,
+              border:`1px solid ${t.border}`,borderRadius:RADIUS.md,padding:'11px 20px',
+              fontSize:FONT.size.md,cursor:'pointer',fontFamily:'Inter,sans-serif'}}>Cancel</button>
+          </div>
         </div>
       </div>
     </div>
   );
 
   // ── VIEW MODE ──────────────────────────────────────────────────────────
+  // Width/columns are driven by the .mb-detail-shell/.mb-detail-grid CSS
+  // classes (public/index.html) rather than inline styles, specifically so
+  // they can respond to viewport size — mobile stays a single column;
+  // tablet/laptop (≥768px) get a wider shell and, once there are images, a
+  // two-column layout with a sticky image rail. A quick fade-in on mount
+  // smooths switching between entries via prev/next, since this component
+  // remounts (`key`) each time.
+  //
+  // The System/Title/meta/toolbar header and the Review Notes section are
+  // ONE merged, lightly-contained "reading pane" (was two separate bordered+
+  // shadowed cards) — see its own comment below for why.
   return (
-    <div style={{maxWidth:680,margin:'0 auto',fontFamily:'Inter,sans-serif'}}>
+    <div className="mb-detail-shell" style={{fontFamily:'Inter,sans-serif',animation:'medbook-fade-in 200ms ease'}}>
       {lb!==null && <Lightbox images={entry.images} start={lb} onClose={()=>setLb(null)} />}
 
       {/* Floating highlight bar — only in view mode, only while Highlight is on,
@@ -672,11 +875,11 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
       )}
 
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
-        marginBottom:16,gap:10,flexWrap:'wrap'}}>
-        <button onClick={onBack} style={{background:'none',border:'none',color:t.text3,
-          cursor:'pointer',fontSize:13,padding:0,
-          display:'flex',alignItems:'center',gap:4,fontWeight:500,fontFamily:'Inter,sans-serif'}}>
-          ← Back to {entry.system}
+        marginBottom:SPACE.lg,gap:SPACE.sm,flexWrap:'wrap'}}>
+        <button className="mb-detailbtn" onClick={onBack} style={{background:'none',border:'none',color:t.text3,
+          cursor:'pointer',fontSize:FONT.size.sm,padding:'4px 2px',
+          display:'flex',alignItems:'center',gap:4,fontWeight:FONT.weight.medium,fontFamily:'Inter,sans-serif'}}>
+          <IconChevronLeft size={15} /> Back to {entry.system}
         </button>
 
         {/* Prev/Next — walks the same ordered list you'd see on the system
@@ -685,133 +888,190 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             go (e.g. only one entry, or search was narrowing the list). */}
         {(hasPrev || hasNext) && (
           <div style={{display:'flex',gap:6}}>
-            <button onClick={onPrev} disabled={!hasPrev} title="Previous entry"
+            <button className="mb-detailbtn" onClick={onPrev} disabled={!hasPrev} title="Previous entry (←)"
               style={{background:t.surface2,border:`1px solid ${t.border}`,
-                color:hasPrev?t.text2:t.text4,borderRadius:7,
-                width:34,height:34,fontSize:16,fontFamily:'Inter,sans-serif',
+                color:hasPrev?t.text2:t.text4,borderRadius:RADIUS.sm+1,
+                width:34,height:34,fontFamily:'Inter,sans-serif',
                 cursor:hasPrev?'pointer':'default',opacity:hasPrev?1:.4,
                 display:'flex',alignItems:'center',justifyContent:'center'}}>
-              ‹
+              <IconChevronLeft size={16} />
             </button>
-            <button onClick={onNext} disabled={!hasNext} title="Next entry"
+            <button className="mb-detailbtn" onClick={onNext} disabled={!hasNext} title="Next entry (→)"
               style={{background:t.surface2,border:`1px solid ${t.border}`,
-                color:hasNext?t.text2:t.text4,borderRadius:7,
-                width:34,height:34,fontSize:16,fontFamily:'Inter,sans-serif',
+                color:hasNext?t.text2:t.text4,borderRadius:RADIUS.sm+1,
+                width:34,height:34,fontFamily:'Inter,sans-serif',
                 cursor:hasNext?'pointer':'default',opacity:hasNext?1:.4,
                 display:'flex',alignItems:'center',justifyContent:'center'}}>
-              ›
+              <IconChevronRight size={16} />
             </button>
           </div>
         )}
       </div>
 
-      <div style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:10,
-        padding:20,marginBottom:14,borderTop:`3px solid ${color}`,
-        boxShadow:`0 1px 3px ${t.shadow}`}}>
-        <div style={{fontSize:18,fontWeight:700,color:t.text,lineHeight:1.4,marginBottom:12}}>
-          {entry.title}{entry.pinned&&' 📌'}
-        </div>
-        <div style={{display:'flex',flexWrap:'wrap',gap:8,alignItems:'center',marginBottom:16}}>
-          <span style={{fontSize:11,fontWeight:500,background:`${dc}1f`,color:dc,
-            borderRadius:4,padding:'2px 8px',border:`1px solid ${dc}44`}}>{entry.difficulty}</span>
-          <span style={{fontSize:12,color:t.text4}}>{fmt(entry.created_at)}</span>
-          {entry.review_count>0 && (
-            <span style={{fontSize:12,color:'#16a34a',fontWeight:600}}>
-              ✓ Reviewed {entry.review_count}×{entry.last_reviewed&&` · Last: ${fmt(entry.last_reviewed)}`}
-            </span>
-          )}
-        </div>
-        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-          <AB color="#16a34a" bg="#f0fdf4" border="#bbf7d0" onClick={markReviewed}>✓ Reviewed</AB>
-          <AB color="#2563eb" bg="#eff6ff" border="#bfdbfe" onClick={()=>setEditing(true)}>✎ Edit</AB>
-          <AB color={entry.pinned?'#d97706':t.text2} bg={entry.pinned?'#fffbeb':t.surface2}
-            border={entry.pinned?'#fde68a':t.border} onClick={togglePin}>
-            {entry.pinned?'📌 Unpin':'📌 Pin'}
-          </AB>
-          <AB color={t.text2} bg={t.surface2} border={t.border} onClick={exportPDF}>⬇ PDF</AB>
-          <AB color="#dc2626" bg="#fef2f2" border="#fecaca" onClick={deleteEntry} disabled={deleting}>
-            {deleting?'…':'Delete'}
-          </AB>
-        </div>
-      </div>
+      <div className={`mb-detail-grid${hasImages ? '' : ' mb-detail-grid--single'}`}>
+      <div className="mb-detail-main" style={{display:'flex',flexDirection:'column',gap:SPACE.md+2,minWidth:0}}>
 
-      {entry.notes && (
-        <div style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:10,
-          padding:'18px 20px',marginBottom:14,boxShadow:`0 1px 3px ${t.shadow}`}}>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
-            marginBottom:12,flexWrap:'wrap',gap:8}}>
-            <div style={{fontSize:10,color:t.text4,letterSpacing:.8,fontWeight:600,textTransform:'uppercase'}}>
-              Review Notes
-            </div>
-            <button
-              onMouseDown={e=>e.preventDefault()} onTouchStart={e=>e.preventDefault()}
-              onClick={()=>setHVOn(p=>!p)}
-              style={{fontSize:11,background:hlViewOn?t.hlBtnBg:t.surface3,
-                border:`1px solid ${hlViewOn?t.hlBtnBorder:t.border}`,
-                borderRadius:5,padding:'3px 10px',cursor:'pointer',
-                color:hlViewOn?t.hlBtnText:t.text3,fontWeight:600,fontFamily:'Inter,sans-serif'}}>
-              🖊 {hlViewOn?'Done':'Highlight'}
-            </button>
-          </div>
-          {hlViewOn && (
-            <>
-              {/* Static toolbar — always available, and the reliable path on mobile
-                  where the OS selection bubble can crowd the floating bar. */}
-              <HLToolbar
-                onApply={applyViewHL}
-                onRemove={removeViewHL}
-                onClearAll={clearAllViewHL}
-                hasSelection={viewHasSel}
-              />
-              <div style={{fontSize:11,color:t.text4,marginBottom:8}}>
-                Select text, then tap a colour here — or use the bar that pops up above your selection.
-              </div>
-            </>
-          )}
-          <div ref={notesRef}
-            data-selectable={hlViewOn ? 'true' : 'false'}
-            style={{lineHeight:1.85,fontSize:14,color:t.text2,
-            userSelect:hlViewOn?'text':'auto'}}>
-            <RenderedNotes text={entry.notes} highlights={viewHL} />
+      {/* ---- Reading pane: System / Title / meta+toolbar / Review Notes ----
+          Merged into ONE lightly-contained block (previously two separate
+          bordered+shadowed cards) so the entry reads as a single continuous
+          page rather than stacked dashboard slabs. Softer border, no
+          shadow, and a smaller radius than the AI/Images cards below it
+          keep this the visually lightest element on the screen, on
+          purpose — the medical content should carry the weight, not the
+          container around it. */}
+      <div className="mb-detail-card" style={{background:t.surface,
+        border:`1px solid ${t.border}`,borderRadius:RADIUS.md}}>
+
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6,flexWrap:'wrap'}}>
+          <span style={{fontSize:FONT.size.sm,fontWeight:FONT.weight.semibold,color}}>{entry.system}</span>
+          {savedFlash && <SavedChip t={t} />}
+        </div>
+
+        <div style={{fontSize:FONT.size.xl3,fontWeight:FONT.weight.bold,color:t.text,
+          lineHeight:FONT.leading.tight,marginBottom:SPACE.md}}>
+          {entry.title}
+          {entry.pinned && <IconPin size={16} style={{marginLeft:8,color:t.warn,verticalAlign:-2}} />}
+        </div>
+
+        {/* Difficulty is intentionally not shown here — see the same note
+            in EntryCard.js. It's still fully editable in Edit mode. Meta
+            and the entry toolbar share a row: compact, and it keeps the
+            header short enough to start reading without much scrolling. */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,flexWrap:'wrap'}}>
+          <span style={{fontSize:FONT.size.xs,color:t.text4}}>
+            {fmt(entry.created_at)}
+            {entry.review_count>0 && (
+              <> · <span style={{color:t.ok,fontWeight:FONT.weight.semibold}}>
+                Reviewed {entry.review_count}×{entry.last_reviewed&&` · Last: ${fmt(entry.last_reviewed)}`}
+              </span></>
+            )}
+          </span>
+
+          <div style={{display:'flex',gap:6,flexShrink:0}}>
+            <ActionButton t={t} tone="ok" icon={<IconCheck size={14} />} label="Mark reviewed"
+              onClick={markReviewed} pulse={reviewedFlash} />
+            <ActionButton t={t} tone="accent" icon={<IconEdit size={14} />} label="Edit entry"
+              onClick={()=>setEditing(true)} />
+            <ActionButton t={t} tone={entry.pinned?'warn':'neutral'} icon={<IconPin size={14} />}
+              label={entry.pinned?'Unpin entry':'Pin entry'} onClick={togglePin} />
+            <ActionButton t={t} tone="neutral" icon={<IconDownload size={14} />} label="Export as PDF"
+              onClick={exportPDF} />
+            <ActionButton t={t} tone="danger" label={deleting?'Deleting…':'Delete entry'}
+              onClick={deleteEntry} disabled={deleting}
+              icon={deleting
+                ? <span style={{display:'inline-block',width:12,height:12,border:`2px solid ${t.border}`,
+                    borderTop:`2px solid ${t.danger}`,borderRadius:RADIUS.circle,
+                    animation:'medbook-spin .7s linear infinite'}} />
+                : <IconTrash size={14} />} />
           </div>
         </div>
-      )}
+
+        {/* Sentinel for the sticky compact bar just below — its DOM position
+            right after the header (before Review Notes) is what makes
+            IntersectionObserver report "scrolled past the header" at the
+            right moment, with no scroll math involved. 1px tall, inert. */}
+        <div ref={headerSentinelRef} aria-hidden="true" style={{height:1}} />
+
+        {/* Sticky bar: a real (collapsing) row, not an overlay — see the CSS
+            comment on .mb-detail-stickybar-anchor for why. It genuinely
+            reserves space when open, so it pushes Review Notes down instead
+            of covering it. Content stays mounted at all times; only the
+            row's height animates. */}
+        <div className={`mb-detail-stickybar-anchor${showStickyBar ? ' is-open' : ''}`} style={{zIndex:Z.dropdown}}>
+          <div className="mb-detail-stickybar-inner">
+            <div className="mb-detail-stickybar" style={{background:t.surface,
+              borderBottom:`1px solid ${t.border}`,boxShadow:elevation(t,'sm')}}>
+              <button className="mb-detailbtn" onClick={onBack} title={`Back to ${entry.system}`}
+                aria-label={`Back to ${entry.system}`} style={{background:'none',border:'none',
+                color:t.text3,cursor:'pointer',display:'flex',alignItems:'center',padding:4,flexShrink:0}}>
+                <IconChevronLeft size={16} />
+              </button>
+              <div style={{flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+                fontSize:FONT.size.sm,fontWeight:FONT.weight.semibold,color:t.text2}}>
+                {entry.title}
+              </div>
+              <HighlightToggle t={t} on={hlViewOn} onClick={()=>setHVOn(p=>!p)} compact />
+            </div>
+          </div>
+        </div>
+
+        {entry.notes && (
+          <>
+            <div style={{height:1,background:t.border,margin:`${SPACE.lg}px 0`}} />
+
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
+              marginBottom:SPACE.md,flexWrap:'wrap',gap:8}}>
+              <div style={{fontSize:FONT.size.micro,color:t.text4,letterSpacing:.8,fontWeight:FONT.weight.semibold,textTransform:'uppercase'}}>
+                Review Notes
+              </div>
+              <HighlightToggle t={t} on={hlViewOn} onClick={()=>setHVOn(p=>!p)} />
+            </div>
+            {hlViewOn && (
+              <>
+                {/* Static toolbar — always available, and the reliable path on mobile
+                    where the OS selection bubble can crowd the floating bar. */}
+                <HLToolbar
+                  onApply={applyViewHL}
+                  onRemove={removeViewHL}
+                  onClearAll={clearAllViewHL}
+                  hasSelection={viewHasSel}
+                />
+                <div style={{fontSize:FONT.size.xs,color:t.text4,marginBottom:SPACE.sm}}>
+                  Select text, then tap a colour here — or use the bar that pops up above your selection.
+                </div>
+              </>
+            )}
+            {/* maxWidth keeps line length comfortable rather than running the
+                full width of a wide tablet/laptop column, without touching
+                notesRef's structure — readSelection()'s character-offset
+                math walks notesRef's text content, which this doesn't
+                change. On mobile the card is already narrower than this,
+                so it has no effect there. */}
+            <div ref={notesRef}
+              data-selectable={hlViewOn ? 'true' : 'false'}
+              style={{lineHeight:1.9,fontSize:FONT.size.md,color:t.text2,maxWidth:640,
+              userSelect:hlViewOn?'text':'auto'}}>
+              <RenderedNotes text={entry.notes} highlights={viewHL} />
+            </div>
+          </>
+        )}
+      </div>
 
       {/* ---- AI analysis (Sprint 2) ------------------------------------------
           Sits BELOW the Review so your own notes always read first.
           Nothing here can modify the Review. */}
       {entry.notes && AIService.isConfigured() && (
-        <div style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:10,
-          padding:'18px 20px',marginBottom:14,boxShadow:`0 1px 3px ${t.shadow}`}}>
+        <div className="mb-detail-card" style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
+          boxShadow:elevation(t,'sm')}}>
 
-          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14,flexWrap:'wrap'}}>
-            <div style={{fontSize:10,color:t.text4,letterSpacing:.8,fontWeight:600,
-              textTransform:'uppercase',flex:1}}>
-              AI Analysis
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:SPACE.lg,flexWrap:'wrap'}}>
+            <div style={{fontSize:FONT.size.micro,color:t.text4,letterSpacing:.8,fontWeight:FONT.weight.semibold,
+              textTransform:'uppercase',flex:1,display:'flex',alignItems:'center',gap:6}}>
+              <IconSparkle size={11} style={{color:t.text4,flexShrink:0}} /> AI Analysis
             </div>
+            {aiSavedFlash && <SavedChip t={t} />}
             {aiDirty && (
-              <button onClick={saveAiEdits} disabled={aiBusy} style={{
-                fontSize:11,fontWeight:600,fontFamily:'Inter,sans-serif',
+              <button className="mb-detailbtn" onClick={saveAiEdits} disabled={aiBusy} style={{
+                fontSize:FONT.size.xs,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
                 background:t.okBg,border:`1px solid ${t.okBorder}`,color:t.ok,
-                borderRadius:6,padding:'5px 12px',cursor:aiBusy?'default':'pointer'}}>
+                borderRadius:RADIUS.sm-1,padding:'5px 12px',cursor:aiBusy?'default':'pointer'}}>
                 Save changes
               </button>
             )}
-            <button onClick={runAnalyze} disabled={aiBusy} style={{
-              fontSize:11,fontWeight:600,fontFamily:'Inter,sans-serif',
+            <button className="mb-detailbtn" onClick={runAnalyze} disabled={aiBusy} style={{
+              fontSize:FONT.size.xs,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
               background:aiBusy?t.surface3:t.navActiveBg,
               border:`1px solid ${aiBusy?t.border:t.navActiveBorder}`,
               color:aiBusy?t.text4:t.navActiveText,
-              borderRadius:6,padding:'5px 12px',
+              borderRadius:RADIUS.sm-1,padding:'5px 12px',
               cursor:aiBusy?'default':'pointer',
               display:'flex',alignItems:'center',gap:6}}>
               {aiBusy ? <>
                 <span style={{display:'inline-block',width:10,height:10,
                   border:`2px solid ${t.border}`,borderTop:`2px solid ${t.text3}`,
-                  borderRadius:'50%',animation:'aispin .7s linear infinite'}} />
-                <style>{`@keyframes aispin{to{transform:rotate(360deg)}}`}</style>
+                  borderRadius:RADIUS.circle,animation:'medbook-spin .7s linear infinite'}} />
                 Analyzing…
-              </> : (aiHasContent ? '✨ Re-analyze' : '✨ Analyze')}
+              </> : <><IconSparkle size={12} /> {aiHasContent ? 'Re-analyze' : 'Analyze'}</>}
             </button>
           </div>
 
@@ -821,9 +1081,9 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
               PUBLISHED limits, not a live figure from Google. */}
           {usageInfo && (
             <div style={{display:'flex',alignItems:'center',gap:8,
-              background:t.surface2,border:`1px solid ${t.border}`,borderRadius:7,
-              padding:'6px 12px',marginBottom:12,fontSize:11,color:t.text4}}>
-              <span style={{fontSize:12}}>📊</span>
+              background:t.surface2,border:`1px solid ${t.border}`,borderRadius:RADIUS.sm+1,
+              padding:'6px 12px',marginBottom:SPACE.md,fontSize:FONT.size.xs,color:t.text4}}>
+              <IconChart size={12} style={{color:t.text4,flexShrink:0}} />
               <span>
                 ~{usageInfo.count} request{usageInfo.count!==1?'s':''} this session on{' '}
                 <strong style={{color:t.text3}}>{usageInfo.model}</strong>
@@ -831,7 +1091,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                   <> · free tier is usually ~{usageInfo.limits.rpm}/min, ~{usageInfo.limits.rpd}/day</>
                 )}
               </span>
-              <span style={{marginLeft:'auto',fontSize:10,fontStyle:'italic',opacity:.7}}>
+              <span style={{marginLeft:'auto',fontSize:FONT.size.micro,fontStyle:'italic',opacity:.7}}>
                 estimate, not from Google
               </span>
             </div>
@@ -839,16 +1099,16 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
 
           {aiErr && (
             <div style={{background:t.dangerBg,border:`1px solid ${t.dangerBorder}`,
-              borderRadius:8,padding:'10px 14px',fontSize:12.5,color:t.danger,marginBottom:12}}>
+              borderRadius:RADIUS.md,padding:'10px 14px',fontSize:12.5,color:t.danger,marginBottom:SPACE.md}}>
               {aiErr}
-              <div style={{marginTop:6,fontSize:11}}>
+              <div style={{marginTop:6,fontSize:FONT.size.xs}}>
                 Your Review and notes are untouched. You can retry.
               </div>
             </div>
           )}
           {aiNote && (
             <div style={{background:t.warnBg,border:`1px solid ${t.warnBorder}`,
-              borderRadius:8,padding:'10px 14px',fontSize:12.5,color:t.warn,marginBottom:12}}>
+              borderRadius:RADIUS.md,padding:'10px 14px',fontSize:12.5,color:t.warn,marginBottom:SPACE.md}}>
               {aiNote}
             </div>
           )}
@@ -874,42 +1134,26 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         </div>
       )}
 
-      {entry.images?.length>0 && (
-        <div style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:10,
-          padding:'18px 20px',boxShadow:`0 1px 3px ${t.shadow}`}}>
-          <div style={{fontSize:10,color:t.text4,letterSpacing:.8,fontWeight:600,
-            textTransform:'uppercase',marginBottom:14}}>
-            Images ({entry.images.length}) — scroll · tap to expand
-          </div>
-          <div style={{display:'flex',gap:10,overflowX:'auto',
-            WebkitOverflowScrolling:'touch',paddingBottom:8,scrollSnapType:'x mandatory'}}>
-            {entry.images.map((url,i)=>(
-              <img key={i} src={url} alt="" onClick={()=>setLb(i)}
-                style={{height:180,width:'auto',maxWidth:'80vw',flexShrink:0,
-                  borderRadius:8,border:`1px solid ${t.border}`,cursor:'pointer',
-                  objectFit:'contain',background:t.surface2,scrollSnapAlign:'start'}} />
-            ))}
+      </div>{/* /.mb-detail-main */}
+
+      {hasImages && (
+        <div className="mb-detail-side">
+          <div className="mb-detail-card" style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
+            boxShadow:elevation(t,'sm')}}>
+            <div style={{display:'flex',alignItems:'center',gap:6,fontSize:FONT.size.micro,color:t.text4,
+              letterSpacing:.8,fontWeight:FONT.weight.semibold,textTransform:'uppercase',marginBottom:SPACE.lg}}>
+              <IconImages size={11} style={{flexShrink:0}} /> Images ({entry.images.length}) — tap to expand
+            </div>
+            <div className="mb-detail-images">
+              {entry.images.map((url,i)=>(
+                <GalleryThumb key={i} t={t} src={url} onClick={()=>setLb(i)} />
+              ))}
+            </div>
           </div>
         </div>
       )}
+
+      </div>{/* /.mb-detail-grid */}
     </div>
   );
 }
-
-function AB({onClick,children,color,bg,border,disabled}) {
-  const { isDark } = useTheme();
-  const b  = isDark ? `${color}22` : bg;
-  const bd = isDark ? `${color}55` : border;
-  return <button onClick={onClick} disabled={disabled} style={{background:b,
-    border:`1px solid ${bd}`,color,borderRadius:7,padding:'8px 16px',fontSize:13,
-    cursor:disabled?'not-allowed':'pointer',fontWeight:600,fontFamily:'Inter,sans-serif',
-    opacity:disabled?.6:1}}>{children}</button>;
-}
-function F({label,children}) {
-  const { t } = useTheme();
-  return <div>
-    <div style={{fontSize:10,color:t.text4,letterSpacing:.8,fontWeight:600,textTransform:'uppercase'}}>{label}</div>
-    {children}
-  </div>;
-}
-

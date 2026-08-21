@@ -46,6 +46,178 @@
       body.medbook-dark ::-webkit-scrollbar-thumb { background: #3a404b; }
       input, textarea, button, select { font-family: inherit; }
 
+      /* Keyboard-focus ring. Most interactive elements in the app set inline
+         outline:none with no replacement (an accessibility gap flagged in the
+         UI audit) — an inline style wins over this rule wherever that's still
+         true, so this covers everything else and is the default new
+         components should rely on rather than adding their own outline:none. */
+      :focus-visible {
+        outline: 2px solid #2563eb;
+        outline-offset: 2px;
+      }
+      body.medbook-dark :focus-visible { outline-color: #3b82f6; }
+
+      /* Shared enter-transition keyframes for shell chrome (mobile nav
+         drawer scrim, toast, view/page transitions). CSS animations run
+         automatically on mount with no JS orchestration needed — kept here,
+         once, rather than duplicated per component. */
+      @keyframes medbook-fade-in {
+        from { opacity: 0; transform: translateY(4px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes medbook-scrim-in {
+        from { opacity: 0; }
+        to   { opacity: 1; }
+      }
+
+      /* Entry card hover/press (batch 4). Lives here rather than a <style>
+         tag in EntryCard.js itself — with 250+ cards on screen at once that
+         would mean 250+ identical <style> nodes instead of one shared rule.
+         A lift + shadow rather than a background swap: reads the same way
+         regardless of theme without needing exact surface-color values in
+         static CSS, and composes fine with SelectableCard's own independent
+         press-scale on its wrapper (different element, own transform box). */
+      .mb-entrycard:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+      body.medbook-dark .mb-entrycard:hover { box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+      .mb-entrycard:active { transform: scale(0.99); }
+
+      /* Filter chips (batch 5) — difficulty/pinned filters above the
+         entries list and Global Search. */
+      .mb-chip { transition: background 120ms ease, border-color 120ms ease, transform 120ms ease; }
+      .mb-chip:hover { filter: brightness(0.97); }
+      body.medbook-dark .mb-chip:hover { filter: brightness(1.15); }
+      .mb-chip:active { transform: scale(0.94); }
+
+      /* Entry-list loading skeleton (batch 5). */
+      @keyframes medbook-skeleton-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 0.9; } }
+      .mb-skeleton { animation: medbook-skeleton-pulse 1.4s ease-in-out infinite; }
+
+      /* Entry detail/editor screen (batch 6) — action toolbar buttons, image
+         thumbnails, the lightbox modal, and a shared spinner. Kept here for
+         the same reason as .mb-entrycard/.mb-chip above: shared rules
+         instead of per-instance <style> tags. */
+      .mb-detailbtn { transition: filter 120ms ease, transform 120ms ease, opacity 120ms ease; }
+      .mb-detailbtn:hover:not(:disabled) { filter: brightness(0.97); }
+      body.medbook-dark .mb-detailbtn:hover:not(:disabled) { filter: brightness(1.18); }
+      .mb-detailbtn:active:not(:disabled) { transform: scale(0.96); }
+
+      .mb-detailimg { transition: transform 160ms ease, box-shadow 160ms ease; }
+      .mb-detailimg:hover { transform: scale(1.03); box-shadow: 0 4px 12px rgba(0,0,0,.12); }
+      body.medbook-dark .mb-detailimg:hover { box-shadow: 0 4px 14px rgba(0,0,0,.45); }
+
+      /* Entry detail responsive shell (tablet/laptop pass). Mobile is
+         untouched below 768px — same single 680px column as before. From
+         768px up the shell widens and, when the entry has images, splits
+         into a main reading column + a sticky image rail, so a laptop
+         window isn't just a stretched phone layout. Widths/columns live
+         here rather than inline so they can be media-queried at all —
+         inline styles can't respond to viewport size on their own. */
+      .mb-detail-shell { max-width: 680px; margin: 0 auto; }
+      .mb-detail-shell-narrow { max-width: 680px; margin: 0 auto; }
+      @media (min-width: 768px) {
+        .mb-detail-shell { max-width: 1160px; }
+        .mb-detail-shell-narrow { max-width: 760px; }
+      }
+
+      .mb-detail-grid { display: block; }
+      .mb-detail-side { margin-top: 14px; }
+      @media (min-width: 768px) {
+        .mb-detail-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 300px;
+          gap: 24px;
+          align-items: start;
+        }
+        /* No images — one flexible reading column instead of the two-column
+           split, capped and centred rather than stretched to the full
+           1160px shell. The header now lives INSIDE this column (merged
+           into the reading pane), so there's only one thing to width-
+           constrain here, not two that need to be kept in sync. */
+        .mb-detail-grid.mb-detail-grid--single {
+          grid-template-columns: minmax(0, 1fr);
+          max-width: 760px;
+          margin: 0 auto;
+        }
+        .mb-detail-side { margin-top: 0; position: sticky; top: 20px; }
+      }
+
+      /* Compact sticky context bar (long entries) — appears once the header
+         has scrolled out of view. FIXED from the original absolute-over-
+         zero-height-anchor version, which covered whatever content followed
+         it (a zero-height anchor reserves no space, so the absolutely
+         positioned bar drew directly on top of Review Notes below it).
+         Now the anchor itself is the sticky element and genuinely reserves
+         space via a grid-rows collapse (the same 0fr<->1fr trick as
+         AISections.js's Collapse) — when it opens, the row's real height
+         pushes the content below down instead of covering it, animating
+         smoothly rather than jumping. The inner content stays permanently
+         mounted; only the row's height is ever toggled, so nothing about
+         the bar's own state resets when it opens/closes. */
+      .mb-detail-stickybar-anchor {
+        position: sticky; top: 0;
+        display: grid; grid-template-rows: 0fr;
+        transition: grid-template-rows 200ms ease;
+        margin: 0 -20px;
+      }
+      .mb-detail-stickybar-anchor.is-open { grid-template-rows: 1fr; }
+      .mb-detail-stickybar-inner { overflow: hidden; min-height: 0; }
+      .mb-detail-stickybar {
+        display: flex; align-items: center; gap: 10px;
+        padding: 8px 20px;
+      }
+      @media (min-width: 768px) {
+        .mb-detail-stickybar-anchor { margin: 0 -28px; }
+        .mb-detail-stickybar { padding: 8px 28px; }
+      }
+
+      /* Image gallery inside the detail screen — a horizontal scroll strip
+         on mobile (unchanged), a compact 2-up grid once it has room to
+         breathe in the sidebar rail. */
+      .mb-detail-images {
+        display: flex; gap: 10px; overflow-x: auto;
+        -webkit-overflow-scrolling: touch; padding-bottom: 8px;
+        scroll-snap-type: x mandatory;
+      }
+      .mb-detail-images img { height: 180px; width: auto; max-width: 80vw; flex-shrink: 0; scroll-snap-align: start; }
+      @media (min-width: 768px) {
+        .mb-detail-images { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; overflow: visible; padding-bottom: 0; }
+        .mb-detail-images img { height: auto; width: 100%; max-width: none; aspect-ratio: 4 / 3; }
+      }
+
+      .mb-detail-card { padding: 18px 20px; }
+      @media (min-width: 768px) {
+        .mb-detail-card { padding: 26px 28px; }
+      }
+
+      /* Lightbox entrance — the scrim fades, the image/controls pop in
+         slightly scaled up. Runs automatically on mount, same pattern as
+         medbook-fade-in above. */
+      @keyframes medbook-pop-in {
+        from { opacity: 0; transform: scale(0.94); }
+        to   { opacity: 1; transform: scale(1); }
+      }
+
+      @keyframes medbook-spin { to { transform: rotate(360deg); } }
+
+      /* One-shot "confirmed" pulse — Reviewed/Save button feedback. */
+      @keyframes medbook-pulse-once {
+        0%   { transform: scale(1); }
+        40%  { transform: scale(1.06); }
+        100% { transform: scale(1); }
+      }
+
+      /* Animation philosophy: subtle, functional micro-interactions only,
+         120–250ms, transform/opacity. Anyone with reduced-motion set gets
+         them collapsed to instant, everywhere, with no per-component work. */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.001ms !important;
+          scroll-behavior: auto !important;
+        }
+      }
+
       /* ===== Native (Capacitor) only — scoped to body.cap-native ===== */
 
       /* Kill accidental pull-to-refresh and rubber-band reload. */

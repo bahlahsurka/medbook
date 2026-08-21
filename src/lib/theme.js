@@ -75,6 +75,67 @@ export const DARK = {
   spinnerTrack:'#2c313a',
 };
 
+// ---------------------------------------------------------------------------
+// Design foundation — spacing, radii, type, elevation, motion, z-index.
+//
+// Colour already had a proper token system (LIGHT/DARK above); everything
+// else was ad-hoc numeric literals repeated per-component (12+ distinct
+// border-radius values, 8+ bespoke transition strings, z-index picked per
+// file with no scale). These tokens are additive only — nothing that
+// consumes LIGHT/DARK needs to change, and no visual output changes just by
+// this file existing. Components opt in incrementally.
+//
+// Kept as plain JS objects (not CSS custom properties) to match the existing
+// architecture: every component already reads `t` from useTheme() and builds
+// inline style objects from it. Introducing a second, parallel CSS-variable
+// system alongside that would be more to keep in sync, not less.
+
+// 4px base scale — covers everything from icon gaps to page padding.
+export const SPACE = { xs:4, sm:8, md:12, lg:16, xl:20, xl2:24, xl3:32, xl4:40, xl5:48, xl6:64 };
+
+// Corner radii. `circle`/`pill` are the two special-cased shapes (avatars,
+// dots, badges) that don't belong on the linear scale.
+export const RADIUS = { sm:6, md:8, lg:10, xl:14, xl2:20, pill:999, circle:'50%' };
+
+// Type scale + weight/line-height ramp. Replaces one-off sizes like 10.5,
+// 12.5, 13.5 that crept in from ad hoc tweaks.
+export const FONT = {
+  size: { micro:10, xs:11, sm:12, base:13, md:14, lg:16, xl:18, xl2:22, xl3:28, display:40 },
+  weight: { regular:400, medium:500, semibold:600, bold:700 },
+  leading: { tight:1.2, normal:1.4, relaxed:1.6 },
+};
+
+// Elevation scale. Pair with the theme's own `shadow`/`shadowStrong` colour
+// via the `elevation()` helper below so shadows stay theme-aware.
+export const ELEVATION = { sm:'0 1px 2px', md:'0 2px 8px', lg:'0 4px 16px', xl:'0 8px 32px' };
+
+export function elevation(t, level = 'md') {
+  const tint = (level === 'lg' || level === 'xl') ? t.shadowStrong : t.shadow;
+  return `${ELEVATION[level]} ${tint}`;
+}
+
+// Motion — per the animation philosophy: subtle, functional, transform/
+// opacity-first, 120–250ms. `ease` is a standard "ease-out"-ish curve that
+// reads as calm rather than bouncy, matching the "premium, calm" direction.
+export const MOTION = {
+  fast: '120ms', normal: '180ms', slow: '250ms',
+  ease: 'cubic-bezier(0.4, 0, 0.2, 1)',
+};
+
+// Stacking order, consolidated from what components were already doing
+// ad hoc (mobile sidebar scrim at 40, sidebar at 50, dialog overlays
+// scattered across 200/300/400, toast/lightbox near 900-1000). Values match
+// current call sites so adopting this doesn't change any existing stacking —
+// it just gives future components a scale to pick from instead of guessing.
+export const Z = { mobileScrim:40, sidebar:50, dropdown:60, overlay:200, modal:300, modalStack:400, toast:900, lightbox:1000 };
+
+// Responsive breakpoints. Previously a single 768px cutoff did double duty
+// for "phone vs. everything else", so a tablet in portrait got the exact
+// same layout as a wide desktop monitor. `tablet` marks the range where the
+// sidebar is still inline (not an overlay drawer) but can afford to be
+// narrower, giving content more room without switching interaction model.
+export const BREAKPOINT = { mobile: 768, tablet: 1024 };
+
 const ThemeContext = createContext({ t: LIGHT, theme:'light', toggle:()=>{}, isDark:false });
 
 function readInitial() {
