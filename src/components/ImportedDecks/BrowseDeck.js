@@ -10,7 +10,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { useTheme } from '../../lib/theme';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import * as api from '../../lib/importedDecks/api';
-import mock from '../../lib/importedDecks/mockData';
 import CardRenderer from './CardRenderer';
 
 const PAGE_SIZE = 30;
@@ -36,14 +35,19 @@ export default function BrowseDeck({ deck, userId, onExit }) {
   const load = useCallback(async () => {
     setErr('');
     try {
-      const result = await api.browseCards(deck.id, { search: debSearch, state, tag, page, pageSize: PAGE_SIZE });
+      const result = await api.browseCards(deck.id, { search: debSearch, state, tag, page, pageSize: PAGE_SIZE, userId });
       setRows(result.rows); setTotal(result.total);
     } catch (e) { setErr(e.message || 'Could not load cards'); setRows([]); }
-  }, [deck.id, debSearch, state, tag, page]);
+  }, [deck.id, debSearch, state, tag, page, userId]);
 
   useEffect(() => { load(); }, [load]);
 
-  const allTags = useMemoTags();
+  const [allTags, setAllTags] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    api.getDeckTags(deck.id, userId).then(tags => { if (!cancelled) setAllTags(tags); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [deck.id, userId]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -150,8 +154,13 @@ function CardRow({ card, t, onOpen }) {
 }
 
 function CardPreviewModal({ t, card, onClose }) {
-  const note = mock.notes.find(n => n.id === card.note_id) || { fields: card.fields || [] };
-  const model = mock.models.find(m => m.id === note.model_id) || mock.models[0];
+  const [noteModel, setNoteModel] = useState({ note: null, model: null });
+  useEffect(() => {
+    let cancelled = false;
+    api.getNoteAndModel(card.note_id).then(nm => { if (!cancelled) setNoteModel(nm); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [card.note_id]);
+  const { note, model } = noteModel;
   const [revealed, setRevealed] = useState(false);
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: t.overlay, zIndex: 250,
@@ -163,7 +172,9 @@ function CardPreviewModal({ t, card, onClose }) {
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: t.text3,
             cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
         </div>
-        <CardRenderer card={card} note={note} model={model} resolvedMedia={{}} revealed={revealed} />
+        {note && model
+          ? <CardRenderer card={card} note={note} model={model} resolvedMedia={{}} revealed={revealed} />
+          : <div style={{ padding: '20px 0', textAlign: 'center', color: t.text4, fontSize: 13 }}>Loading…</div>}
         <button onClick={() => setRevealed(p => !p)} style={{ marginTop: 12, width: '100%',
           background: t.accent, color: '#fff', border: 'none', borderRadius: 8, padding: '10px 16px',
           fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
@@ -175,13 +186,3 @@ function CardPreviewModal({ t, card, onClose }) {
 }
 
 function stripHtml(html) { return String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); }
-
-// Small helper kept local (not worth a hook of its own): distinct tags
-// across the mock set for the filter dropdown. The real implementation
-// would query DISTINCT tags server-side rather than scanning client-side —
-// left as MOCK_MODE-only for now, same as everything else gated on the
-// unconfirmed schema/RLS state.
-function useMemoTags() {
-  const [tags] = useState(() => [...new Set(mock.cards.flatMap(c => c.tags || []))].sort());
-  return tags;
-}

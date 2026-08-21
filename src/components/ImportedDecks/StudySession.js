@@ -11,7 +11,6 @@ import { useTheme } from '../../lib/theme';
 import * as api from '../../lib/importedDecks/api';
 import { scheduler } from '../../lib/srs/Scheduler';
 import CardRenderer, { cardMediaFilenames } from './CardRenderer';
-import mock from '../../lib/importedDecks/mockData';
 
 const SESSION_KEY_PREFIX = 'medbook_imported_session_';
 
@@ -45,7 +44,7 @@ export default function StudySession({ deck, userId, onExit }) {
       setErr('');
       try {
         const saved = loadSaved(deck.id);
-        const cards = await api.getSessionCards([deck.id], { limit: 50 });
+        const cards = await api.getSessionCards([deck.id], { limit: 50, userId });
         if (cancelled) return;
         setQueue(cards);
         // Only trust a saved index if the queue is still the same length —
@@ -56,7 +55,7 @@ export default function StudySession({ deck, userId, onExit }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [deck.id]);
+  }, [deck.id, userId]);
 
   useEffect(() => {
     if (queue === null || !queue.length) return;
@@ -65,17 +64,19 @@ export default function StudySession({ deck, userId, onExit }) {
 
   const card = queue?.[idx];
 
-  // Look up note/model for the current card. MOCK_MODE keeps everything
-  // in lib/importedDecks/mockData; the real path would join through
-  // imported_notes/imported_models — left as a documented follow-up
-  // alongside the other MOCK_MODE-gated reads in api.js, since it needs
-  // the same schema confirmation before going live.
-  const { note, model } = useMemo(() => {
-    if (!card) return { note: null, model: null };
-    const n = mock.notes.find(n => n.id === card.note_id) || { fields: card.fields || [], tags: card.tags || [] };
-    const m = mock.models.find(m => m.id === n.model_id) || mock.models[0];
-    return { note: n, model: m };
+  // Note + model for the current card — never the whole deck's, one card
+  // at a time. Async because the real path is a fetch (api.getNoteAndModel),
+  // not a synchronous mock lookup.
+  const [noteModel, setNoteModel] = useState({ note: null, model: null });
+  useEffect(() => {
+    if (!card) { setNoteModel({ note: null, model: null }); return; }
+    let cancelled = false;
+    api.getNoteAndModel(card.note_id)
+      .then(nm => { if (!cancelled) setNoteModel(nm); })
+      .catch(e => { if (!cancelled) { setErr(e.message || 'Could not load card content'); setNoteModel({ note: null, model: null }); } });
+    return () => { cancelled = true; };
   }, [card]);
+  const { note, model } = noteModel;
 
   // Resolve this card's media before rendering — never the whole deck's.
   useEffect(() => {

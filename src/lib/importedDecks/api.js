@@ -6,34 +6,54 @@
 // helpers (session ordering) stay separate from fetching.
 //
 // ── MOCK_MODE ──────────────────────────────────────────────────────────
-// Two real, unresolved gaps make live-backend calls unverified right now:
+// Was `true` while two real gaps made live-backend calls unverified. Both
+// are now confirmed against the live schema, so this is real data:
 //
-//  1. due_cards does not exist as a column anywhere in the code that
-//     writes imported_decks (only total_cards/new_cards are written, by
-//     refreshDeckCounts in api/import-process.mjs). The spec calls for
-//     "use the existing denormalized fields" for new/due/total counts,
-//     but that field was never actually added. getDeckChildren() below
-//     requests it and falls back to 0 (not a live COUNT scan) if the
-//     column doesn't exist, rather than crashing the deck browser.
+//  1. due_cards now exists as a column on imported_decks (confirmed via
+//     information_schema). refreshDeckCounts in api/import-process.mjs
+//     still only writes total_cards/new_cards, not due_cards — harmless:
+//     every freshly-imported card starts as state:'new' with due_at:null
+//     (spec §9 — scheduling history is never imported), so due_cards is
+//     genuinely 0 for anything that hasn't been studied yet. The 42703
+//     fallback below stays as a real safety net either way.
 //
-//  2. Every past read/write against imported_* tables ran through the
-//     SERVICE ROLE key in api/import-process.mjs, which bypasses Row
-//     Level Security entirely. This app's browser client (lib/supabase.js)
-//     uses the anon key instead — nobody has ever verified an
-//     authenticated user can actually SELECT their own imported_decks
-//     rows, because nothing has tried until this feature.
-//
-// Until both are confirmed against the real schema, MOCK_MODE defaults to
-// true so the UI is honestly demoable without silently depending on
-// unverified backend behavior. Flip it (or wire up a real toggle) once
-// the schema/RLS policies are confirmed.
-export const MOCK_MODE = true;
+//  2. RLS is confirmed in place on all four imported_* tables (own
+//     select/insert/update/delete, `auth.uid() = user_id`) — the same
+//     pattern the rest of the app already relies on through the anon-key
+//     browser client. Verified directly against the production project.
+export const MOCK_MODE = false;
 
 import { supabase } from '../supabase';
 import mock from './mockData';
 import { scheduler, buildSessionQuery } from '../srs/Scheduler';
 
 const PAGE_SIZE = 50;
+
+/**
+ * A deck node passed around the UI (from getRootDecks/getChildDecks) can be
+ * ANY depth — root or a nested sub-deck, both expose the same Study/Browse
+ * actions (see DeckBrowser's DeckNode). Cards attach to whichever specific
+ * (often leaf) deck they're filed under, not to an ancestor root — so
+ * "browse/study this node" has to mean this deck PLUS every deck under it,
+ * or a deck with children (including the aggregate root, which never holds
+ * cards directly) would silently look empty. This walks parent_id to
+ * collect that set. Decks are few per user (dozens, not thousands), so one
+ * flat query + in-memory BFS is cheap — no recursive SQL needed.
+ */
+async function collectDescendantDeckIds(userId, deckId) {
+  const { data, error } = await supabase.from('imported_decks')
+    .select('id, parent_id').eq('user_id', userId);
+  if (error) throw new Error(error.message);
+  const childrenOf = {};
+  (data || []).forEach(d => { (childrenOf[d.parent_id] ||= []).push(d.id); });
+  const ids = [deckId];
+  const queue = [deckId];
+  while (queue.length) {
+    const cur = queue.shift();
+    (childrenOf[cur] || []).forEach(c => { ids.push(c); queue.push(c); });
+  }
+  return ids;
+}
 
 /* ------------------------------------------------------------------ */
 /* Deck tree                                                           */
@@ -167,29 +187,43 @@ export async function getImportJob(jobId) {
 /* Browse — paginated, filtered, never a full-deck fetch                */
 /* ------------------------------------------------------------------ */
 
-export async function browseCards(rootDeckId, { deckId, search, state, tag, page = 0, pageSize = PAGE_SIZE } = {}) {
+export async function browseCards(deckId, { search, state, tag, page = 0, pageSize = PAGE_SIZE, userId } = {}) {
   if (MOCK_MODE) return mock.browseCards({ deckId, search, state, tag, page, pageSize });
 
-  // imported_cards has no full-text field of its own — search runs against
-  // the note's sort_field, so this filters notes first, then cards.
-  let noteQuery = supabase.from('imported_notes').select('id').eq('root_deck_id', rootDeckId);
-  if (search?.trim()) noteQuery = noteQuery.ilike('sort_field', `%${search.trim()}%`);
-  if (tag) noteQuery = noteQuery.contains('tags', [tag]);
-  const { data: noteRows, error: nErr } = await noteQuery;
-  if (nErr) throw new Error(nErr.message);
-  const noteIds = (noteRows || []).map(n => n.id);
-  if (!noteIds.length) return { rows: [], total: 0 };
+  // `deckId` is whichever node the user is browsing (root or any sub-deck)
+  // — expand to its full subtree first (see collectDescendantDeckIds), then
+  // query cards directly by deck_id. Embed imported_notes (a real FK,
+  // imported_cards_note_id_fkey) in the same round trip for search/tag
+  // filtering AND the preview text — cards carry no text of their own.
+  const deckIds = await collectDescendantDeckIds(userId, deckId);
 
   let cardQuery = supabase.from('imported_cards')
-    .select('id, deck_id, note_id, state, due_at', { count: 'exact' })
-    .in('note_id', noteIds.slice(0, 1000)); // PostgREST .in() practical cap
-  if (deckId) cardQuery = cardQuery.eq('deck_id', deckId);
+    .select('id, deck_id, note_id, state, due_at, imported_notes!inner(sort_field, fields, tags)',
+      { count: 'exact' })
+    .in('deck_id', deckIds);
   if (state) cardQuery = cardQuery.eq('state', state);
+  if (search?.trim()) cardQuery = cardQuery.ilike('imported_notes.sort_field', `%${search.trim()}%`);
+  if (tag) cardQuery = cardQuery.contains('imported_notes.tags', [tag]);
   cardQuery = cardQuery.range(page * pageSize, page * pageSize + pageSize - 1);
 
   const { data, error, count } = await cardQuery;
   if (error) throw new Error(error.message);
-  return { rows: data || [], total: count || 0 };
+  const rows = (data || []).map(({ imported_notes, ...c }) => ({
+    ...c, sort_field: imported_notes?.sort_field, fields: imported_notes?.fields, tags: imported_notes?.tags,
+  }));
+  return { rows, total: count || 0 };
+}
+
+/** Distinct tags across a deck's whole subtree, for the Browse filter. */
+export async function getDeckTags(deckId, userId) {
+  if (MOCK_MODE) return [...new Set(mock.cards.flatMap(c => c.tags || []))].sort();
+  const deckIds = await collectDescendantDeckIds(userId, deckId);
+  const { data, error } = await supabase.from('imported_cards')
+    .select('imported_notes!inner(tags)').in('deck_id', deckIds);
+  if (error) throw new Error(error.message);
+  const set = new Set();
+  (data || []).forEach(r => (r.imported_notes?.tags || []).forEach(tg => set.add(tg)));
+  return [...set].sort();
 }
 
 /* ------------------------------------------------------------------ */
@@ -197,10 +231,17 @@ export async function browseCards(rootDeckId, { deckId, search, state, tag, page
 /* second ordering/scheduling implementation.                          */
 /* ------------------------------------------------------------------ */
 
-export async function getSessionCards(deckIds, { limit = 50 } = {}) {
+export async function getSessionCards(deckIds, { limit = 50, userId } = {}) {
   if (MOCK_MODE) return mock.sessionCards(deckIds, limit);
 
-  const query = buildSessionQuery({ deckIds, limit });
+  // Same subtree-expansion as browseCards — "study this deck" has to
+  // include its descendants, or studying a node with children (including
+  // the aggregate root) would show zero cards even when its subdecks are
+  // full of them.
+  const expanded = await Promise.all(deckIds.map(id => collectDescendantDeckIds(userId, id)));
+  const allDeckIds = [...new Set(expanded.flat())];
+
+  const query = buildSessionQuery({ deckIds: allDeckIds, limit });
   let q = supabase.from('imported_cards').select('*')
     .in('deck_id', query.deckIds).neq('state', 'suspended')
     .or(`due_at.lte.${query.nowIso},state.eq.new`);
@@ -218,6 +259,29 @@ export async function rateCard(card, rating) {
     .update(patch).eq('id', card.id).select().single();
   if (error) throw new Error(error.message);
   return data;
+}
+
+/**
+ * Note + its model for ONE card — never the whole deck's notes/models,
+ * since a session/preview only ever renders one card at a time. Was
+ * previously inlined as a direct `mock.notes.find(...)` in both
+ * StudySession.js and BrowseDeck.js's CardPreviewModal, unconditionally
+ * (not even gated on MOCK_MODE) — meaning real cards would render against
+ * mock content. Centralized here to match every other real/mock branch.
+ */
+export async function getNoteAndModel(noteId) {
+  if (MOCK_MODE) {
+    const n = mock.notes.find(n => n.id === noteId) || null;
+    const m = n ? (mock.models.find(m => m.id === n.model_id) || mock.models[0]) : null;
+    return { note: n, model: m };
+  }
+  const { data: note, error: nErr } = await supabase.from('imported_notes')
+    .select('id, fields, tags, model_id').eq('id', noteId).single();
+  if (nErr) throw new Error(nErr.message);
+  const { data: model, error: mErr } = await supabase.from('imported_models')
+    .select('id, field_names, templates, css, is_cloze').eq('id', note.model_id).single();
+  if (mErr) throw new Error(mErr.message);
+  return { note, model };
 }
 
 /* ------------------------------------------------------------------ */
