@@ -68,6 +68,12 @@ export default async function handler(req, res) {
     });
     return res.status(200).json(jsonResponse);
   } catch (error) {
+    // Was silently swallowed — a 400 reached the browser, but nothing was
+    // ever logged server-side, so a real failure (quota, content-type,
+    // size limit, whatever @vercel/blob actually rejected it for) left no
+    // trace to investigate from here. Same class of bug as the cleanup
+    // silent-catch in api/import-process.mjs.
+    console.error('[imported-blob-upload] handleUpload failed', { message: error.message, name: error.name });
     return res.status(400).json({ error: error.message });
   }
 }
