@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/import-process.mjs": {
+      "maxDuration": 300
+    }
+  }
+}

@@ -249,9 +249,15 @@ export class MediaService {
         return { deduped: true, storageKey, mediaId: winner?.id };
       }
 
-      // Genuinely unexpected — surface the RAW fields so if this happens
-      // again, the actual shape of the error is visible instead of just a
-      // wrapped message string that looks identical across different bugs.
+      // Genuinely unexpected — log AND surface the RAW fields. Logging
+      // separately (not just embedding in the thrown message) means the
+      // raw shape still reaches Vercel's function logs even if whatever
+      // reads the thrown error only surfaces a truncated/summarized
+      // version of it upstream.
+      console.error('[MediaService.storeImportedMedia] unexpected error', {
+        code: error.code, message: error.message, details: error.details, hint: error.hint,
+        rootDeckId, ankiFilename, contentHash,
+      });
       throw new Error(`Failed to record media: ${error.message} [code=${error.code}, details=${error.details}, hint=${error.hint}]`);
     }
 
