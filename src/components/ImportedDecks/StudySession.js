@@ -36,13 +36,6 @@ export default function StudySession({ deck, userId, onExit }) {
   const [resolvedMedia, setResolvedMedia] = useState({});
   const [rating, setRating] = useState(null); // in-flight rating, disables buttons briefly
   const [err, setErr] = useState('');
-  // The single most recent rating, kept only until either another card is
-  // rated or an undo consumes it — { snapshot: the card's full row exactly
-  // as it was BEFORE that rating, idx: which position it was rated at }.
-  // Undo is single-level, matching Anki's default Ctrl+Z: reverting one
-  // rating doesn't chain further back than that.
-  const [lastRated, setLastRated] = useState(null);
-  const [undoing, setUndoing] = useState(false);
 
   // Load session — recover a saved position for this deck if one exists
   // (Phase L3: "if the user leaves and returns while a session is active,
@@ -106,13 +99,16 @@ export default function StudySession({ deck, userId, onExit }) {
   }, []);
 
   const rate = async (label) => {
-    if (!card || rating || undoing) return;
-    const snapshot = card; // full row, exactly as it stood before this rating
+    if (!card || rating) return;
     const ratedIdx = idx;
     setRating(label);
     try {
-      await api.rateCard(card, label);
-      setLastRated({ snapshot, idx: ratedIdx });
+      const updated = await api.rateCard(card, label);
+      // Same reason ReviewQueue.js keeps its cards array live after rating:
+      // ← lets you step back to this card and rate it again, and a re-rating
+      // has to act on the card's CURRENT (post-rating) scheduling state, not
+      // the stale pre-rating snapshot still sitting in the queue array.
+      setQueue(q => { const next = [...q]; next[ratedIdx] = updated; return next; });
       advance();
     } catch (e) {
       setErr(e.message || 'Could not save rating');
@@ -120,19 +116,14 @@ export default function StudySession({ deck, userId, onExit }) {
     setRating(null);
   };
 
-  const undo = async () => {
-    if (!lastRated || rating || undoing) return;
-    setUndoing(true); setErr('');
-    try {
-      const restored = await api.undoRating(lastRated.snapshot.id, lastRated.snapshot);
-      setQueue(q => { const next = [...q]; next[lastRated.idx] = restored; return next; });
-      setIdx(lastRated.idx);
-      setRevealed(false);
-      setLastRated(null);
-    } catch (e) {
-      setErr(e.message || 'Could not undo');
-    }
-    setUndoing(false);
+  // Step back to the previous card — same behavior as ReviewQueue's ←
+  // (goPrev): plain navigation, not a scheduling revert. Deliberately
+  // doesn't touch anything a rating wrote; re-rating a revisited card works
+  // exactly like rating any other card (see the comment in rate() above).
+  const goPrev = () => {
+    if (idx === 0) return;
+    setIdx(p => p - 1);
+    setRevealed(false);
   };
 
   const exit = () => { clearSession(deck.id); onExit(); };
@@ -154,12 +145,13 @@ export default function StudySession({ deck, userId, onExit }) {
     }
   };
 
-  // Keyboard shortcuts (Phase L, previously entirely absent from this
-  // screen): Space to flip, a/h/g/Enter to rate, ← to undo the last
-  // rating. Called unconditionally, before any of the early returns below,
-  // per the rules of hooks — `enabled` covers every state where acting on
-  // a keypress wouldn't make sense (still loading, paused, no cards, or
-  // the session's already finished).
+  // Keyboard shortcuts — same hook, same bindings, same ← semantics as
+  // ReviewQueue.js (the main app's review screen): Space to flip, a/h/g/Enter
+  // to rate, ← for plain "previous card" navigation (not gated on having
+  // just rated). Called unconditionally, before any of the early returns
+  // below, per the rules of hooks — `enabled` covers every state where
+  // acting on a keypress wouldn't make sense (still loading, paused, no
+  // cards, or the session's already finished).
   const activeCard = queue && idx < queue.length ? queue[idx] : null;
   useReviewKeyboard(!!activeCard && !paused, {
     flipped: revealed,
@@ -168,11 +160,11 @@ export default function StudySession({ deck, userId, onExit }) {
     onHard: () => rate('hard'),
     onGood: () => rate('good'),
     onEasy: () => rate('easy'),
-    onPrev: lastRated ? undo : undefined,
+    onPrev: idx > 0 ? goPrev : undefined,
   });
 
-  // Close the flag popup whenever the card changes (advance, undo, or a
-  // flag was just picked) — it should never carry over onto the next card.
+  // Close the flag popup whenever the card changes (advance, going back, or
+  // a flag was just picked) — it should never carry over onto the next card.
   useEffect(() => { setFlagPickerOpen(false); }, [card?.id]);
 
   const B = (bg, color = '#fff') => ({ background: bg, color, border: 'none', borderRadius: 10,
@@ -229,6 +221,14 @@ export default function StudySession({ deck, userId, onExit }) {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          {/* Always-visible "previous card" button, disabled at idx 0 — same
+              placement/behavior as ReviewQueue.js's ← button, not a
+              conditional pill that only appears right after rating. */}
+          <button onClick={goPrev} disabled={idx === 0} title="Previous card" aria-label="Previous card"
+            style={{ background: 'none', border: 'none', color: t.text3, fontSize: 13, fontWeight: 600,
+              padding: '6px 4px 6px 0', cursor: idx === 0 ? 'default' : 'pointer', opacity: idx === 0 ? 0.4 : 1 }}>
+            ← <span style={{ opacity: 0.6, fontWeight: 400 }}>Prev</span>
+          </button>
           <button onClick={() => setPaused(true)} style={{ background: 'none', border: 'none',
             color: t.text3, cursor: 'pointer', fontSize: 13, fontWeight: 600, padding: '6px 4px 6px 0' }}>
             ⏸ Pause
@@ -272,15 +272,6 @@ export default function StudySession({ deck, userId, onExit }) {
           width: `${(idx / queue.length) * 100}%`, transition: 'width .3s' }} />
       </div>
 
-      {lastRated && (
-        <button onClick={undo} disabled={undoing} style={{ display: 'flex', alignItems: 'center', gap: 6,
-          background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 8, color: t.text2,
-          cursor: 'pointer', fontSize: 12.5, fontWeight: 600, padding: '7px 12px', marginBottom: 12,
-          fontFamily: 'Inter,sans-serif', opacity: undoing ? 0.6 : 1 }}>
-          ↶ {undoing ? 'Undoing…' : 'Undo last rating'} <span style={{ opacity: 0.6, fontWeight: 400 }}>(←)</span>
-        </button>
-      )}
-
       {err && <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: 8,
         padding: '10px 14px', fontSize: 13, color: t.danger, marginBottom: 12 }}>{err}</div>}
 
@@ -304,8 +295,8 @@ export default function StudySession({ deck, userId, onExit }) {
               ['good', 'Good', '#16a34a'],
               ['easy', 'Easy', '#2563eb'],
             ].map(([key, label, color]) => (
-              <button key={key} onClick={() => rate(key)} disabled={!!rating || undoing}
-                style={{ ...B(color), opacity: (rating && rating !== key) || undoing ? 0.5 : 1,
+              <button key={key} onClick={() => rate(key)} disabled={!!rating}
+                style={{ ...B(color), opacity: (rating && rating !== key) ? 0.5 : 1,
                   display: 'flex', flexDirection: 'column', gap: 4, minHeight: 58 }}>
                 <span>{label}</span>
                 <span style={{ fontSize: 11, fontWeight: 500, opacity: 0.9 }}>{intervals?.[key]?.label}</span>
