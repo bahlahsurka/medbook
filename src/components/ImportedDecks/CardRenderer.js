@@ -109,7 +109,14 @@ export function cardMediaFilenames({ card, note, model }) {
  * styling, that's a content problem to flag, not something to fix by
  * overriding its CSS globally.
  */
-export default function CardRenderer({ card, note, model, resolvedMedia, revealed }) {
+// Defaults suit a small "quick glance" context (Browse's CardPreviewModal,
+// a compact popup). StudySession — the actual study screen, where the
+// complaint that this was cramped/unreadable/unscreenshottable actually
+// applies — passes the much larger `minHeight`/`maxHeight` explicitly
+// below, same spirit as Anki's own maximized-window card view: a tall card
+// still scrolls within its own box (the iframe's native overflow), it's
+// just far less likely to need to at that size.
+export default function CardRenderer({ card, note, model, resolvedMedia, revealed, minHeight = 180, maxHeight = '55vh' }) {
   const html = useMemo(() => {
     const { question, answer } = buildCardHtml({ card, note, model, resolvedMedia });
     return wrapDocument(revealed ? answer : question, model.css);
@@ -123,8 +130,8 @@ export default function CardRenderer({ card, note, model, resolvedMedia, reveale
       referrerPolicy="no-referrer"
       style={{
         width: '100%',
-        minHeight: 180,
-        maxHeight: '55vh',
+        minHeight,
+        maxHeight,
         border: 'none',
         borderRadius: 12,
         background: '#fff', // the card's OWN background — not a MedBook theme token, deliberately

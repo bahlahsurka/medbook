@@ -215,8 +215,14 @@ export default function StudySession({ deck, userId, onExit }) {
   return (
     // Mobile/tablet-first (Phase L4): safe-area padding, large tap targets
     // on the rating row, single-column layout that doesn't rely on a wide
-    // viewport, no hover-only affordances.
-    <div style={{ maxWidth: 560, margin: '0 auto', fontFamily: 'Inter,sans-serif',
+    // viewport, no hover-only affordances. The 560px cap from the original
+    // pass made the card itself tiny on anything wider than a phone —
+    // unreadable at a glance and useless for screenshotting content/media,
+    // the exact complaint this raised it to fix — so this now stretches
+    // much wider (still capped, not edge-to-edge sprawl on an ultrawide
+    // monitor) while staying just as narrow as before on an actual phone,
+    // since maxWidth is only ever a ceiling.
+    <div style={{ maxWidth: 1100, margin: '0 auto', fontFamily: 'Inter,sans-serif',
       paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
@@ -277,7 +283,8 @@ export default function StudySession({ deck, userId, onExit }) {
 
       {card && note && model && (
         <div style={card.flag ? { borderLeft: `4px solid ${FLAG_COLORS[card.flag]}`, borderRadius: 4, paddingLeft: 10 } : undefined}>
-          <CardRenderer card={card} note={note} model={model} resolvedMedia={resolvedMedia} revealed={revealed} />
+          <CardRenderer card={card} note={note} model={model} resolvedMedia={resolvedMedia} revealed={revealed}
+            minHeight={420} maxHeight="75vh" />
         </div>
       )}
 
