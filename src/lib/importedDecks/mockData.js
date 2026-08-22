@@ -26,6 +26,7 @@ export const mockDecks = [
     id: 'deck-root', user_id: 'mock-user', anki_deck_id: 1, parent_id: null,
     full_name: 'Tzanki Step 2', display_name: 'Tzanki Step 2', is_root: true,
     total_cards: 7043, new_cards: 4102, due_cards: 318, archived: false,
+    new_cards_per_day: null, max_reviews_per_day: null,
   },
   {
     id: 'deck-cardio', user_id: 'mock-user', anki_deck_id: 2, parent_id: 'deck-root',
@@ -106,10 +107,10 @@ function makeNote({ deckId, modelId, fields, tags = [], sortField }) {
   };
 }
 
-function makeCard({ note, deckId, state, dueAt, ord = 0 }) {
+function makeCard({ note, deckId, state, dueAt, ord = 0, flag = 0 }) {
   return {
     id: nid('card'), user_id: 'mock-user', deck_id: deckId, note_id: note.id,
-    anki_card_id: _id, template_ord: ord, state, due_at: dueAt ?? null,
+    anki_card_id: _id, template_ord: ord, state, due_at: dueAt ?? null, flag,
     model_id: note.model_id, // denormalized for the mock browse UI; real query joins via note
     tags: note.tags, fields: note.fields, sort_field: note.sort_field,
   };
@@ -254,11 +255,12 @@ export function rootDecks() {
 
 /** Mirrors api.browseCards()'s { rows, total } shape, filtered client-side
  *  over the small mock set — the real implementation paginates server-side. */
-export function browseCards({ deckId, search, state, tag, page = 0, pageSize = 50 } = {}) {
+export function browseCards({ deckId, search, state, tag, flag, page = 0, pageSize = 50 } = {}) {
   let rows = mockCards;
   if (deckId) rows = rows.filter(c => c.deck_id === deckId);
   if (state) rows = rows.filter(c => c.state === state);
   if (tag) rows = rows.filter(c => (c.tags || []).includes(tag));
+  if (flag != null) rows = rows.filter(c => (c.flag || 0) === flag);
   if (search?.trim()) {
     const q = search.trim().toLowerCase();
     rows = rows.filter(c => (c.sort_field || '').toLowerCase().includes(q));

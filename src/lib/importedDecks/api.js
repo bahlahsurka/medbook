@@ -25,7 +25,7 @@ export const MOCK_MODE = false;
 
 import { supabase } from '../supabase';
 import mock from './mockData';
-import { scheduler, buildSessionQuery } from '../srs/Scheduler';
+import { scheduler } from '../srs/Scheduler';
 
 const PAGE_SIZE = 50;
 
@@ -59,22 +59,29 @@ async function collectDescendantDeckIds(userId, deckId) {
 /* Deck tree                                                           */
 /* ------------------------------------------------------------------ */
 
+// Columns from SUPABASE_MIGRATION_STUDY_CONTROLS.sql — attempt them, and if
+// the migration hasn't been run yet (42703, undefined_column) retry without
+// them rather than surfacing a hard error, same defensive pattern due_cards
+// already used for exactly this kind of schema gap.
+const DECK_COLUMNS = 'id, parent_id, full_name, display_name, is_root, total_cards, new_cards, due_cards, archived, new_cards_per_day, max_reviews_per_day';
+const DECK_COLUMNS_FALLBACK = 'id, parent_id, full_name, display_name, is_root, total_cards, new_cards, archived';
+function applyDeckColumnFallback(rows) {
+  (rows || []).forEach(d => { d.due_cards = null; d.new_cards_per_day = null; d.max_reviews_per_day = null; });
+}
+
 export async function getRootDecks(userId) {
   if (MOCK_MODE) return mock.rootDecks();
 
-  // due_cards: attempt the real column; if it 42703s (undefined_column),
-  // retry without it rather than surfacing a hard error for a documented
-  // schema gap. Either way, this is ONE query, not a per-render scan.
   let { data, error } = await supabase.from('imported_decks')
-    .select('id, parent_id, full_name, display_name, is_root, total_cards, new_cards, due_cards, archived')
+    .select(DECK_COLUMNS)
     .eq('user_id', userId).is('parent_id', null).eq('archived', false)
     .order('display_name');
   if (error?.code === '42703') {
     ({ data, error } = await supabase.from('imported_decks')
-      .select('id, parent_id, full_name, display_name, is_root, total_cards, new_cards, archived')
+      .select(DECK_COLUMNS_FALLBACK)
       .eq('user_id', userId).is('parent_id', null).eq('archived', false)
       .order('display_name'));
-    (data || []).forEach(d => { d.due_cards = null; }); // null = "unknown", not "zero"
+    applyDeckColumnFallback(data);
   }
   if (error) throw new Error(error.message);
   return data || [];
@@ -84,18 +91,38 @@ export async function getChildDecks(userId, parentId) {
   if (MOCK_MODE) return mock.childDecksOf(parentId);
 
   let { data, error } = await supabase.from('imported_decks')
-    .select('id, parent_id, full_name, display_name, is_root, total_cards, new_cards, due_cards, archived')
+    .select(DECK_COLUMNS)
     .eq('user_id', userId).eq('parent_id', parentId).eq('archived', false)
     .order('display_name');
   if (error?.code === '42703') {
     ({ data, error } = await supabase.from('imported_decks')
-      .select('id, parent_id, full_name, display_name, is_root, total_cards, new_cards, archived')
+      .select(DECK_COLUMNS_FALLBACK)
       .eq('user_id', userId).eq('parent_id', parentId).eq('archived', false)
       .order('display_name'));
-    (data || []).forEach(d => { d.due_cards = null; });
+    applyDeckColumnFallback(data);
   }
   if (error) throw new Error(error.message);
   return data || [];
+}
+
+/**
+ * Read/write a deck's own new-cards/max-reviews daily caps (null = no
+ * cap — the default, so existing decks are unaffected until someone
+ * actually opens Deck Options). Applied to whichever node a study session
+ * is started from; see getSessionCards for how "already done today" gets
+ * counted against these.
+ */
+export async function updateDeckOptions(deckId, { newCardsPerDay, maxReviewsPerDay }) {
+  if (MOCK_MODE) return;
+  const { error } = await supabase.from('imported_decks')
+    .update({ new_cards_per_day: newCardsPerDay, max_reviews_per_day: maxReviewsPerDay })
+    .eq('id', deckId);
+  if (error) {
+    if (error.code === '42703') {
+      throw new Error('Deck Options aren’t set up on this database yet (run SUPABASE_MIGRATION_STUDY_CONTROLS.sql).');
+    }
+    throw new Error(error.message);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -189,8 +216,8 @@ export async function getImportJob(jobId) {
 /* Browse — paginated, filtered, never a full-deck fetch                */
 /* ------------------------------------------------------------------ */
 
-export async function browseCards(deckId, { search, state, tag, page = 0, pageSize = PAGE_SIZE, userId } = {}) {
-  if (MOCK_MODE) return mock.browseCards({ deckId, search, state, tag, page, pageSize });
+export async function browseCards(deckId, { search, state, tag, flag, page = 0, pageSize = PAGE_SIZE, userId } = {}) {
+  if (MOCK_MODE) return mock.browseCards({ deckId, search, state, tag, flag, page, pageSize });
 
   // `deckId` is whichever node the user is browsing (root or any sub-deck)
   // — expand to its full subtree first (see collectDescendantDeckIds), then
@@ -199,19 +226,29 @@ export async function browseCards(deckId, { search, state, tag, page = 0, pageSi
   // filtering AND the preview text — cards carry no text of their own.
   const deckIds = await collectDescendantDeckIds(userId, deckId);
 
-  let cardQuery = supabase.from('imported_cards')
-    .select('id, deck_id, note_id, state, due_at, imported_notes!inner(sort_field, fields, tags)',
-      { count: 'exact' })
-    .in('deck_id', deckIds);
-  if (state) cardQuery = cardQuery.eq('state', state);
-  if (search?.trim()) cardQuery = cardQuery.ilike('imported_notes.sort_field', `%${search.trim()}%`);
-  if (tag) cardQuery = cardQuery.contains('imported_notes.tags', [tag]);
-  cardQuery = cardQuery.range(page * pageSize, page * pageSize + pageSize - 1);
+  // `flag` is a SUPABASE_MIGRATION_STUDY_CONTROLS.sql column — same 42703
+  // fallback pattern as DECK_COLUMNS above, since Browse loads automatically
+  // (not an opt-in action) and must keep working for every user until that
+  // migration has actually been run against the live database.
+  const buildQuery = (withFlag) => {
+    const cols = withFlag
+      ? 'id, deck_id, note_id, state, due_at, flag, imported_notes!inner(sort_field, fields, tags)'
+      : 'id, deck_id, note_id, state, due_at, imported_notes!inner(sort_field, fields, tags)';
+    let q = supabase.from('imported_cards').select(cols, { count: 'exact' }).in('deck_id', deckIds);
+    if (state) q = q.eq('state', state);
+    if (withFlag && flag != null) q = q.eq('flag', flag);
+    if (search?.trim()) q = q.ilike('imported_notes.sort_field', `%${search.trim()}%`);
+    if (tag) q = q.contains('imported_notes.tags', [tag]);
+    return q.range(page * pageSize, page * pageSize + pageSize - 1);
+  };
 
-  const { data, error, count } = await cardQuery;
+  let { data, error, count } = await buildQuery(true);
+  if (error?.code === '42703') {
+    ({ data, error, count } = await buildQuery(false));
+  }
   if (error) throw new Error(error.message);
   const rows = (data || []).map(({ imported_notes, ...c }) => ({
-    ...c, sort_field: imported_notes?.sort_field, fields: imported_notes?.fields, tags: imported_notes?.tags,
+    ...c, flag: c.flag ?? 0, sort_field: imported_notes?.sort_field, fields: imported_notes?.fields, tags: imported_notes?.tags,
   }));
   return { rows, total: count || 0 };
 }
@@ -243,14 +280,95 @@ export async function getSessionCards(deckIds, { limit = 50, userId } = {}) {
   const expanded = await Promise.all(deckIds.map(id => collectDescendantDeckIds(userId, id)));
   const allDeckIds = [...new Set(expanded.flat())];
 
-  const query = buildSessionQuery({ deckIds: allDeckIds, limit });
-  let q = supabase.from('imported_cards').select('*')
-    .in('deck_id', query.deckIds).neq('state', 'suspended')
-    .or(`due_at.lte.${query.nowIso},state.eq.new`);
-  for (const o of query.order) q = q.order(o.column, { ascending: o.ascending, nullsFirst: o.nullsFirst });
-  const { data, error } = await q.limit(query.limit);
-  if (error) throw new Error(error.message);
-  return data || [];
+  // Per-day caps (SUPABASE_MIGRATION_STUDY_CONTROLS.sql) live on whichever
+  // node was actually clicked to study — deckIds[0] in practice
+  // (StudySession.js always passes a single id). A cap set on a parent
+  // covers the whole session pulled from beneath it; sub-deck-level
+  // overrides aren't layered in on top of it — a deliberate simplification
+  // vs. Anki's real per-child aggregation, not an oversight.
+  let newLimit = null, reviewLimit = null;
+  if (deckIds[0]) {
+    const { data: node } = await supabase.from('imported_decks')
+      .select('new_cards_per_day, max_reviews_per_day').eq('id', deckIds[0]).maybeSingle();
+    newLimit = node?.new_cards_per_day ?? null;
+    reviewLimit = node?.max_reviews_per_day ?? null;
+  }
+
+  const nowIso = new Date().toISOString();
+  let newCap = limit, reviewCap = limit;
+
+  if (newLimit != null || reviewLimit != null) {
+    // "Today" = the studying browser's own local calendar day — computed
+    // here, not stored, so it always matches whoever's actually studying
+    // rather than depending on a stored timezone. Approximate by design:
+    // there's no separate per-rating log for imported cards (unlike the
+    // main app's review_log), so "done today" is inferred from each
+    // card's OWN last_reviewed_at/review_count — a card rated twice in
+    // one day only shows its latest timestamp, so a rare multi-rating
+    // binge on the same card could undercount slightly. Good enough for
+    // a soft daily cap; not a ledger.
+    const dayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+    if (newLimit != null) {
+      const { count } = await supabase.from('imported_cards').select('*', { count: 'exact', head: true })
+        .in('deck_id', allDeckIds).eq('review_count', 1).gte('last_reviewed_at', dayStart);
+      newCap = Math.min(newCap, Math.max(0, newLimit - (count || 0)));
+    }
+    if (reviewLimit != null) {
+      const { count } = await supabase.from('imported_cards').select('*', { count: 'exact', head: true })
+        .in('deck_id', allDeckIds).gt('review_count', 1).gte('last_reviewed_at', dayStart);
+      reviewCap = Math.min(reviewCap, Math.max(0, reviewLimit - (count || 0)));
+    }
+  }
+
+  // Due and new pulled separately so each can respect its own (possibly
+  // capped) limit independently, then combined due-first-then-new and
+  // trimmed to the session's overall `limit` — same effective order as a
+  // single combined query when no caps are set (reviewCap/newCap both
+  // just equal `limit`), since the trailing slice does the real work.
+  let dueRows = [];
+  if (reviewCap > 0) {
+    const { data, error } = await supabase.from('imported_cards').select('*')
+      .in('deck_id', allDeckIds).neq('state', 'new').neq('state', 'suspended')
+      .lte('due_at', nowIso)
+      .order('due_at', { ascending: true, nullsFirst: false })
+      .limit(reviewCap);
+    if (error) throw new Error(`Due cards query failed: ${error.message}`);
+    dueRows = data || [];
+  }
+
+  let newRows = [];
+  if (newCap > 0) {
+    const { data, error } = await supabase.from('imported_cards').select('*')
+      .in('deck_id', allDeckIds).eq('state', 'new')
+      .limit(newCap);
+    if (error) throw new Error(`New cards query failed: ${error.message}`);
+    newRows = data || [];
+  }
+
+  return [...dueRows, ...newRows].slice(0, limit);
+}
+
+/**
+ * Set (or clear, with 0) a card's flag — Anki's 7-color flag system,
+ * SUPABASE_MIGRATION_STUDY_CONTROLS.sql. Independent of rating/scheduling:
+ * flagging a card never touches state/due_at/review_count, so unlike
+ * rateCard() there's no deck-count refresh to fire here.
+ */
+export async function setCardFlag(cardId, flag) {
+  if (MOCK_MODE) {
+    const existing = mock.cards.find(c => c.id === cardId);
+    if (existing) existing.flag = flag; // mutate in place so a later browseCards() re-query sees it
+    return { ...existing, id: cardId, flag };
+  }
+  const { data, error } = await supabase.from('imported_cards')
+    .update({ flag }).eq('id', cardId).select().single();
+  if (error) {
+    if (error.code === '42703') {
+      throw new Error('Flags aren’t set up on this database yet (run SUPABASE_MIGRATION_STUDY_CONTROLS.sql).');
+    }
+    throw new Error(error.message);
+  }
+  return data;
 }
 
 /** Persist a rating via the existing scheduler — no interval math here. */
