@@ -69,6 +69,7 @@ export default async function handler(req, res) {
     const resolved = await media.resolveMany({ rootDeckId: root.id, filenames });
     return res.status(200).json(resolved);
   } catch (err) {
+    console.error('[imported-media-resolve] failed', { rootDeckId: root.id, message: err.message });
     return res.status(500).json({ error: err.message });
   }
 }
