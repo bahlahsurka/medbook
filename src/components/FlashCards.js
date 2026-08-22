@@ -8,6 +8,7 @@ import DeckBrowser from './ImportedDecks/DeckBrowser';
 import ImportWizard from './ImportedDecks/ImportWizard';
 import StudySession from './ImportedDecks/StudySession';
 import BrowseDeck from './ImportedDecks/BrowseDeck';
+import ImportedStats from './ImportedDecks/ImportedStats';
 
 // Sentinel key for cards with no system assigned (legacy cards, or anything
 // created before folders existed). Never stored in the DB as this string —
@@ -324,13 +325,17 @@ export default function FlashCards({ userId, userSystems }) {
     if (importedSub?.mode === 'browse') return (
       <BrowseDeck deck={importedSub.deck} userId={userId} onExit={() => setImportedSub(null)} />
     );
+    if (importedSub?.mode === 'stats') return (
+      <ImportedStats userId={userId} onExit={() => setImportedSub(null)} />
+    );
     return (
       <div style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
         <AreaTabs t={t} area={area} setArea={setArea} />
         <DeckBrowser key={deckBrowserKey} userId={userId}
           onStudy={(deck) => setImportedSub({ mode: 'study', deck })}
           onBrowse={(deck) => setImportedSub({ mode: 'browse', deck })}
-          onImportClick={() => setShowImportWizard(true)} />
+          onImportClick={() => setShowImportWizard(true)}
+          onStatsClick={() => setImportedSub({ mode: 'stats' })} />
         {showImportWizard && (
           <ImportWizard userId={userId}
             onClose={() => setShowImportWizard(false)}

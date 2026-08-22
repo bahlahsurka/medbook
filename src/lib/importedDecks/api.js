@@ -434,6 +434,19 @@ export async function rateCard(card, rating) {
   // awaited: refreshing counts shouldn't add latency to flipping cards,
   // and a failure here shouldn't block a rating that already saved fine.
   refreshDeckCountsAfterRating(card.deck_id).catch(() => {});
+  // Same fire-and-forget spirit as the count refresh above, and the same
+  // pattern ReviewQueue.js already uses for the main app's review_log:
+  // supplementary stats, never allowed to block or fail a rating that
+  // already saved. SUPABASE_MIGRATION_IMPORTED_REVIEW_LOG.sql — powers the
+  // Stats screen (streak/retention/reviews-per-day); nothing else reads it.
+  supabase.from('imported_review_log').insert({
+    user_id: card.user_id, card_id: card.id, deck_id: card.deck_id, rating,
+  }).then(({ error: logError }) => {
+    if (logError && process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line no-console
+      console.warn('[rateCard] imported_review_log insert failed — has SUPABASE_MIGRATION_IMPORTED_REVIEW_LOG.sql been run?', logError.message);
+    }
+  });
   return data;
 }
 
@@ -577,4 +590,42 @@ export async function resolveMedia(rootDeckId, filenames) {
     return Object.fromEntries(filenames.map(f => [f, null]));
   }
   return res.json();
+}
+
+/* ------------------------------------------------------------------ */
+/* Stats — reads imported_review_log (see rateCard's insert above and  */
+/* SUPABASE_MIGRATION_IMPORTED_REVIEW_LOG.sql). Nothing else reads it.  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Raw log rows for the Stats screen to derive streak/retention/daily-count
+ * from, plus a separate all-time total (a cheap head-count query — no
+ * reason to pull potentially years of rows just to know how many there
+ * are). `null` — not an error throw — means "unavailable", same
+ * undefined/null/real convention Insights.js's useInsightsData already
+ * uses for review_log/study_sessions: covers both "table doesn't exist
+ * yet" (migration not run) and any other transient failure alike, so the
+ * Stats screen has one simple "show the empty/sample state" branch rather
+ * than needing to distinguish failure modes it can't act on differently.
+ * 90 days is enough for a genuine streak in practice while staying a
+ * bounded query — this is a display feature, not an audit log.
+ */
+export async function getImportedReviewStats(userId) {
+  if (MOCK_MODE) return null;
+  try {
+    const since = new Date(Date.now() - 90 * 86400_000).toISOString();
+    const [{ count, error: countErr }, { data: rows, error: rowsErr }] = await Promise.all([
+      supabase.from('imported_review_log').select('*', { count: 'exact', head: true }).eq('user_id', userId),
+      supabase.from('imported_review_log').select('rating, reviewed_at')
+        .eq('user_id', userId).gte('reviewed_at', since).order('reviewed_at', { ascending: true }),
+    ]);
+    if (countErr || rowsErr) throw (countErr || rowsErr);
+    return { totalAllTime: count || 0, rows: rows || [] };
+  } catch (err) {
+    if (process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line no-console
+      console.warn('[getImportedReviewStats] unavailable, Stats screen will show its empty state — has SUPABASE_MIGRATION_IMPORTED_REVIEW_LOG.sql been run?', err.message);
+    }
+    return null;
+  }
 }
