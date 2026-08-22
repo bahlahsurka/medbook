@@ -69,6 +69,54 @@ function applyDeckColumnFallback(rows) {
   (rows || []).forEach(d => { d.due_cards = null; d.new_cards_per_day = null; d.max_reviews_per_day = null; });
 }
 
+/**
+ * due_cards is the one denormalized count that goes stale from time alone,
+ * not just from writes — a card rated "Again" isn't due yet the instant
+ * it's rated (its due_at is 6 minutes out), but genuinely IS due six
+ * minutes later even though nothing ever wrote to the deck row in between.
+ * Reading the stored column straight (like total_cards/new_cards, which
+ * only ever change via an explicit rating/reset/import that already
+ * refreshes them) meant a deck's "due" count — and the Study button, which
+ * disables itself when both new_cards and due_cards read 0 — could get
+ * stuck showing 0 forever once its new cards ran out, no matter how much
+ * time passed or how many cards were actually overdue. Anki itself always
+ * computes "due" live rather than caching it; this does the same, on every
+ * deck-list read, overwriting whatever the stored column says.
+ */
+async function liveDueCounts(userId) {
+  const nowIso = new Date().toISOString();
+  const [{ data: decks }, { data: dueCards }] = await Promise.all([
+    supabase.from('imported_decks').select('id, parent_id').eq('user_id', userId),
+    supabase.from('imported_cards').select('deck_id').eq('user_id', userId)
+      .in('state', ['learning', 'review']).lte('due_at', nowIso),
+  ]);
+  const childrenOf = {};
+  (decks || []).forEach(d => { (childrenOf[d.parent_id] ||= []).push(d.id); });
+  const direct = {};
+  (dueCards || []).forEach(c => { direct[c.deck_id] = (direct[c.deck_id] || 0) + 1; });
+  const memo = {};
+  function rollup(id) {
+    if (memo[id] != null) return memo[id];
+    let sum = direct[id] || 0;
+    for (const childId of (childrenOf[id] || [])) sum += rollup(childId);
+    return (memo[id] = sum);
+  }
+  const out = {};
+  (decks || []).forEach(d => { out[d.id] = rollup(d.id); });
+  return out;
+}
+
+/** Overwrites each row's due_cards with a live count; leaves the stored
+ *  value in place (rather than erroring the whole deck list) if the live
+ *  computation itself fails for some reason. */
+async function withLiveDueCounts(userId, rows) {
+  try {
+    const live = await liveDueCounts(userId);
+    (rows || []).forEach(d => { if (d.id in live) d.due_cards = live[d.id]; });
+  } catch { /* stale stored value is still a reasonable fallback */ }
+  return rows;
+}
+
 export async function getRootDecks(userId) {
   if (MOCK_MODE) return mock.rootDecks();
 
@@ -84,7 +132,7 @@ export async function getRootDecks(userId) {
     applyDeckColumnFallback(data);
   }
   if (error) throw new Error(error.message);
-  return data || [];
+  return withLiveDueCounts(userId, data || []);
 }
 
 export async function getChildDecks(userId, parentId) {
@@ -102,7 +150,7 @@ export async function getChildDecks(userId, parentId) {
     applyDeckColumnFallback(data);
   }
   if (error) throw new Error(error.message);
-  return data || [];
+  return withLiveDueCounts(userId, data || []);
 }
 
 /**
