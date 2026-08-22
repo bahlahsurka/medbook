@@ -11,6 +11,7 @@ import { useTheme } from '../../lib/theme';
 import * as api from '../../lib/importedDecks/api';
 import { scheduler } from '../../lib/srs/Scheduler';
 import { useReviewKeyboard } from '../../lib/useReviewKeyboard';
+import { FLAGS, FLAG_COLORS, FLAG_NAMES } from '../../lib/importedDecks/flags';
 import CardRenderer, { cardMediaFilenames } from './CardRenderer';
 
 const SESSION_KEY_PREFIX = 'medbook_imported_session_';
@@ -137,6 +138,22 @@ export default function StudySession({ deck, userId, onExit }) {
   const exit = () => { clearSession(deck.id); onExit(); };
   const finishedNormally = () => { clearSession(deck.id); };
 
+  // Toggling the SAME flag again clears it (0) — same convention Anki
+  // itself uses, so "flag this card red" and "unflag it" are the same
+  // action on the same button rather than needing a separate clear step.
+  const [flagPickerOpen, setFlagPickerOpen] = useState(false);
+  const setFlag = async (flag) => {
+    if (!card) return;
+    const next = card.flag === flag ? 0 : flag;
+    setFlagPickerOpen(false);
+    try {
+      const updated = await api.setCardFlag(card.id, next);
+      setQueue(q => { const copy = [...q]; copy[idx] = updated; return copy; });
+    } catch (e) {
+      setErr(e.message || 'Could not set flag');
+    }
+  };
+
   // Keyboard shortcuts (Phase L, previously entirely absent from this
   // screen): Space to flip, a/h/g/Enter to rate, ← to undo the last
   // rating. Called unconditionally, before any of the early returns below,
@@ -153,6 +170,10 @@ export default function StudySession({ deck, userId, onExit }) {
     onEasy: () => rate('easy'),
     onPrev: lastRated ? undo : undefined,
   });
+
+  // Close the flag popup whenever the card changes (advance, undo, or a
+  // flag was just picked) — it should never carry over onto the next card.
+  useEffect(() => { setFlagPickerOpen(false); }, [card?.id]);
 
   const B = (bg, color = '#fff') => ({ background: bg, color, border: 'none', borderRadius: 10,
     padding: '14px 10px', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' });
@@ -207,16 +228,44 @@ export default function StudySession({ deck, userId, onExit }) {
       paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-        <button onClick={() => setPaused(true)} style={{ background: 'none', border: 'none',
-          color: t.text3, cursor: 'pointer', fontSize: 13, fontWeight: 600, padding: '6px 0' }}>
-          ⏸ Pause
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <button onClick={() => setPaused(true)} style={{ background: 'none', border: 'none',
+            color: t.text3, cursor: 'pointer', fontSize: 13, fontWeight: 600, padding: '6px 4px 6px 0' }}>
+            ⏸ Pause
+          </button>
+          <button onClick={() => setFlagPickerOpen(o => !o)} title={card.flag ? `Flagged: ${FLAG_NAMES[card.flag]}` : 'Flag this card'}
+            style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none',
+              cursor: 'pointer', fontSize: 15, padding: '6px 4px', color: t.text3,
+              opacity: flagPickerOpen || card.flag ? 1 : 0.7 }}>
+            {/* 🚩 is a fixed-color emoji glyph — CSS `color` can't tint it, so
+                the current flag color is shown as a separate dot instead. */}
+            🚩{card.flag > 0 && (
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: FLAG_COLORS[card.flag] }} />
+            )}
+          </button>
+        </div>
         <span style={{ fontSize: 13, color: t.text3, fontWeight: 600 }}>{idx + 1} / {queue.length}</span>
         <button onClick={exit} style={{ background: 'none', border: 'none',
           color: t.text3, cursor: 'pointer', fontSize: 13, fontWeight: 600, padding: '6px 0' }}>
           ✕ Exit
         </button>
       </div>
+
+      {flagPickerOpen && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12,
+          padding: '8px 10px', background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 8 }}>
+          <span style={{ fontSize: 12, color: t.text3, fontWeight: 600 }}>Flag:</span>
+          {FLAGS.map(f => (
+            <button key={f} onClick={() => setFlag(f)} title={card.flag === f ? `Clear flag (${FLAG_NAMES[f]})` : FLAG_NAMES[f]}
+              style={{ width: 20, height: 20, borderRadius: '50%', background: FLAG_COLORS[f], padding: 0,
+                border: card.flag === f ? `2px solid ${t.text}` : '2px solid transparent', cursor: 'pointer' }} />
+          ))}
+          <button onClick={() => setFlagPickerOpen(false)} style={{ marginLeft: 'auto', background: 'none',
+            border: 'none', color: t.text3, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+            Close
+          </button>
+        </div>
+      )}
 
       <div style={{ height: 4, background: t.surface3, borderRadius: 4, marginBottom: 16 }}>
         <div style={{ height: '100%', background: t.accent, borderRadius: 4,
@@ -236,7 +285,9 @@ export default function StudySession({ deck, userId, onExit }) {
         padding: '10px 14px', fontSize: 13, color: t.danger, marginBottom: 12 }}>{err}</div>}
 
       {card && note && model && (
-        <CardRenderer card={card} note={note} model={model} resolvedMedia={resolvedMedia} revealed={revealed} />
+        <div style={card.flag ? { borderLeft: `4px solid ${FLAG_COLORS[card.flag]}`, borderRadius: 4, paddingLeft: 10 } : undefined}>
+          <CardRenderer card={card} note={note} model={model} resolvedMedia={resolvedMedia} revealed={revealed} />
+        </div>
       )}
 
       <div style={{ marginTop: 16 }}>

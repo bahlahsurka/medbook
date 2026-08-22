@@ -37,6 +37,10 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick }
   const [renameValue, setRenameValue] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(null); // deck or null
   const [confirmReset, setConfirmReset] = useState(null);   // deck or null
+  const [optionsTarget, setOptionsTarget] = useState(null); // deck or null — "Deck Options" modal
+  const [optNewPerDay, setOptNewPerDay] = useState('');     // '' = unlimited
+  const [optMaxReviews, setOptMaxReviews] = useState('');   // '' = unlimited
+  const [optSaving, setOptSaving] = useState(false);
 
   const load = useCallback(async () => {
     setErr('');
@@ -67,9 +71,22 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick }
     saveExpanded(next);
   };
 
+  // Any deck action can change counts/hierarchy anywhere in the tree, so the
+  // simplest correct thing is to drop the whole children cache and re-fetch
+  // it for every node the user currently has expanded — otherwise an
+  // already-open subdeck list would sit on "Loading subdecks…" forever,
+  // since only toggleExpand's own click handler ever populates that cache.
+  const reloadExpandedChildren = async (expandedIds) => {
+    const entries = await Promise.all([...expandedIds].map(async (id) => {
+      try { return [id, await api.getChildDecks(userId, id)]; }
+      catch { return [id, []]; }
+    }));
+    setChildren(Object.fromEntries(entries));
+  };
+
   const runAction = async (deck, fn, successMsg) => {
     setBusyId(deck.id); setErr('');
-    try { await fn(); if (successMsg) { /* toast could hook in here later */ } await load(); setChildren({}); }
+    try { await fn(); if (successMsg) { /* toast could hook in here later */ } await load(); await reloadExpandedChildren(expanded); }
     catch (e) { setErr(e.message || 'Action failed'); }
     setBusyId(null);
   };
@@ -77,7 +94,7 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick }
   const doRename = async () => {
     if (!renameValue.trim() || !renameTarget) return;
     setBusyId(renameTarget.id);
-    try { await api.renameDeck(renameTarget.id, renameValue.trim()); await load(); setChildren({}); }
+    try { await api.renameDeck(renameTarget.id, renameValue.trim()); await load(); await reloadExpandedChildren(expanded); }
     catch (e) { setErr(e.message || 'Rename failed'); }
     setBusyId(null); setRenameTarget(null);
   };
@@ -94,6 +111,30 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick }
     if (!confirmReset) return;
     await runAction(confirmReset, () => api.resetDeckProgress(confirmReset.id, userId));
     setConfirmReset(null);
+  };
+
+  const openOptions = (deck) => {
+    setOptionsTarget(deck);
+    setOptNewPerDay(deck.new_cards_per_day == null ? '' : String(deck.new_cards_per_day));
+    setOptMaxReviews(deck.max_reviews_per_day == null ? '' : String(deck.max_reviews_per_day));
+  };
+
+  // Blank field = unlimited (null), matching Anki's own "no limit" convention
+  // for these two settings — see SUPABASE_MIGRATION_STUDY_CONTROLS.sql.
+  const doSaveOptions = async () => {
+    if (!optionsTarget) return;
+    setOptSaving(true); setErr('');
+    try {
+      await api.updateDeckOptions(optionsTarget.id, {
+        newCardsPerDay: optNewPerDay.trim() === '' ? null : Math.max(0, parseInt(optNewPerDay, 10) || 0),
+        maxReviewsPerDay: optMaxReviews.trim() === '' ? null : Math.max(0, parseInt(optMaxReviews, 10) || 0),
+      });
+      await load(); await reloadExpandedChildren(expanded);
+      setOptionsTarget(null);
+    } catch (e) {
+      setErr(e.message || 'Could not save deck options');
+    }
+    setOptSaving(false);
   };
 
   const B = (bg, color = '#fff') => ({ background: bg, color, border: 'none', borderRadius: 8,
@@ -141,6 +182,7 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick }
               onArchive={doArchive}
               onDeleteRequest={setConfirmDelete}
               onResetRequest={setConfirmReset}
+              onOptionsRequest={openOptions}
               busyId={busyId} t={t} />
           ))}
         </div>
@@ -203,12 +245,48 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick }
           </div>
         </Modal>
       )}
+
+      {/* Deck Options — per-deck daily new/review caps (Anki's own "Deck
+          Options" idea, scaled down to the two limits that actually apply
+          to imported study sessions). Applies to whichever node is opened,
+          not aggregated across the whole subtree — see getSessionCards in
+          lib/importedDecks/api.js. */}
+      {optionsTarget && (
+        <Modal t={t} onClose={() => setOptionsTarget(null)} title={`Deck Options — "${optionsTarget.display_name}"`}>
+          <div style={{ fontSize: 13, color: t.text3, lineHeight: 1.6, marginBottom: 18 }}>
+            Limits apply per calendar day, to a study session started from this deck. Leave a field
+            blank for no limit.
+          </div>
+          <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: t.text2, marginBottom: 6 }}>
+            New cards / day
+          </label>
+          <input type="number" min="0" inputMode="numeric" value={optNewPerDay}
+            onChange={e => setOptNewPerDay(e.target.value)} placeholder="Unlimited"
+            style={{ width: '100%', background: t.surface2, border: `1px solid ${t.borderStrong}`,
+              borderRadius: 8, color: t.text, padding: '10px 12px', fontSize: 14, outline: 'none',
+              boxSizing: 'border-box', fontFamily: 'Inter,sans-serif', marginBottom: 14 }} />
+          <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: t.text2, marginBottom: 6 }}>
+            Max reviews / day
+          </label>
+          <input type="number" min="0" inputMode="numeric" value={optMaxReviews}
+            onChange={e => setOptMaxReviews(e.target.value)} placeholder="Unlimited"
+            style={{ width: '100%', background: t.surface2, border: `1px solid ${t.borderStrong}`,
+              borderRadius: 8, color: t.text, padding: '10px 12px', fontSize: 14, outline: 'none',
+              boxSizing: 'border-box', fontFamily: 'Inter,sans-serif', marginBottom: 20 }} />
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={doSaveOptions} disabled={optSaving} style={B(t.accent)}>
+              {optSaving ? 'Saving…' : 'Save'}
+            </button>
+            <button onClick={() => setOptionsTarget(null)} style={B(t.surface3, t.text2)}>Cancel</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
 
 function DeckNode({ deck, depth, expanded, childrenMap, onToggleExpand, onStudy, onBrowse,
-  onRename, onArchive, onDeleteRequest, onResetRequest, busyId, t }) {
+  onRename, onArchive, onDeleteRequest, onResetRequest, onOptionsRequest, busyId, t }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const isOpen = expanded.has(deck.id);
   const kids = childrenMap[deck.id];
@@ -269,6 +347,7 @@ function DeckNode({ deck, depth, expanded, childrenMap, onToggleExpand, onStudy,
                 boxShadow: `0 4px 16px ${t.shadowStrong}`, minWidth: 160, overflow: 'hidden' }}>
                 {[
                   ['Rename', () => onRename(deck)],
+                  ['Deck Options', () => onOptionsRequest(deck)],
                   ['Reset Progress', () => onResetRequest(deck)],
                   ['Archive', () => onArchive(deck)],
                   ['Delete', () => onDeleteRequest(deck)],
@@ -303,6 +382,7 @@ function DeckNode({ deck, depth, expanded, childrenMap, onToggleExpand, onStudy,
               expanded={expanded} childrenMap={childrenMap} onToggleExpand={onToggleExpand}
               onStudy={onStudy} onBrowse={onBrowse} onRename={onRename} onArchive={onArchive}
               onDeleteRequest={onDeleteRequest} onResetRequest={onResetRequest}
+              onOptionsRequest={onOptionsRequest}
               busyId={busyId} t={t} />
           ))}
         </div>

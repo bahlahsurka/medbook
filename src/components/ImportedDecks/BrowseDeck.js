@@ -10,6 +10,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useTheme } from '../../lib/theme';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import * as api from '../../lib/importedDecks/api';
+import { FLAGS, FLAG_COLORS, FLAG_NAMES } from '../../lib/importedDecks/flags';
 import CardRenderer from './CardRenderer';
 
 const PAGE_SIZE = 30;
@@ -24,21 +25,25 @@ export default function BrowseDeck({ deck, userId, onExit }) {
   const debSearch = useDebouncedValue(search, 250);
   const [state, setState] = useState('');
   const [tag, setTag] = useState('');
+  const [flag, setFlag] = useState(''); // '' = all, '0' = unflagged only, '1'-'7' = that color
   const [page, setPage] = useState(0);
   const [rows, setRows] = useState(null); // null = loading
   const [total, setTotal] = useState(0);
   const [err, setErr] = useState('');
   const [openCard, setOpenCard] = useState(null); // full renderer loads only on demand (K1)
 
-  useEffect(() => { setPage(0); }, [debSearch, state, tag]);
+  useEffect(() => { setPage(0); }, [debSearch, state, tag, flag]);
 
   const load = useCallback(async () => {
     setErr('');
     try {
-      const result = await api.browseCards(deck.id, { search: debSearch, state, tag, page, pageSize: PAGE_SIZE, userId });
+      const result = await api.browseCards(deck.id, {
+        search: debSearch, state, tag, flag: flag === '' ? null : Number(flag),
+        page, pageSize: PAGE_SIZE, userId,
+      });
       setRows(result.rows); setTotal(result.total);
     } catch (e) { setErr(e.message || 'Could not load cards'); setRows([]); }
-  }, [deck.id, debSearch, state, tag, page, userId]);
+  }, [deck.id, debSearch, state, tag, flag, page, userId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -81,6 +86,13 @@ export default function BrowseDeck({ deck, userId, onExit }) {
             {allTags.map(tg => <option key={tg} value={tg}>{tg}</option>)}
           </select>
         )}
+        <select value={flag} onChange={e => setFlag(e.target.value)}
+          style={{ background: t.surface2, border: `1px solid ${t.borderStrong}`, borderRadius: 8,
+            color: t.text, padding: '9px 10px', fontSize: 13, fontFamily: 'Inter,sans-serif' }}>
+          <option value="">All flags</option>
+          <option value="0">🏳 No flag</option>
+          {FLAGS.map(f => <option key={f} value={f}>🚩 {FLAG_NAMES[f]}</option>)}
+        </select>
       </div>
 
       {err && <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: 8,
@@ -113,7 +125,11 @@ export default function BrowseDeck({ deck, userId, onExit }) {
 
       {/* Full renderer loads only when a row is opened (Phase K1) */}
       {openCard && (
-        <CardPreviewModal t={t} card={openCard} onClose={() => setOpenCard(null)} />
+        <CardPreviewModal t={t} card={openCard} onClose={() => setOpenCard(null)}
+          onFlagChange={updated => {
+            setOpenCard(updated);
+            setRows(rs => rs.map(r => (r.id === updated.id ? updated : r)));
+          }} />
       )}
     </div>
   );
@@ -130,6 +146,7 @@ function CardRow({ card, t, onOpen }) {
   const preview = stripHtml(card.sort_field || card.fields?.[0] || '').slice(0, 90);
   return (
     <div onClick={onOpen} style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 9,
+      borderLeft: card.flag ? `4px solid ${FLAG_COLORS[card.flag]}` : `1px solid ${t.border}`,
       padding: '11px 14px', cursor: 'pointer', boxShadow: `0 1px 2px ${t.shadow}`,
       display: 'flex', alignItems: 'center', gap: 10 }}>
       <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
@@ -153,7 +170,7 @@ function CardRow({ card, t, onOpen }) {
   );
 }
 
-function CardPreviewModal({ t, card, onClose }) {
+function CardPreviewModal({ t, card, onClose, onFlagChange }) {
   const [noteModel, setNoteModel] = useState({ note: null, model: null });
   useEffect(() => {
     let cancelled = false;
@@ -162,6 +179,17 @@ function CardPreviewModal({ t, card, onClose }) {
   }, [card.note_id]);
   const { note, model } = noteModel;
   const [revealed, setRevealed] = useState(false);
+  const [flagBusy, setFlagBusy] = useState(false);
+  const toggleFlag = async (f) => {
+    if (flagBusy) return;
+    const next = card.flag === f ? 0 : f;
+    setFlagBusy(true);
+    try {
+      const updated = await api.setCardFlag(card.id, next);
+      onFlagChange(updated);
+    } catch { /* preview modal has no error slot — silently leave the flag unchanged */ }
+    setFlagBusy(false);
+  };
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: t.overlay, zIndex: 250,
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
@@ -171,6 +199,15 @@ function CardPreviewModal({ t, card, onClose }) {
           <span style={{ fontSize: 13, fontWeight: 700, color: t.text }}>Card Preview</span>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: t.text3,
             cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 12, opacity: flagBusy ? 0.5 : 1 }}>
+          <span style={{ fontSize: 11.5, color: t.text3, fontWeight: 600, marginRight: 1 }}>Flag:</span>
+          {FLAGS.map(f => (
+            <button key={f} onClick={() => toggleFlag(f)} disabled={flagBusy}
+              title={card.flag === f ? `Clear flag (${FLAG_NAMES[f]})` : FLAG_NAMES[f]}
+              style={{ width: 18, height: 18, borderRadius: '50%', background: FLAG_COLORS[f], padding: 0,
+                border: card.flag === f ? `2px solid ${t.text}` : '2px solid transparent', cursor: 'pointer' }} />
+          ))}
         </div>
         {note && model
           ? <CardRenderer card={card} note={note} model={model} resolvedMedia={{}} revealed={revealed} />
