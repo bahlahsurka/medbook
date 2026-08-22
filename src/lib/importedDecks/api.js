@@ -409,10 +409,26 @@ export async function getNoteAndModel(noteId) {
 export async function resolveMedia(rootDeckId, filenames) {
   if (MOCK_MODE) return mock.resolveMany(filenames);
   if (!filenames?.length) return {};
+  // THE actual bug behind every card's images/audio showing "unavailable"
+  // — this request never carried the Authorization header the endpoint
+  // requires (imported-media-resolve.mjs 401s without one), so it never
+  // once resolved anything, regardless of whether the media itself
+  // imported fine or the root_deck_id scoping was correct. Every other
+  // authenticated call in this file (uploadApkg, imported-blob-upload)
+  // sends this same Bearer token; this one just never did.
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return Object.fromEntries(filenames.map(f => [f, null]));
   const res = await fetch('/api/imported-media-resolve', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
     body: JSON.stringify({ rootDeckId, filenames }),
   });
-  if (!res.ok) return Object.fromEntries(filenames.map(f => [f, null]));
+  if (!res.ok) {
+    if (process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line no-console
+      console.warn('[resolveMedia] request failed', res.status, await res.text().catch(() => ''));
+    }
+    return Object.fromEntries(filenames.map(f => [f, null]));
+  }
   return res.json();
 }
