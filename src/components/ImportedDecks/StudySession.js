@@ -6,7 +6,7 @@
 // scheduler.previewIntervals() / rateCard() (which itself calls
 // scheduler.calculateNextReview()).
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useTheme } from '../../lib/theme';
 import * as api from '../../lib/importedDecks/api';
 import { scheduler } from '../../lib/srs/Scheduler';
@@ -167,6 +167,34 @@ export default function StudySession({ deck, userId, onExit }) {
   // a flag was just picked) — it should never carry over onto the next card.
   useEffect(() => { setFlagPickerOpen(false); }, [card?.id]);
 
+  // How much real vertical room this screen actually has — measured, not
+  // guessed. height:'100%' looked like it should work (App.js's own shell
+  // IS a definite-height flex chain all the way down), but there's one
+  // plain, non-flex `<div key={view}>` wrapper in between (App.js's
+  // per-destination fade-in wrapper) that resets to auto height, which
+  // breaks CSS percentage-height resolution for every view rendered inside
+  // it — not just this one, and not something to "fix" by changing that
+  // shared wrapper for every other screen that relies on its auto sizing.
+  // Measuring via getBoundingClientRect().top sidesteps that break
+  // entirely: it doesn't care how many auto-height ancestors sit above it.
+  const [availHeight, setAvailHeight] = useState(null);
+  const rootRef = useRef(null);
+  const measureHeight = useCallback((node) => {
+    const el = node || rootRef.current;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top;
+    // 20px matches the app shell's own bottom padding on desktop — a
+    // small, deliberately generous buffer so nothing touches the very
+    // edge of the window; harmless if it's a couple px off on mobile.
+    setAvailHeight(Math.max(360, window.innerHeight - top - 20));
+  }, []);
+  const setRootRef = useCallback((node) => { rootRef.current = node; measureHeight(node); }, [measureHeight]);
+  useEffect(() => {
+    const onResize = () => measureHeight();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [measureHeight]);
+
   const B = (bg, color = '#fff') => ({ background: bg, color, border: 'none', borderRadius: 10,
     padding: '14px 10px', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' });
 
@@ -222,15 +250,14 @@ export default function StudySession({ deck, userId, onExit }) {
     // much wider (still capped, not edge-to-edge sprawl on an ultrawide
     // monitor) while staying just as narrow as before on an actual phone,
     // since maxWidth is only ever a ceiling.
-    // Fills whatever height the app shell's own layout actually gives this
-    // screen (that chain is flexbox with definite heights all the way up
-    // to the 100vh root — see App.js) instead of sizing the card off a
-    // fixed vh guess independent of the header/buttons around it. A vh cap
-    // either clipped a long card early or, on a short one, left a dead
-    // gap below the rating buttons — both symptoms of the card's size not
-    // actually being tied to the space it had to work with.
-    <div style={{ maxWidth: 1100, margin: '0 auto', fontFamily: 'Inter,sans-serif',
-      height: '100%', display: 'flex', flexDirection: 'column',
+    // Fills exactly the vertical room this screen was actually measured to
+    // have (see availHeight/measureHeight above) instead of sizing the card
+    // off a fixed vh guess independent of the header/buttons around it. A
+    // vh cap either clipped a long card early or, on a short one, left a
+    // dead gap below the rating buttons — both symptoms of the card's size
+    // not actually being tied to the space it had to work with.
+    <div ref={setRootRef} style={{ maxWidth: 1100, margin: '0 auto', fontFamily: 'Inter,sans-serif',
+      height: availHeight != null ? availHeight : undefined, display: 'flex', flexDirection: 'column',
       paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexShrink: 0 }}>
