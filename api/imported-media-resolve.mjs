@@ -40,14 +40,33 @@ export default async function handler(req, res) {
   );
 
   const { data: deck, error: deckErr } = await db.from('imported_decks')
-    .select('id, user_id').eq('id', rootDeckId).single();
+    .select('id, user_id, parent_id').eq('id', rootDeckId).single();
   if (deckErr || !deck || deck.user_id !== user.id) {
     return res.status(403).json({ error: 'Not your deck' });
   }
 
+  // `rootDeckId` here is really "whichever deck node the caller is
+  // studying/previewing" — StudySession.js and BrowseDeck's preview both
+  // pass the clicked node's own id, which is the ROOT only when that node
+  // happens to be one. imported_media.root_deck_id is always the TRUE
+  // root, same as imported_notes — so resolving media for a sub-deck study
+  // session (the overwhelmingly common case, since the aggregate root
+  // itself never holds cards directly) always found zero rows and showed
+  // "image unavailable" on every card, regardless of whether the media
+  // actually imported fine. Walk parent_id up to the real root before
+  // querying. Bounded by the deck tree's actual depth (a handful of
+  // queries at most — decks are never more than a few levels deep).
+  let root = deck;
+  while (root.parent_id) {
+    const { data: parent, error: parentErr } = await db.from('imported_decks')
+      .select('id, user_id, parent_id').eq('id', root.parent_id).single();
+    if (parentErr || !parent) break; // orphaned row — resolve with whatever we have
+    root = parent;
+  }
+
   try {
     const media = createMediaService({ db });
-    const resolved = await media.resolveMany({ rootDeckId, filenames });
+    const resolved = await media.resolveMany({ rootDeckId: root.id, filenames });
     return res.status(200).json(resolved);
   } catch (err) {
     return res.status(500).json({ error: err.message });
