@@ -289,11 +289,29 @@ export class MediaService {
     const out = {};
     for (const name of unique) out[name] = null;
 
+    // Two genuinely different failure classes were both silently collapsing
+    // into the same "image unavailable" with zero trace of which one it
+    // actually was: (a) no imported_media row at all for this filename
+    // under this root_deck_id, vs (b) a row WAS found but getUrl() failed
+    // (e.g. the provider it was stored under isn't registered right now —
+    // missing/misconfigured credentials, same class of bug as
+    // BLOB_READ_WRITE_TOKEN). Logged separately so a real failure is
+    // actually diagnosable instead of just "images don't show up".
+    const foundNames = new Set((data || []).map(r => r.anki_filename));
+    const missingNames = unique.filter(n => !foundNames.has(n));
+    if (missingNames.length) {
+      console.error('[MediaService.resolveMany] no imported_media row found', { rootDeckId, missingNames });
+    }
+
     await Promise.all((data || []).map(async row => {
       try {
         out[row.anki_filename] = await this._provider(row.storage_provider)
           .getUrl(row.storage_key, { expiresIn });
-      } catch {
+      } catch (e) {
+        console.error('[MediaService.resolveMany] getUrl failed', {
+          filename: row.anki_filename, storageProvider: row.storage_provider,
+          storageKey: row.storage_key, message: e.message,
+        });
         out[row.anki_filename] = null;   // provider hiccup shouldn't break the card
       }
     }));
