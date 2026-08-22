@@ -26,7 +26,7 @@ function saveExpanded(set) {
   try { sessionStorage.setItem(EXPANDED_KEY, JSON.stringify([...set])); } catch {}
 }
 
-export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick }) {
+export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick, onStatsClick }) {
   const { t } = useTheme();
   const [roots, setRoots] = useState(null);      // null = loading
   const [children, setChildren] = useState({});  // parentId -> deck[] | 'loading'
@@ -153,7 +153,12 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick }
         <div style={{ fontSize: 16, fontWeight: 700, color: t.text }}>
           Imported Decks <span style={{ fontSize: 13, color: t.text4, fontWeight: 400 }}>({roots.length})</span>
         </div>
-        <button onClick={onImportClick} style={B(t.accent)}>+ Import Anki Deck</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {onStatsClick && (
+            <button onClick={onStatsClick} style={B(t.surface2, t.text2)}>📊 Stats</button>
+          )}
+          <button onClick={onImportClick} style={B(t.accent)}>+ Import Anki Deck</button>
+        </div>
       </div>
 
       {err && (
