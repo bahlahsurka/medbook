@@ -222,10 +222,18 @@ export default function StudySession({ deck, userId, onExit }) {
     // much wider (still capped, not edge-to-edge sprawl on an ultrawide
     // monitor) while staying just as narrow as before on an actual phone,
     // since maxWidth is only ever a ceiling.
+    // Fills whatever height the app shell's own layout actually gives this
+    // screen (that chain is flexbox with definite heights all the way up
+    // to the 100vh root — see App.js) instead of sizing the card off a
+    // fixed vh guess independent of the header/buttons around it. A vh cap
+    // either clipped a long card early or, on a short one, left a dead
+    // gap below the rating buttons — both symptoms of the card's size not
+    // actually being tied to the space it had to work with.
     <div style={{ maxWidth: 1100, margin: '0 auto', fontFamily: 'Inter,sans-serif',
+      height: '100%', display: 'flex', flexDirection: 'column',
       paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           {/* Always-visible "previous card" button, disabled at idx 0 — same
               placement/behavior as ReviewQueue.js's ← button, not a
@@ -258,7 +266,7 @@ export default function StudySession({ deck, userId, onExit }) {
       </div>
 
       {flagPickerOpen && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12,
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexShrink: 0,
           padding: '8px 10px', background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 8 }}>
           <span style={{ fontSize: 12, color: t.text3, fontWeight: 600 }}>Flag:</span>
           {FLAGS.map(f => (
@@ -273,22 +281,26 @@ export default function StudySession({ deck, userId, onExit }) {
         </div>
       )}
 
-      <div style={{ height: 4, background: t.surface3, borderRadius: 4, marginBottom: 16 }}>
+      <div style={{ height: 4, background: t.surface3, borderRadius: 4, marginBottom: 16, flexShrink: 0 }}>
         <div style={{ height: '100%', background: t.accent, borderRadius: 4,
           width: `${(idx / queue.length) * 100}%`, transition: 'width .3s' }} />
       </div>
 
       {err && <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: 8,
-        padding: '10px 14px', fontSize: 13, color: t.danger, marginBottom: 12 }}>{err}</div>}
+        padding: '10px 14px', fontSize: 13, color: t.danger, marginBottom: 12, flexShrink: 0 }}>{err}</div>}
 
       {card && note && model && (
-        <div style={card.flag ? { borderLeft: `4px solid ${FLAG_COLORS[card.flag]}`, borderRadius: 4, paddingLeft: 10 } : undefined}>
-          <CardRenderer card={card} note={note} model={model} resolvedMedia={resolvedMedia} revealed={revealed}
-            minHeight={420} maxHeight="75vh" />
+        // flex:1 + minHeight:0 is what actually lets this claim the leftover
+        // space instead of just sizing to its own content — minHeight:0
+        // overrides a flex item's default "never shrink below content size",
+        // which is what was fighting the fixed vh cap before.
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
+          ...(card.flag ? { borderLeft: `4px solid ${FLAG_COLORS[card.flag]}`, borderRadius: 4, paddingLeft: 10 } : {}) }}>
+          <CardRenderer card={card} note={note} model={model} resolvedMedia={resolvedMedia} revealed={revealed} fill />
         </div>
       )}
 
-      <div style={{ marginTop: 16 }}>
+      <div style={{ marginTop: 16, flexShrink: 0 }}>
         {!revealed ? (
           // Large single tap target — the primary touch action (Phase L4).
           <button onClick={() => setRevealed(true)} style={{ ...B(t.accent), width: '100%', padding: '16px 10px', fontSize: 15 }}>
