@@ -389,26 +389,6 @@ export async function rateCard(card, rating) {
   return data;
 }
 
-/**
- * Revert the single most recent rating — Anki's Ctrl+Z, not just "look at
- * the previous card." Writes back exactly the scheduling fields the card
- * had immediately before that rating (captured by the caller from the
- * card object itself, since getSessionCards already returns every field
- * `rateCard`'s patch could touch — no separate snapshot table needed).
- * Single-level: once used, there's nothing further back to undo until
- * another card gets rated.
- */
-export async function undoRating(cardId, snapshot) {
-  const { state, due_at, interval_days, ease_factor, review_count, lapse_count, last_reviewed_at } = snapshot;
-  const patch = { state, due_at, interval_days, ease_factor, review_count, lapse_count, last_reviewed_at };
-  if (MOCK_MODE) return { ...snapshot, ...patch };
-  const { data, error } = await supabase.from('imported_cards')
-    .update(patch).eq('id', cardId).select().single();
-  if (error) throw new Error(error.message);
-  refreshDeckCountsAfterRating(data.deck_id).catch(() => {});
-  return data;
-}
-
 /** Direct (own, not rolled-up) total/new/due for exactly one deck node. */
 async function directDeckCounts(id, nowIso = new Date().toISOString()) {
   const { count: total } = await supabase.from('imported_cards')
