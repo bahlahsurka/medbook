@@ -123,7 +123,7 @@ export default function ImportWizard({ userId, onClose, onImported }) {
         {step === 'uploading' && <UploadingStep t={t} B={B} file={file}
           pct={progressPct} onCancel={cancelUpload} />}
 
-        {step === 'processing' && <ProcessingStep t={t} job={job} onClose={onClose} />}
+        {step === 'processing' && <ProcessingStep t={t} B={B} job={job} onClose={onClose} onNudge={retry} />}
 
         {step === 'failed' && <FailedStep t={t} B={B} job={job} err={err}
           onRetry={retry} onClose={onClose} />}
@@ -243,12 +243,34 @@ function UploadingStep({ t, B, file, pct, onCancel }) {
 }
 
 /* ── Phase H4 — real processing progress, real counts, no fake % ───────── */
-function ProcessingStep({ t, job, onClose }) {
+// Resume/nudge (added after a real job sat stuck on 250/N media for 2+
+// hours): the pipeline continues itself via one server function calling
+// itself — if that single hand-off silently fails (now logged server-side,
+// but still not retried automatically), the job just sits wherever its
+// cursor was, forever, looking identical to "still working." There was no
+// way to get it moving again short of finding its id and re-POSTing to the
+// endpoint by hand. This reuses the exact same startProcessing() call the
+// Retry button on a 'failed' job already used — always safe to call even
+// if the job turns out not to actually be stuck (import-process.mjs's own
+// duplicate-detection handles a harmless overlap with a chain that's still
+// alive after all).
+function ProcessingStep({ t, B, job, onClose, onNudge }) {
   const stage = STAGE_LABEL[job?.status] || 'Processing';
   const notesLine = job?.total_notes
     ? `${(job.imported_notes || 0).toLocaleString()} / ${job.total_notes.toLocaleString()}` : null;
   const mediaLine = job?.total_media
     ? `${(job.imported_media || 0).toLocaleString()} / ${job.total_media.toLocaleString()}` : null;
+
+  const [nudging, setNudging] = useState(false);
+  const [nudgeErr, setNudgeErr] = useState('');
+  const staleMs = job?.updated_at ? Date.now() - new Date(job.updated_at).getTime() : 0;
+  const looksStalled = staleMs > 2 * 60 * 1000; // no progress written in 2+ minutes
+
+  const nudge = async () => {
+    setNudging(true); setNudgeErr('');
+    try { await onNudge(); } catch (e) { setNudgeErr(e.message || 'Could not resume'); }
+    setNudging(false);
+  };
 
   return (
     <>
@@ -267,16 +289,29 @@ function ProcessingStep({ t, job, onClose }) {
         </div>
       )}
 
+      {looksStalled && (
+        <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: 8,
+          padding: '10px 14px', fontSize: 12.5, color: t.danger, marginBottom: 14, lineHeight: 1.6 }}>
+          No progress in a couple of minutes — the background hand-off may have dropped.
+          Tap Resume below; whatever's already imported is safe either way.
+        </div>
+      )}
+      {nudgeErr && <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: 8,
+        padding: '10px 14px', fontSize: 12.5, color: t.danger, marginBottom: 14 }}>{nudgeErr}</div>}
+
       <div style={{ fontSize: 11.5, color: t.text4, lineHeight: 1.6, marginBottom: 18 }}>
         You can safely close this and come back — the import keeps running, and reopening
         Import will pick up right where it left off.
       </div>
 
-      <button onClick={onClose} style={{ background: t.surface3, color: t.text2, border: 'none',
-        borderRadius: 8, padding: '12px 22px', fontSize: 14, fontWeight: 600, cursor: 'pointer',
-        fontFamily: 'Inter,sans-serif', width: '100%' }}>
-        Close (keep importing in background)
-      </button>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <button onClick={nudge} disabled={nudging} style={{ ...B(t.accent), flex: 1, opacity: nudging ? 0.7 : 1 }}>
+          {nudging ? 'Resuming…' : 'Resume'}
+        </button>
+        <button onClick={onClose} style={{ ...B(t.surface3, t.text2), flex: 1 }}>
+          Close
+        </button>
+      </div>
     </>
   );
 }

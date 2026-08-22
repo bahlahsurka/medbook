@@ -485,9 +485,19 @@ async function cleanupSourceArchive(db, jobId, blobUrl) {
 async function selfInvoke(req, jobId) {
   const host = req.headers?.['x-forwarded-host'] || req.headers?.host;
   const proto = req.headers?.['x-forwarded-proto'] || 'https';
-  if (!host) return;
-  // Fire-and-forget: we don't await the work, only the handoff.
-  fetch(`${proto}://${host}/api/import-process?jobId=${jobId}`, { method: 'POST' }).catch(() => {});
+  if (!host) {
+    console.error('[import-process] selfInvoke: no host header, cannot continue chain', { jobId });
+    return;
+  }
+  // Fire-and-forget: we don't await the work, only the handoff. This was
+  // the whole chain's single point of failure — a hand-off that fails here
+  // for ANY reason (network blip, cold start timeout, whatever) previously
+  // died in total silence: no error, no status change, the job just sits
+  // wherever its cursor was forever, looking identical to "still working"
+  // from the UI. Confirmed live: a real import got stuck at 250/N media
+  // for 2+ hours with nothing anywhere indicating why. Now at least logged.
+  fetch(`${proto}://${host}/api/import-process?jobId=${jobId}`, { method: 'POST' })
+    .catch(e => console.error('[import-process] selfInvoke: hand-off request failed', { jobId, message: e.message }));
 }
 
 /**
