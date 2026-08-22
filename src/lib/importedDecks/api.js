@@ -113,7 +113,19 @@ async function withLiveDueCounts(userId, rows) {
   try {
     const live = await liveDueCounts(userId);
     (rows || []).forEach(d => { if (d.id in live) d.due_cards = live[d.id]; });
-  } catch { /* stale stored value is still a reasonable fallback */ }
+  } catch (err) {
+    // Was a bare silent catch — exactly the anti-pattern that made the
+    // original due_cards bug take multiple rounds to diagnose. If the live
+    // count fails, the deck list falls back to the stale stored value
+    // (still better than a broken page), but that fallback should never be
+    // invisible — it's supposed to be rare, and "still shows the same old
+    // 0" is precisely what silently landing on the fallback path looks
+    // like from the outside.
+    if (process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line no-console
+      console.warn('[withLiveDueCounts] live due-count query failed, falling back to stale stored due_cards', err.message);
+    }
+  }
   return rows;
 }
 
