@@ -25,69 +25,6 @@ function useImportedStatsData(userId) {
   return stats;
 }
 
-// TEMPORARY — see api.getDebugSnapshot's own comment. Remove this hook, the
-// DebugPanel component below, and its one render call once the due_cards/
-// Stats bug is confirmed fixed.
-function useDebugSnapshot(userId) {
-  const [snap, setSnap] = useState(undefined);
-  useEffect(() => {
-    if (!userId) return;
-    let cancelled = false;
-    api.getDebugSnapshot(userId).then(s => { if (!cancelled) setSnap(s); });
-    return () => { cancelled = true; };
-  }, [userId]);
-  return snap;
-}
-
-function DebugPanel({ t, snap }) {
-  const [open, setOpen] = useState(false);
-  const pre = { fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-    color: t.text2, background: t.surface2, borderRadius: 6, padding: 8, marginTop: 6 };
-  return (
-    <div style={{ marginTop: 24, border: `1px dashed ${t.border}`, borderRadius: 10, padding: 12 }}>
-      <button onClick={() => setOpen(o => !o)} style={{ background: 'none', border: 'none', color: t.text3,
-        fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0, fontFamily: 'Inter,sans-serif' }}>
-        🔧 Diagnostics (temporary) {open ? '▲' : '▼'}
-      </button>
-      {open && (
-        <div style={{ marginTop: 10 }}>
-          {snap === undefined && <div style={{ fontSize: 12, color: t.text4 }}>Loading…</div>}
-          {snap && (
-            <>
-              <div style={{ fontSize: 11.5, color: t.text3, fontWeight: 700 }}>
-                imported_review_log row count: {snap.logCount ?? '(query failed)'}
-              </div>
-              {snap.logCountErr && <pre style={pre}>{snap.logCountErr}</pre>}
-
-              <div style={{ fontSize: 11.5, color: t.text3, fontWeight: 700, marginTop: 10 }}>
-                Last 5 imported_review_log rows:
-              </div>
-              <pre style={pre}>{JSON.stringify(snap.logSample, null, 2)}</pre>
-              {snap.logSampleErr && <pre style={pre}>{snap.logSampleErr}</pre>}
-
-              <div style={{ fontSize: 11.5, color: t.text3, fontWeight: 700, marginTop: 10 }}>
-                5 most recently reviewed imported_cards (by last_reviewed_at):
-              </div>
-              <pre style={pre}>{JSON.stringify(snap.recentCards, null, 2)}</pre>
-              {snap.recentCardsErr && <pre style={pre}>{snap.recentCardsErr}</pre>}
-
-              <div style={{ fontSize: 11.5, fontWeight: 700, marginTop: 10,
-                color: snap.testInsert?.succeeded ? t.ok : snap.testInsert?.error ? t.danger : t.text3 }}>
-                Test insert into imported_review_log: {
-                  snap.testInsert?.succeeded ? 'SUCCEEDED (and was cleaned up)'
-                  : snap.testInsert?.error ? 'FAILED — see error below'
-                  : snap.testInsert?.skipped || '—'
-                }
-              </div>
-              {snap.testInsert?.error && <pre style={pre}>{JSON.stringify(snap.testInsert.error, null, 2)}</pre>}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // Consecutive days with >=1 review, walking back from today. Today not
 // having a review yet doesn't zero an in-progress streak (the day isn't
 // over) — it only breaks once yesterday is also missing.
@@ -210,7 +147,6 @@ const RATING_META = {
 export default function ImportedStats({ userId, onExit }) {
   const { t } = useTheme();
   const stats = useImportedStatsData(userId);
-  const debugSnap = useDebugSnapshot(userId); // TEMPORARY — see DebugPanel above
 
   const last7Days = useMemo(() => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -361,11 +297,6 @@ export default function ImportedStats({ userId, onExit }) {
           </div>
         </>
       )}
-
-      {/* TEMPORARY — see DebugPanel's own comment. Always rendered
-          (outside every stats-state branch above) so it's reachable even
-          when Stats itself shows "not set up" or "no reviews yet". */}
-      <DebugPanel t={t} snap={debugSnap} />
     </div>
   );
 }
