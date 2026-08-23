@@ -641,3 +641,28 @@ export async function getImportedReviewStats(userId) {
     return null;
   }
 }
+
+/**
+ * TEMPORARY diagnostic snapshot — not a permanent feature, just a way to
+ * see raw rows from a phone with no desktop access, to split "ratings
+ * aren't persisting" from "ratings persist fine but the read side is
+ * wrong" without needing Supabase's own dashboard or live tool access
+ * this session. Every query here is read-only. Remove this + its one
+ * caller in ImportedStats.js once the due_cards/Stats bug is confirmed
+ * fixed — it's not meant to ship long-term.
+ */
+export async function getDebugSnapshot(userId) {
+  if (MOCK_MODE) return null;
+  const [cardsRes, logCountRes, logSampleRes] = await Promise.all([
+    supabase.from('imported_cards')
+      .select('id, deck_id, state, due_at, review_count, last_reviewed_at')
+      .eq('user_id', userId).order('last_reviewed_at', { ascending: false, nullsFirst: false }).limit(5),
+    supabase.from('imported_review_log').select('*', { count: 'exact', head: true }).eq('user_id', userId),
+    supabase.from('imported_review_log').select('*').eq('user_id', userId).order('reviewed_at', { ascending: false }).limit(5),
+  ]);
+  return {
+    recentCards: cardsRes.data || [], recentCardsErr: cardsRes.error?.message || null,
+    logCount: logCountRes.count ?? null, logCountErr: logCountRes.error?.message || null,
+    logSample: logSampleRes.data || [], logSampleErr: logSampleRes.error?.message || null,
+  };
+}
