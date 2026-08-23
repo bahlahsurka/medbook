@@ -13,6 +13,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useTheme } from '../../lib/theme';
 import * as api from '../../lib/importedDecks/api';
+import { IconChevronRight } from '../../lib/icons';
 
 // Deck tree expansion state remembered across mounts within a session —
 // local UI state per architectural rules ("expanded/collapsed deck nodes"
@@ -49,6 +50,28 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick, 
   }, [userId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // `expanded` rehydrates from sessionStorage on every fresh mount (a page
+  // reload, or a browser-tab restore) — correct, that's the point of
+  // persisting it. But the fetched `children` cache is deliberately NOT
+  // persisted (it's just an in-memory copy of server data, not meaningful
+  // UI state), so it always comes back empty on a fresh mount. Left alone,
+  // an already-expanded id then renders as open (chevron rotated, per
+  // `expanded`) with nothing under it — stuck on "Loading subdecks…"
+  // forever, since only toggleExpand's own click handler or
+  // reloadExpandedChildren (run after a mutating action) ever populate
+  // that cache. That mismatch — visually "forced open" but functionally
+  // empty — is the actual root cause behind Batch 5's bug report. Fetch
+  // once, for whatever was already expanded, right after mount.
+  useEffect(() => {
+    if (expanded.size) reloadExpandedChildren(expanded);
+    // Mount-time only (deliberately []): this reconciles whatever
+    // `expanded` rehydrated to. Every later change to `expanded` goes
+    // through toggleExpand, which already fetches for the specific id it
+    // just added — re-running this on every `expanded` change would
+    // refetch the whole open subtree on every single click, not just the
+    // newly-toggled node.
+  }, []);
 
   const toggleExpand = async (deck) => {
     const next = new Set(expanded);
@@ -146,8 +169,30 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick, 
     </div>
   );
 
+  // Hierarchy-control hover state + the subdeck reveal transition live here,
+  // not inline — inline styles can't express :hover, and prefers-reduced-
+  // motion needs a media query to gate the transition itself off (not just
+  // shorten it) for users who've asked for that. Both are scoped to plain,
+  // deliberately generic class names since nothing else in this tree uses
+  // them — same pattern FlashCards.js already uses for its own hover/fade
+  // rules.
+  const css = `
+    .mb-deck-toggle:hover { background: ${t.surface2} !important; color: ${t.text2} !important; }
+    .mb-deck-toggle:active { transform: scale(0.94); }
+    .mb-deck-children { animation: mb-deck-reveal 1ms; }
+    @media (prefers-reduced-motion: no-preference) {
+      .mb-deck-toggle-icon { transition: transform 180ms ease; }
+      .mb-deck-children { animation: mb-deck-reveal 200ms ease; }
+    }
+    @keyframes mb-deck-reveal {
+      from { opacity: 0; transform: translateY(-3px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  `;
+
   return (
     <div style={{ maxWidth: 680, margin: '0 auto', fontFamily: 'Inter,sans-serif' }}>
+      <style>{css}</style>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: t.text }}>
@@ -305,11 +350,20 @@ function DeckNode({ deck, depth, expanded, childrenMap, onToggleExpand, onStudy,
         padding: '12px 14px', marginLeft: depth * 18, boxShadow: `0 1px 2px ${t.shadow}`,
         opacity: busy ? 0.6 : 1 }}>
 
-        <button onClick={() => onToggleExpand(deck)} title={isOpen ? 'Collapse' : 'Expand'}
-          style={{ background: 'none', border: 'none', color: t.text4, cursor: 'pointer',
-            fontSize: 12, width: 18, flexShrink: 0, padding: 0,
-            transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .12s' }}>
-          ▶
+        {/* Hierarchy control — a deliberately roomy, standalone tap target
+            (36x36) so expand/collapse never has to compete with Study/
+            Browse/⋯ for precision, and never risks being mistaken for
+            "open this deck". The icon itself stays small and restrained;
+            the button around it is what's actually comfortable to hit —
+            large interaction target, small visual icon. */}
+        <button onClick={() => onToggleExpand(deck)} aria-expanded={isOpen}
+          title={isOpen ? 'Collapse subdecks' : 'Expand subdecks'} className="mb-deck-toggle"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 36, height: 36, flexShrink: 0, padding: 0,
+            background: isOpen ? t.surface2 : 'transparent', color: t.text3,
+            border: 'none', borderRadius: 9, cursor: 'pointer' }}>
+          <IconChevronRight size={15} className="mb-deck-toggle-icon"
+            style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }} />
         </button>
 
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -371,7 +425,14 @@ function DeckNode({ deck, depth, expanded, childrenMap, onToggleExpand, onStudy,
       </div>
 
       {isOpen && (
-        <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div className="mb-deck-children" style={{ marginTop: 6, position: 'relative',
+          display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {/* Subtle vertical guide connecting this deck to its subdecks —
+              a folder-like hierarchy cue instead of indentation alone, so
+              the relationship reads at a glance without any extra chrome. */}
+          <div aria-hidden style={{ position: 'absolute', left: depth * 18 + 32, top: 0, bottom: 8,
+            width: 1, background: t.border }} />
+
           {!hasKidsLoaded && (
             <div style={{ marginLeft: (depth + 1) * 18, fontSize: 12, color: t.text4, padding: '6px 0' }}>
               Loading subdecks…

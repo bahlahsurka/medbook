@@ -332,29 +332,55 @@ export default function FlashCards({ userId, userSystems }) {
   // A tab inside Flashcards, not a new Sidebar section. Everything below
   // this branch is the pre-existing "My Cards" feature, untouched.
   if (area === 'imported') {
-    if (importedSub?.mode === 'study') return (
-      <StudySession deck={importedSub.deck} userId={userId} onExit={() => setImportedSub(null)} />
-    );
-    if (importedSub?.mode === 'browse') return (
-      <BrowseDeck deck={importedSub.deck} userId={userId} onExit={() => setImportedSub(null)} />
-    );
-    if (importedSub?.mode === 'stats') return (
-      <ImportedStats userId={userId} onExit={() => setImportedSub(null)} />
-    );
+    // Batch 5 fix: DeckBrowser stays mounted the whole time the user is in
+    // the Imported Decks area — Study/Browse/Stats render as SIBLINGS on
+    // top of it (hidden via display:none, not unmounted) instead of the
+    // old pattern of returning a differently-shaped root that unmounted
+    // DeckBrowser entirely whenever importedSub became non-null.
+    //
+    // That unmount was the actual root cause of "subdeck stays forced
+    // open": DeckBrowser's expanded Set persists across mounts via
+    // sessionStorage, but its fetched children map does not (nor should
+    // it — it's just an in-memory cache, not meaningful to persist). Every
+    // remount rehydrated `expanded` (so a node still LOOKED expanded, its
+    // chevron still rotated open) while `children` came back empty with
+    // nothing to re-fetch it, so the row was stuck showing "Loading
+    // subdecks…" — a broken-looking permanently-open state, not an
+    // intentionally-restored one. Keeping DeckBrowser mounted removes the
+    // remount entirely, so both pieces of state simply stay exactly as the
+    // user left them — no persistence trick or extra fetch-on-mount patch
+    // needed, and no risk of the two ever drifting apart again.
+    //
+    // Bonus: this is also strictly cheaper — entering/exiting Study no
+    // longer re-fetches root decks or any already-expanded subdeck list at
+    // all, and any scroll position inside the tree survives a study trip
+    // for free.
+    const subOpen = !!importedSub;
     return (
-      <div style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
-        <AreaTabs t={t} area={area} setArea={setArea} />
-        <DeckBrowser key={deckBrowserKey} userId={userId}
-          onStudy={(deck) => setImportedSub({ mode: 'study', deck })}
-          onBrowse={(deck) => setImportedSub({ mode: 'browse', deck })}
-          onImportClick={() => setShowImportWizard(true)}
-          onStatsClick={() => setImportedSub({ mode: 'stats' })} />
-        {showImportWizard && (
-          <ImportWizard userId={userId}
-            onClose={() => setShowImportWizard(false)}
-            onImported={() => setDeckBrowserKey(k => k + 1)} />
+      <>
+        {importedSub?.mode === 'study' && (
+          <StudySession deck={importedSub.deck} userId={userId} onExit={() => setImportedSub(null)} />
         )}
-      </div>
+        {importedSub?.mode === 'browse' && (
+          <BrowseDeck deck={importedSub.deck} userId={userId} onExit={() => setImportedSub(null)} />
+        )}
+        {importedSub?.mode === 'stats' && (
+          <ImportedStats userId={userId} onExit={() => setImportedSub(null)} />
+        )}
+        <div style={{ display: subOpen ? 'none' : 'block', maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
+          <AreaTabs t={t} area={area} setArea={setArea} />
+          <DeckBrowser key={deckBrowserKey} userId={userId}
+            onStudy={(deck) => setImportedSub({ mode: 'study', deck })}
+            onBrowse={(deck) => setImportedSub({ mode: 'browse', deck })}
+            onImportClick={() => setShowImportWizard(true)}
+            onStatsClick={() => setImportedSub({ mode: 'stats' })} />
+          {showImportWizard && (
+            <ImportWizard userId={userId}
+              onClose={() => setShowImportWizard(false)}
+              onImported={() => setDeckBrowserKey(k => k + 1)} />
+          )}
+        </div>
+      </>
     );
   }
 
