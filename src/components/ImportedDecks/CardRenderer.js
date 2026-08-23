@@ -38,9 +38,30 @@ import { renderTemplate, renderCloze, substituteMedia, extractMediaFilenames } f
 
 const RESET_CSS = `
   html,body{margin:0;padding:0;}
+  html{height:100%;}
   body{
+    /* min-height (not height) + flex column: lets the single .mb-card-inner
+       child below be vertically centered via its own auto margins. */
+    min-height:100%; display:flex; flex-direction:column;
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
-    padding:20px; box-sizing:border-box; overflow-wrap:break-word; word-break:break-word;
+  }
+  /* Vertical centering lives on this ONE wrapper (auto top/bottom margins),
+     not on body as a flex container of every top-level node — that would
+     also make each node a flex item and stretch/shrink-wrap it, which
+     quietly breaks two things: an image's default cross-axis stretch would
+     blow it up to the full card width regardless of its own size, and a
+     shrink-wrapped text node loses the full-width box a deck's own
+     text-align:center needs to have any visible effect. Auto-margin
+     centering on a single full-width child avoids both, and, unlike
+     justify-content:center on body itself, never clips a tall card's
+     top: on overflow the auto margins simply resolve to 0 instead of
+     pushing the box above the viewport. Short cards (a single line of
+     text, one image) end up centered in the space the study screen
+     actually gives them, instead of pinned to the top with a dead gap
+     above the rating buttons. */
+  .mb-card-inner{
+    margin:auto 0; padding:16px; box-sizing:border-box;
+    overflow-wrap:break-word; word-break:break-word;
   }
   img{max-width:100%;height:auto;}
   .cloze-blank{font-weight:700;color:#2563eb;border-bottom:2px solid #2563eb;padding:0 2px;}
@@ -53,7 +74,7 @@ function wrapDocument(bodyHtml, deckCss) {
   return `<!doctype html><html><head><meta charset="utf-8">` +
     `<style>${RESET_CSS}</style>` +
     `<style>${deckCss || ''}</style>` +
-    `</head><body class="card">${bodyHtml}</body></html>`;
+    `</head><body class="card"><div class="mb-card-inner">${bodyHtml}</div></body></html>`;
 }
 
 /**
