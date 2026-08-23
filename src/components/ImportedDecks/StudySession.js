@@ -10,10 +10,11 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTheme } from '../../lib/theme';
 import * as api from '../../lib/importedDecks/api';
+import * as favoritesApi from '../../lib/importedDecks/favorites';
 import { scheduler } from '../../lib/srs/Scheduler';
 import { useReviewKeyboard } from '../../lib/useReviewKeyboard';
 import { FLAGS, FLAG_COLORS, FLAG_NAMES } from '../../lib/importedDecks/flags';
-import { IconChevronLeft, IconPause, IconX, IconMaximize, IconMinimize, IconSearch } from '../../lib/icons';
+import { IconChevronLeft, IconPause, IconX, IconMaximize, IconMinimize, IconSearch, IconStar } from '../../lib/icons';
 import CardRenderer, { cardMediaFilenames, cardSideImages } from './CardRenderer';
 
 // Rating strip — name first, interval (t.tokenKey) secondary. Theme tokens,
@@ -51,6 +52,21 @@ export default function StudySession({ deck, userId, onExit }) {
   const [rating, setRating] = useState(null); // in-flight rating, disables buttons briefly
   const [err, setErr] = useState('');
 
+  // Batch 4 — favorite state for the WHOLE session, loaded once as a Set
+  // (favoritesApi.getFavoriteCardIds), not one request per card — exactly
+  // the bulk-read that module's own doc comment says it exists for. The
+  // toggle below is the optimistic-UI layer favorites.js deliberately
+  // leaves to its caller: flip the local Set immediately so the star
+  // reacts the instant it's tapped, persist in the background, and put
+  // the Set back exactly as it was — never just "off" — if the write
+  // fails, surfacing a concise error instead of silently losing the tap.
+  const [favoriteIds, setFavoriteIds] = useState(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    favoritesApi.getFavoriteCardIds(userId).then(ids => { if (!cancelled) setFavoriteIds(ids); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [userId]);
+
   // Batch 2 — Focus Mode: hides everything but the minimum needed to get
   // back out (plus the image-expand affordance, if the card has one), so
   // the card itself gets nearly the whole viewport for studying and
@@ -76,13 +92,26 @@ export default function StudySession({ deck, userId, onExit }) {
   // Load session — recover a saved position for this deck if one exists
   // (Phase L3: "if the user leaves and returns while a session is active,
   // recover the session state"), otherwise build a fresh queue.
+  //
+  // Batch 4 — `deck.isFavorites` is how "Study Favorites" reuses this exact
+  // component instead of a second study-session implementation: a virtual
+  // deck-shaped object (see FAVORITES_DECK in FlashCards.js), not a real
+  // imported_decks row, that swaps WHERE the queue comes from and nothing
+  // else — the rest of this component (rating, flagging, Focus Mode, the
+  // image lightbox, keyboard shortcuts) doesn't know or care where its
+  // cards came from. `deck.onlyCardId`, set alongside it for a single
+  // favorited card's own "Study" action, filters that same fetch down to
+  // one card — still the real queue/advance/rate machinery below, not a
+  // special-cased single-card mode.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setErr('');
       try {
         const saved = loadSaved(deck.id);
-        const cards = await api.getSessionCards([deck.id], { limit: 50, userId });
+        const cards = deck.isFavorites
+          ? (await favoritesApi.getFavoriteCards(userId)).filter(c => !deck.onlyCardId || c.id === deck.onlyCardId)
+          : await api.getSessionCards([deck.id], { limit: 50, userId });
         if (cancelled) return;
         setQueue(cards);
         // Only trust a saved index if the queue is still the same length —
@@ -93,7 +122,7 @@ export default function StudySession({ deck, userId, onExit }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [deck.id, userId]);
+  }, [deck.id, deck.isFavorites, deck.onlyCardId, userId]);
 
   useEffect(() => {
     if (queue === null || !queue.length) return;
@@ -117,12 +146,23 @@ export default function StudySession({ deck, userId, onExit }) {
   const { note, model } = noteModel;
 
   // Resolve this card's media before rendering — never the whole deck's.
+  //
+  // Scoped by the CARD's own deck_id, not the static `deck` prop — the
+  // media-resolve endpoint walks up from whatever id it's given to that
+  // card's real root deck (api/imported-media-resolve.mjs's own comment),
+  // so either id reaches the same root in a normal single-deck session.
+  // Study Favorites is exactly the case where they can differ: its cards
+  // can come from entirely different decks, and the static `deck` prop
+  // there is a virtual favorites placeholder with no real row at all — the
+  // endpoint would 403 on it immediately. card.deck_id is always a real
+  // deck this specific card actually belongs to, regardless of which
+  // session pulled it in.
   useEffect(() => {
     if (!card || !note || !model) return;
     let cancelled = false;
     const filenames = cardMediaFilenames({ card, note, model });
     if (!filenames.length) { setResolvedMedia({}); return; }
-    api.resolveMedia(deck.id, filenames).then(map => { if (!cancelled) setResolvedMedia(map); })
+    api.resolveMedia(card.deck_id || deck.id, filenames).then(map => { if (!cancelled) setResolvedMedia(map); })
       .catch(() => { if (!cancelled) setResolvedMedia({}); });
     return () => { cancelled = true; };
   }, [card, note, model, deck.id]);
@@ -160,6 +200,31 @@ export default function StudySession({ deck, userId, onExit }) {
       setErr(e.message || 'Could not save rating');
     }
     setRating(null);
+  };
+
+  // Optimistic toggle — flip the local Set immediately (the star reacts
+  // this frame), persist in the background via toggleFavorite (which
+  // itself takes the CURRENT state rather than re-deriving it — see its
+  // own doc comment), and roll the Set back to exactly what it was if the
+  // write fails, surfacing why rather than leaving a star that lied.
+  const toggleCardFavorite = async () => {
+    if (!card) return;
+    const wasFavorited = favoriteIds.has(card.id);
+    setFavoriteIds(prev => {
+      const next = new Set(prev);
+      wasFavorited ? next.delete(card.id) : next.add(card.id);
+      return next;
+    });
+    try {
+      await favoritesApi.toggleFavorite(card.id, userId, wasFavorited);
+    } catch (e) {
+      setFavoriteIds(prev => {
+        const next = new Set(prev);
+        wasFavorited ? next.add(card.id) : next.delete(card.id);
+        return next;
+      });
+      setErr(e.message || 'Could not update favorite');
+    }
   };
 
   // Step back to the previous card — same behavior as ReviewQueue's ←
@@ -408,6 +473,12 @@ export default function StudySession({ deck, userId, onExit }) {
           <>
             <div />
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button className="mb-ss-iconbtn" onClick={toggleCardFavorite}
+                title={favoriteIds.has(card.id) ? 'Remove favorite' : 'Favorite this card'}
+                aria-label={favoriteIds.has(card.id) ? 'Remove favorite' : 'Favorite this card'}
+                style={iconBtnStyle({ color: favoriteIds.has(card.id) ? '#eab308' : t.text3 })}>
+                <IconStar size={14} filled={favoriteIds.has(card.id)} />
+              </button>
               {sideImages.length > 0 && (
                 <button className="mb-ss-iconbtn" onClick={() => setLightboxSrc(sideImages[0])}
                   title="Expand image" aria-label="Expand image" style={iconBtnStyle()}>
@@ -479,6 +550,12 @@ export default function StudySession({ deck, userId, onExit }) {
                   </>
                 )}
               </div>
+              <button className="mb-ss-iconbtn" onClick={toggleCardFavorite}
+                title={favoriteIds.has(card.id) ? 'Remove favorite' : 'Favorite this card'}
+                aria-label={favoriteIds.has(card.id) ? 'Remove favorite' : 'Favorite this card'}
+                style={iconBtnStyle({ color: favoriteIds.has(card.id) ? '#eab308' : t.text3 })}>
+                <IconStar size={14} filled={favoriteIds.has(card.id)} />
+              </button>
             </div>
             <span style={{ fontSize: 13, color: t.text3, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
               {idx + 1} / {queue.length}

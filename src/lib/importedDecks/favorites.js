@@ -135,18 +135,48 @@ export async function toggleFavorite(cardId, userId, currentlyFavorited) {
 export async function getFavoriteCards(userId) {
   if (MOCK_MODE) {
     const ids = mockSetFor(userId);
-    return mock.cards.filter(c => ids.has(c.id)).map(c => ({ ...c, favorited_at: new Date().toISOString() }));
+    const decksById = Object.fromEntries(mock.decks.map(d => [d.id, d]));
+    return mock.cards.filter(c => ids.has(c.id))
+      .map(c => ({ ...c, favorited_at: new Date().toISOString(), deck: decksById[c.deck_id] || null }));
   }
+
+  // imported_cards!inner(*, ...) — the full row, not a hand-picked column
+  // list: rateCard()/Scheduler.calculateNextReview() read several fields
+  // off a card (ease_factor, interval_days, review_count, lapse_count,
+  // user_id for the review-log insert) that have nothing to do with what
+  // this screen displays. Selecting `*` means a card favorited-and-studied
+  // here carries exactly the same shape browseCards()/getSessionCards()
+  // already produce, with no risk of quietly dropping a column Scheduler
+  // needs the next time it changes.
   const { data, error } = await supabase.from('imported_card_favorites')
-    .select('favorited_at, imported_cards(*)')
+    .select('favorited_at, imported_cards!inner(*, imported_notes!inner(sort_field, fields, tags))')
     .eq('user_id', userId)
     .order('favorited_at', { ascending: false });
   if (error) throw new Error(error.message);
+
   // Filter out rows whose card no longer exists — shouldn't happen (the FK
   // is ON DELETE CASCADE, so the favorite row is gone the same instant the
   // card is), but a defensive null-check here is free and cheap insurance
   // against ever rendering a favorite with nothing behind it.
-  return (data || [])
-    .filter(r => r.imported_cards)
-    .map(r => ({ ...r.imported_cards, favorited_at: r.favorited_at }));
+  const rows = (data || []).filter(r => r.imported_cards).map(r => {
+    const { imported_notes, ...card } = r.imported_cards;
+    return { ...card, sort_field: imported_notes?.sort_field, fields: imported_notes?.fields,
+      tags: imported_notes?.tags, favorited_at: r.favorited_at };
+  });
+
+  // Deck display_name/full_name (for "deck / subdeck" context in the list)
+  // via a SEPARATE small query keyed on the distinct deck_ids actually
+  // present, rather than a third embed hop (imported_cards -> imported_decks)
+  // stacked onto the query above — that relationship has never been
+  // exercised anywhere else in the codebase, unlike the cards -> notes hop
+  // browseCards() already proves works, so this doesn't lean on it being
+  // set up as a real FK PostgREST can traverse.
+  const deckIds = [...new Set(rows.map(r => r.deck_id).filter(Boolean))];
+  let decksById = {};
+  if (deckIds.length) {
+    const { data: deckRows, error: deckErr } = await supabase.from('imported_decks')
+      .select('id, display_name, full_name').in('id', deckIds);
+    if (!deckErr) decksById = Object.fromEntries((deckRows || []).map(d => [d.id, d]));
+  }
+  return rows.map(r => ({ ...r, deck: decksById[r.deck_id] || null }));
 }
