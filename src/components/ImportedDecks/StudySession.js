@@ -7,6 +7,7 @@
 // scheduler.calculateNextReview()).
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useTheme } from '../../lib/theme';
 import * as api from '../../lib/importedDecks/api';
 import { scheduler } from '../../lib/srs/Scheduler';
@@ -58,6 +59,19 @@ export default function StudySession({ deck, userId, onExit }) {
   const [focusMode, setFocusMode] = useState(false);
   // Image lightbox — the enlarged-image URL currently showing, or null.
   const [lightboxSrc, setLightboxSrc] = useState(null);
+
+  // The toolbar renders via a portal into App.js's OWN persistent header bar
+  // (#mb-study-toolbar-slot — see its comment there) instead of a second
+  // row inside this screen, so a study session reuses chrome that's
+  // already on screen rather than adding more. That div is a sibling
+  // rendered earlier in the same tree, so it already exists in the DOM by
+  // the time this component's own render runs — but `document.getElementById`
+  // still needs an effect (not a render-time call) to be safe against
+  // React strict-mode's double-render and any future change to render
+  // order; null on the very first paint just means the toolbar portal
+  // doesn't render that one frame, not that it's ever stuck missing.
+  const [headerSlot, setHeaderSlot] = useState(null);
+  useEffect(() => { setHeaderSlot(document.getElementById('mb-study-toolbar-slot')); }, []);
 
   // Load session — recover a saved position for this deck if one exists
   // (Phase L3: "if the user leaves and returns while a session is active,
@@ -378,8 +392,13 @@ export default function StudySession({ deck, userId, onExit }) {
           In Focus Mode this row collapses to just the handful of controls
           that still make sense with the chrome minimized — everything else
           (Previous/Pause/Flag/progress/session-exit) is one tap away behind
-          the un-focus button, not gone. */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexShrink: 0 }}>
+          the un-focus button, not gone.
+          Portaled into App.js's own header bar (#mb-study-toolbar-slot)
+          instead of taking a row of its own here — that row is already on
+          screen for every view, "Flashcards" just leaves most of it empty,
+          so a study session reuses it rather than adding a second one. */}
+      {headerSlot && createPortal(
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flex: 1, minWidth: 0 }}>
         {focusMode ? (
           <>
             <div />
@@ -442,7 +461,9 @@ export default function StudySession({ deck, userId, onExit }) {
             </div>
           </>
         )}
-      </div>
+        </div>,
+        headerSlot
+      )}
 
       {flagPickerOpen && !focusMode && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexShrink: 0,
