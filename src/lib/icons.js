@@ -254,3 +254,27 @@ export function IconTrendUp({ size=16, style, className }) {
     <polyline points="14 6 21 6 21 13" />
   </Svg>;
 }
+
+// --- Added for Imported Decks study screen (batch 2 — Focus Mode) -----------
+
+// Four corner brackets pointing outward — "enter focus/fullscreen".
+export function IconMaximize({ size=14, style, className }) {
+  return <Svg size={size} style={style} className={className}>
+    <polyline points="8 3 3 3 3 8" />
+    <polyline points="16 3 21 3 21 8" />
+    <polyline points="3 16 3 21 8 21" />
+    <polyline points="21 16 21 21 16 21" />
+  </Svg>;
+}
+
+// Same four brackets, pointing inward — "exit focus/fullscreen". Distinct
+// from IconX: this reads as "shrink back", not "cancel/close", which
+// matters when it sits alone as the only way out of Focus Mode.
+export function IconMinimize({ size=14, style, className }) {
+  return <Svg size={size} style={style} className={className}>
+    <polyline points="3 8 8 8 8 3" />
+    <polyline points="21 8 16 8 16 3" />
+    <polyline points="8 21 8 16 3 16" />
+    <polyline points="16 16 16 21 21 21" />
+  </Svg>;
+}

@@ -33,8 +33,8 @@
 // reset CSS) — a tall card scrolls within its box instead of the page
 // needing dynamic resize logic that would require script access.
 
-import { useMemo } from 'react';
-import { renderTemplate, renderCloze, substituteMedia, extractMediaFilenames } from '../../lib/importedDecks/templateRender';
+import { useMemo, useRef, useState, useEffect } from 'react';
+import { renderTemplate, renderCloze, substituteMedia, extractMediaFilenames, extractImageSrcs } from '../../lib/importedDecks/templateRender';
 
 const RESET_CSS = `
   html,body{margin:0;padding:0;}
@@ -123,6 +123,30 @@ export function cardMediaFilenames({ card, note, model }) {
 }
 
 /**
+ * Batch 2 — image expansion. Resolved image URLs actually visible on the
+ * CURRENT side (question or answer) of this card, for the study screen's
+ * "expand image" affordance.
+ *
+ * Deliberately does NOT reach into the iframe to find out what was tapped —
+ * it can't. The iframe's `sandbox=""` (see the file header) gives it an
+ * opaque origin with no script execution, so there is no channel — no
+ * postMessage, no cross-frame click bubbling, nothing — for the parent to
+ * learn what's inside it. Weakening the sandbox to get one is explicitly
+ * off the table (batch 1 and batch 2 both require preserving it). Instead
+ * this reuses buildCardHtml()'s already-substituted output — the same
+ * resolved-URL HTML the iframe itself renders — and just re-extracts the
+ * <img> srcs from it with the same regex-based extractMediaFilenames()
+ * already used for the resolveMedia() request. A missing/unresolved image
+ * already isn't an <img> tag in that HTML (substituteMedia swaps it for a
+ * ".media-missing" placeholder span), so this naturally only ever returns
+ * images that actually rendered.
+ */
+export function cardSideImages({ card, note, model, resolvedMedia = {}, revealed }) {
+  const { question, answer } = buildCardHtml({ card, note, model, resolvedMedia });
+  return extractImageSrcs(revealed ? answer : question);
+}
+
+/**
  * Phase L5 — theme rule: the MedBook SHELL around the iframe follows
  * MedBook's theme; the card's OWN content inside the iframe keeps its
  * original Anki styling untouched (deck CSS is injected as-is, never
@@ -144,20 +168,48 @@ export default function CardRenderer({ card, note, model, resolvedMedia, reveale
     return wrapDocument(revealed ? answer : question, model.css);
   }, [card, note, model, resolvedMedia, revealed]);
 
+  // Batch 2 — a subtle (~180ms) fade when the CARD itself changes, not on
+  // every flip: revealing the answer already has its own "Show Answer"
+  // press feedback, and fading there would just delay the answer becoming
+  // clearly legible. This is a plain opacity transition on a WRAPPER div —
+  // the iframe below is never given a `key` and is never remounted, so its
+  // srcDoc still updates in place exactly as it always did. Nothing about
+  // this can cause an extra image reload: the fade is paint-only, it
+  // doesn't touch how or when srcDoc changes.
+  const [visible, setVisible] = useState(true);
+  const prevCardId = useRef(card?.id);
+  useEffect(() => {
+    if (prevCardId.current === card?.id) return;
+    prevCardId.current = card?.id;
+    setVisible(false);
+    const raf = requestAnimationFrame(() => setVisible(true));
+    return () => cancelAnimationFrame(raf);
+  }, [card?.id]);
+
   return (
-    <iframe
-      title="card"
-      srcDoc={html}
-      sandbox=""
-      referrerPolicy="no-referrer"
-      style={{
-        width: '100%',
-        ...(fill ? { flex: 1, minHeight: 0 } : { minHeight, maxHeight }),
-        border: 'none',
-        borderRadius: 12,
-        background: '#fff', // the card's OWN background — not a MedBook theme token, deliberately
-        display: 'block',
-      }}
-    />
+    <div className="mb-card-fade" style={{
+      ...(fill ? { flex: 1, minHeight: 0 } : {}),
+      display: 'flex', flexDirection: 'column',
+      opacity: visible ? 1 : 0,
+    }}>
+      <style>{`
+        .mb-card-fade { transition: opacity .18s ease; }
+        @media (prefers-reduced-motion: reduce) { .mb-card-fade { transition: none; } }
+      `}</style>
+      <iframe
+        title="card"
+        srcDoc={html}
+        sandbox=""
+        referrerPolicy="no-referrer"
+        style={{
+          width: '100%',
+          ...(fill ? { flex: 1, minHeight: 0 } : { minHeight, maxHeight }),
+          border: 'none',
+          borderRadius: 12,
+          background: '#fff', // the card's OWN background — not a MedBook theme token, deliberately
+          display: 'block',
+        }}
+      />
+    </div>
   );
 }
