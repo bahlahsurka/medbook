@@ -7,6 +7,7 @@
 // scheduler.calculateNextReview()).
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useTheme } from '../../lib/theme';
 import * as api from '../../lib/importedDecks/api';
 import { scheduler } from '../../lib/srs/Scheduler';
@@ -58,6 +59,19 @@ export default function StudySession({ deck, userId, onExit }) {
   const [focusMode, setFocusMode] = useState(false);
   // Image lightbox — the enlarged-image URL currently showing, or null.
   const [lightboxSrc, setLightboxSrc] = useState(null);
+
+  // The toolbar renders via a portal into App.js's OWN persistent header bar
+  // (#mb-study-toolbar-slot — see its comment there) instead of a second
+  // row inside this screen, so a study session reuses chrome that's
+  // already on screen rather than adding more. That div is a sibling
+  // rendered earlier in the same tree, so it already exists in the DOM by
+  // the time this component's own render runs — but `document.getElementById`
+  // still needs an effect (not a render-time call) to be safe against
+  // React strict-mode's double-render and any future change to render
+  // order; null on the very first paint just means the toolbar portal
+  // doesn't render that one frame, not that it's ever stuck missing.
+  const [headerSlot, setHeaderSlot] = useState(null);
+  useEffect(() => { setHeaderSlot(document.getElementById('mb-study-toolbar-slot')); }, []);
 
   // Load session — recover a saved position for this deck if one exists
   // (Phase L3: "if the user leaves and returns while a session is active,
@@ -206,22 +220,25 @@ export default function StudySession({ deck, userId, onExit }) {
   // should ever carry over onto the next card.
   useEffect(() => { setFlagPickerOpen(false); setLightboxSrc(null); }, [card?.id]);
 
-  // Escape is the fallback "get me out" key for both the lightbox and
-  // Focus Mode — on top of the explicit close/exit buttons each already
-  // has. Lightbox takes priority when both are open (it's the topmost
-  // layer). A plain window listener, not useReviewKeyboard: Escape isn't a
-  // review action, and this needs to keep working even while the lightbox
-  // has that hook disabled.
+  // Escape is the fallback "get me out" key for the lightbox, the flag
+  // popover, and Focus Mode — on top of the explicit close/exit affordance
+  // each already has (the popover's is now just "click outside", since it
+  // dropped its own inline Close button once it became a real anchored
+  // dropdown). Checked in topmost-layer-first order. A plain window
+  // listener, not useReviewKeyboard: Escape isn't a review action, and
+  // this needs to keep working even while the lightbox has that hook
+  // disabled.
   useEffect(() => {
-    if (!lightboxSrc && !focusMode) return;
+    if (!lightboxSrc && !focusMode && !flagPickerOpen) return;
     const onKeyDown = (e) => {
       if (e.key !== 'Escape') return;
       if (lightboxSrc) setLightboxSrc(null);
+      else if (flagPickerOpen) setFlagPickerOpen(false);
       else setFocusMode(false);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [lightboxSrc, focusMode]);
+  }, [lightboxSrc, focusMode, flagPickerOpen]);
 
   // Focus Mode hides the flag button entirely, so an open flag picker
   // would otherwise be stranded on screen with no way to see what opened it.
@@ -358,6 +375,8 @@ export default function StudySession({ deck, userId, onExit }) {
         .mb-ss-showanswer { transition: filter .12s ease, transform .12s ease; }
         .mb-ss-showanswer:hover { filter: brightness(1.04); }
         .mb-ss-showanswer:active { transform: scale(0.99); }
+        .mb-ss-flagpop { animation: mb-ss-flagpop-in .12s ease; transform-origin: top left; }
+        @keyframes mb-ss-flagpop-in { from { opacity: 0; transform: translateY(-4px) scale(0.97); } to { opacity: 1; transform: none; } }
         /* Batch 2 — Focus Mode's own entrance/exit is the one "mode
            transition" in this screen; animating just this one collapsing
            strip (rather than every element that swaps) is what keeps it
@@ -367,7 +386,7 @@ export default function StudySession({ deck, userId, onExit }) {
         @keyframes mb-ss-lightbox-in { from { opacity: 0; } to { opacity: 1; } }
         @media (prefers-reduced-motion: reduce) {
           .mb-ss-iconbtn, .mb-ss-ratebtn, .mb-ss-showanswer, .mb-ss-progress-wrap { transition: none !important; }
-          .mb-ss-lightbox { animation: none !important; }
+          .mb-ss-lightbox, .mb-ss-flagpop { animation: none !important; }
         }
       `}</style>
 
@@ -378,8 +397,13 @@ export default function StudySession({ deck, userId, onExit }) {
           In Focus Mode this row collapses to just the handful of controls
           that still make sense with the chrome minimized — everything else
           (Previous/Pause/Flag/progress/session-exit) is one tap away behind
-          the un-focus button, not gone. */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexShrink: 0 }}>
+          the un-focus button, not gone.
+          Portaled into App.js's own header bar (#mb-study-toolbar-slot)
+          instead of taking a row of its own here — that row is already on
+          screen for every view, "Flashcards" just leaves most of it empty,
+          so a study session reuses it rather than adding a second one. */}
+      {headerSlot && createPortal(
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flex: 1, minWidth: 0 }}>
         {focusMode ? (
           <>
             <div />
@@ -408,19 +432,53 @@ export default function StudySession({ deck, userId, onExit }) {
                 title="Pause session" aria-label="Pause session" style={iconBtnStyle()}>
                 <IconPause size={13} />
               </button>
-              <button className="mb-ss-iconbtn" onClick={() => setFlagPickerOpen(o => !o)}
-                title={card.flag ? `Flagged: ${FLAG_NAMES[card.flag]}` : 'Flag this card'} aria-label="Flag this card"
-                style={iconBtnStyle({ background: flagPickerOpen ? t.surface3 : t.surface2 })}>
-                {/* 🚩 is a fixed-color emoji glyph — CSS `color` can't tint it, so
-                    the current flag color is shown as a separate dot instead. */}
-                <span style={{ position: 'relative', fontSize: 14, lineHeight: 1 }}>
-                  🚩
-                  {card.flag > 0 && (
-                    <span style={{ position: 'absolute', right: -3, bottom: -2, width: 6, height: 6,
-                      borderRadius: '50%', background: FLAG_COLORS[card.flag], border: `1px solid ${t.surface2}` }} />
-                  )}
-                </span>
-              </button>
+              {/* position:relative wrapper makes the color popover a true
+                  sub-part of this button — anchored right below/beside it
+                  via absolute positioning — instead of a full-width bar
+                  down in the content area with no visible connection to
+                  what opened it. */}
+              <div style={{ position: 'relative' }}>
+                <button className="mb-ss-iconbtn" onClick={() => setFlagPickerOpen(o => !o)}
+                  title={card.flag ? `Flagged: ${FLAG_NAMES[card.flag]}` : 'Flag this card'} aria-label="Flag this card"
+                  style={iconBtnStyle({ background: flagPickerOpen ? t.surface3 : t.surface2 })}>
+                  {/* 🚩 is a fixed-color emoji glyph — CSS `color` can't tint it, so
+                      the current flag color is shown as a separate dot instead. */}
+                  <span style={{ position: 'relative', fontSize: 14, lineHeight: 1 }}>
+                    🚩
+                    {card.flag > 0 && (
+                      <span style={{ position: 'absolute', right: -3, bottom: -2, width: 6, height: 6,
+                        borderRadius: '50%', background: FLAG_COLORS[card.flag], border: `1px solid ${t.surface2}` }} />
+                    )}
+                  </span>
+                </button>
+                {flagPickerOpen && (
+                  <>
+                    {/* Full-viewport, invisible, dismiss-on-click — NOT a
+                        cosmetic backdrop. A plain "click outside closes it"
+                        document listener can't work here: most of the
+                        screen is the card's sandboxed iframe, and a click
+                        that lands inside an iframe never bubbles out to the
+                        parent document at all (separate browsing context —
+                        true regardless of sandboxing). This scrim sits
+                        between the popover (z-index 20, above it) and
+                        everything else, so it's what actually catches
+                        "clicked the card to dismiss this" rather than that
+                        click silently doing nothing. */}
+                    <div onClick={() => setFlagPickerOpen(false)}
+                      style={{ position: 'fixed', inset: 0, zIndex: 15 }} />
+                    <div className="mb-ss-flagpop" style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 20,
+                      display: 'flex', alignItems: 'center', gap: 6, padding: '8px 9px',
+                      background: t.surface, border: `1px solid ${t.border}`, borderRadius: 10,
+                      boxShadow: `0 8px 24px ${t.shadowStrong}`, whiteSpace: 'nowrap' }}>
+                      {FLAGS.map(f => (
+                        <button key={f} onClick={() => setFlag(f)} title={card.flag === f ? `Clear flag (${FLAG_NAMES[f]})` : FLAG_NAMES[f]}
+                          style={{ width: 18, height: 18, borderRadius: '50%', background: FLAG_COLORS[f], padding: 0,
+                            border: card.flag === f ? `2px solid ${t.text}` : '2px solid transparent', cursor: 'pointer' }} />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
             <span style={{ fontSize: 13, color: t.text3, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
               {idx + 1} / {queue.length}
@@ -442,22 +500,8 @@ export default function StudySession({ deck, userId, onExit }) {
             </div>
           </>
         )}
-      </div>
-
-      {flagPickerOpen && !focusMode && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexShrink: 0,
-          padding: '8px 10px', background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 8 }}>
-          <span style={{ fontSize: 12, color: t.text3, fontWeight: 600 }}>Flag:</span>
-          {FLAGS.map(f => (
-            <button key={f} onClick={() => setFlag(f)} title={card.flag === f ? `Clear flag (${FLAG_NAMES[f]})` : FLAG_NAMES[f]}
-              style={{ width: 20, height: 20, borderRadius: '50%', background: FLAG_COLORS[f], padding: 0,
-                border: card.flag === f ? `2px solid ${t.text}` : '2px solid transparent', cursor: 'pointer' }} />
-          ))}
-          <button onClick={() => setFlagPickerOpen(false)} style={{ marginLeft: 'auto', background: 'none',
-            border: 'none', color: t.text3, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
-            Close
-          </button>
-        </div>
+        </div>,
+        headerSlot
       )}
 
       {/* Reclaimed (collapsed to 0) in Focus Mode, animated via

@@ -593,7 +593,15 @@ export default function App() {
             </>
           )}
 
-          <div style={{flex:1}} />
+          {/* Plain spacer for every view except 'cards' — there, it doubles
+              as a portal target StudySession renders its own toolbar into
+              (see its own comment), so a study session gets the entire rest
+              of this ALREADY-PERSISTENT header row instead of needing a
+              second row of its own in the content area below. Renders as
+              an ordinary empty spacer for every other 'cards'-area screen
+              (DeckBrowser, BrowseDeck, etc.) that never portals into it —
+              zero behavior change for them. */}
+          <div id="mb-study-toolbar-slot" style={{flex:1, display:'flex', alignItems:'center', minWidth:0}} />
 
           {view==='list' && !isMobile && (
             <input value={search} onChange={e=>setSearch(e.target.value)}
