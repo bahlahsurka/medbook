@@ -324,11 +324,26 @@ export default function StudySession({ deck, userId, onExit }) {
     // vh cap either clipped a long card early or, on a short one, left a
     // dead gap below the rating buttons — both symptoms of the card's size
     // not actually being tied to the space it had to work with.
-    <div ref={setRootRef} className="mb-ss-root" style={{ margin: '0 auto', fontFamily: 'Inter,sans-serif',
+    <div ref={setRootRef} className="mb-ss-root" style={{ marginLeft: 'auto', marginRight: 'auto', fontFamily: 'Inter,sans-serif',
       height: availHeight != null ? availHeight : undefined, display: 'flex', flexDirection: 'column',
       paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
       <style>{`
         .mb-ss-root { max-width: 1100px; }
+        /* Pull the screen up flush against the app header, cancelling the
+           shared content area's own top padding (App.js: 20px desktop /
+           14px <=768px) instead of just leaving it as dead space above the
+           toolbar. Scoped to this one screen via negative margin — not a
+           change to that shared padding, which every other screen still
+           uses as-is. (Set here, not in the inline style object above:
+           inline styles always beat a CSS class for the same property, so
+           an inline marginTop would silently block this — same reason
+           max-width lives in CSS too, a few lines up.) The header's own
+           border-bottom already reads as the section divider, so landing
+           flush under it looks deliberate rather than cramped. */
+        .mb-ss-root { margin-top: -20px; }
+        @media (max-width: 768px) {
+          .mb-ss-root { margin-top: -14px; }
+        }
         /* Tablet landscape (the primary device) — let the card actually use
            the wide viewport instead of capping at the same width as portrait. */
         @media (min-width: 900px) and (orientation: landscape) {
