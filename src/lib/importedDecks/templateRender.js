@@ -93,12 +93,23 @@ export function substituteMedia(html, resolvedMap) {
   return out;
 }
 
-/** Every filename an HTML fragment references — feeds resolveMany(). */
-export function extractMediaFilenames(html) {
+/** Just the <img> src values from an HTML fragment — no audio. Used both by
+ *  extractMediaFilenames() below (pre-substitution, filenames) and by
+ *  CardRenderer's cardSideImages() (post-substitution, resolved URLs) — same
+ *  regex, two different inputs, so an audio ref never gets mistaken for an
+ *  image to expand. */
+export function extractImageSrcs(html) {
   const names = new Set();
   let m;
   const imgRe = new RegExp(IMG_RE);
   while ((m = imgRe.exec(html || ''))) names.add(m[1]);
+  return [...names];
+}
+
+/** Every filename an HTML fragment references — feeds resolveMany(). */
+export function extractMediaFilenames(html) {
+  const names = new Set(extractImageSrcs(html));
+  let m;
   const sndRe = new RegExp(SOUND_RE);
   while ((m = sndRe.exec(html || ''))) names.add(m[1]);
   return [...names];

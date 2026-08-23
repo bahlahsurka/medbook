@@ -12,8 +12,8 @@ import * as api from '../../lib/importedDecks/api';
 import { scheduler } from '../../lib/srs/Scheduler';
 import { useReviewKeyboard } from '../../lib/useReviewKeyboard';
 import { FLAGS, FLAG_COLORS, FLAG_NAMES } from '../../lib/importedDecks/flags';
-import { IconChevronLeft, IconPause, IconX } from '../../lib/icons';
-import CardRenderer, { cardMediaFilenames } from './CardRenderer';
+import { IconChevronLeft, IconPause, IconX, IconMaximize, IconMinimize, IconSearch } from '../../lib/icons';
+import CardRenderer, { cardMediaFilenames, cardSideImages } from './CardRenderer';
 
 // Rating strip — name first, interval (t.tokenKey) secondary. Theme tokens,
 // not hardcoded hex: identical to the old hardcoded values in light mode
@@ -49,6 +49,15 @@ export default function StudySession({ deck, userId, onExit }) {
   const [resolvedMedia, setResolvedMedia] = useState({});
   const [rating, setRating] = useState(null); // in-flight rating, disables buttons briefly
   const [err, setErr] = useState('');
+
+  // Batch 2 — Focus Mode: hides everything but the minimum needed to get
+  // back out (plus the image-expand affordance, if the card has one), so
+  // the card itself gets nearly the whole viewport for studying and
+  // screenshotting. It only ever hides/shrinks chrome that's already on
+  // this screen — no new navigation system, no separate route/screen.
+  const [focusMode, setFocusMode] = useState(false);
+  // Image lightbox — the enlarged-image URL currently showing, or null.
+  const [lightboxSrc, setLightboxSrc] = useState(null);
 
   // Load session — recover a saved position for this deck if one exists
   // (Phase L3: "if the user leaves and returns while a session is active,
@@ -105,6 +114,16 @@ export default function StudySession({ deck, userId, onExit }) {
   }, [card, note, model, deck.id]);
 
   const intervals = useMemo(() => card ? scheduler.previewIntervals(card) : null, [card]);
+
+  // Batch 2 — image expansion. Which resolved image (if any) is visible on
+  // the currently-shown side of the card, for the "expand image" toolbar
+  // icon. See cardSideImages()'s own comment for why this can't just be
+  // "whichever image was tapped" — the sandboxed iframe has no channel to
+  // tell the parent that.
+  const sideImages = useMemo(
+    () => (card && note && model) ? cardSideImages({ card, note, model, resolvedMedia, revealed }) : [],
+    [card, note, model, resolvedMedia, revealed]
+  );
 
   const advance = useCallback(() => {
     setRevealed(false);
@@ -164,9 +183,15 @@ export default function StudySession({ deck, userId, onExit }) {
   // just rated). Called unconditionally, before any of the early returns
   // below, per the rules of hooks — `enabled` covers every state where
   // acting on a keypress wouldn't make sense (still loading, paused, no
-  // cards, or the session's already finished).
+  // cards, or the session's already finished). Deliberately NOT gated on
+  // focusMode — Focus Mode only hides/shrinks buttons, it doesn't change
+  // what the screen can do, so keyboard-driven studying keeps working
+  // exactly as before while it's on. It IS gated on the lightbox, per this
+  // hook's own doc comment ("disabled while a modal like the image
+  // lightbox is open on top of it") — otherwise "a" while just looking at
+  // an enlarged image would silently rate the card underneath it.
   const activeCard = queue && idx < queue.length ? queue[idx] : null;
-  useReviewKeyboard(!!activeCard && !paused, {
+  useReviewKeyboard(!!activeCard && !paused && !lightboxSrc, {
     flipped: revealed,
     onFlip: () => setRevealed(true),
     onAgain: () => rate('again'),
@@ -176,9 +201,31 @@ export default function StudySession({ deck, userId, onExit }) {
     onPrev: idx > 0 ? goPrev : undefined,
   });
 
-  // Close the flag popup whenever the card changes (advance, going back, or
-  // a flag was just picked) — it should never carry over onto the next card.
-  useEffect(() => { setFlagPickerOpen(false); }, [card?.id]);
+  // Close the flag popup and any open image lightbox whenever the card
+  // changes (advance, going back, or a flag was just picked) — neither
+  // should ever carry over onto the next card.
+  useEffect(() => { setFlagPickerOpen(false); setLightboxSrc(null); }, [card?.id]);
+
+  // Escape is the fallback "get me out" key for both the lightbox and
+  // Focus Mode — on top of the explicit close/exit buttons each already
+  // has. Lightbox takes priority when both are open (it's the topmost
+  // layer). A plain window listener, not useReviewKeyboard: Escape isn't a
+  // review action, and this needs to keep working even while the lightbox
+  // has that hook disabled.
+  useEffect(() => {
+    if (!lightboxSrc && !focusMode) return;
+    const onKeyDown = (e) => {
+      if (e.key !== 'Escape') return;
+      if (lightboxSrc) setLightboxSrc(null);
+      else setFocusMode(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [lightboxSrc, focusMode]);
+
+  // Focus Mode hides the flag button entirely, so an open flag picker
+  // would otherwise be stranded on screen with no way to see what opened it.
+  useEffect(() => { if (focusMode) setFlagPickerOpen(false); }, [focusMode]);
 
   // How much real vertical room this screen actually has — measured, not
   // guessed. height:'100%' looked like it should work (App.js's own shell
@@ -277,11 +324,26 @@ export default function StudySession({ deck, userId, onExit }) {
     // vh cap either clipped a long card early or, on a short one, left a
     // dead gap below the rating buttons — both symptoms of the card's size
     // not actually being tied to the space it had to work with.
-    <div ref={setRootRef} className="mb-ss-root" style={{ margin: '0 auto', fontFamily: 'Inter,sans-serif',
+    <div ref={setRootRef} className="mb-ss-root" style={{ marginLeft: 'auto', marginRight: 'auto', fontFamily: 'Inter,sans-serif',
       height: availHeight != null ? availHeight : undefined, display: 'flex', flexDirection: 'column',
       paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
       <style>{`
         .mb-ss-root { max-width: 1100px; }
+        /* Pull the screen up flush against the app header, cancelling the
+           shared content area's own top padding (App.js: 20px desktop /
+           14px <=768px) instead of just leaving it as dead space above the
+           toolbar. Scoped to this one screen via negative margin — not a
+           change to that shared padding, which every other screen still
+           uses as-is. (Set here, not in the inline style object above:
+           inline styles always beat a CSS class for the same property, so
+           an inline marginTop would silently block this — same reason
+           max-width lives in CSS too, a few lines up.) The header's own
+           border-bottom already reads as the section divider, so landing
+           flush under it looks deliberate rather than cramped. */
+        .mb-ss-root { margin-top: -20px; }
+        @media (max-width: 768px) {
+          .mb-ss-root { margin-top: -14px; }
+        }
         /* Tablet landscape (the primary device) — let the card actually use
            the wide viewport instead of capping at the same width as portrait. */
         @media (min-width: 900px) and (orientation: landscape) {
@@ -296,49 +358,93 @@ export default function StudySession({ deck, userId, onExit }) {
         .mb-ss-showanswer { transition: filter .12s ease, transform .12s ease; }
         .mb-ss-showanswer:hover { filter: brightness(1.04); }
         .mb-ss-showanswer:active { transform: scale(0.99); }
+        /* Batch 2 — Focus Mode's own entrance/exit is the one "mode
+           transition" in this screen; animating just this one collapsing
+           strip (rather than every element that swaps) is what keeps it
+           "extremely subtle" instead of turning into a layout shuffle. */
+        .mb-ss-progress-wrap { transition: max-height .2s ease, opacity .15s ease, margin-bottom .2s ease; overflow: hidden; }
+        .mb-ss-lightbox { animation: mb-ss-lightbox-in .15s ease; }
+        @keyframes mb-ss-lightbox-in { from { opacity: 0; } to { opacity: 1; } }
         @media (prefers-reduced-motion: reduce) {
-          .mb-ss-iconbtn, .mb-ss-ratebtn, .mb-ss-showanswer { transition: none !important; }
+          .mb-ss-iconbtn, .mb-ss-ratebtn, .mb-ss-showanswer, .mb-ss-progress-wrap { transition: none !important; }
+          .mb-ss-lightbox { animation: none !important; }
         }
       `}</style>
 
       {/* Quiet toolbar — icon-only, consistent 34px tiles, restrained
           background/border rather than large standalone buttons. Progress
           stays plainly readable text; Exit stays visually distinct (an X,
-          not just another tile) so it's never mistaken for a study action. */}
+          not just another tile) so it's never mistaken for a study action.
+          In Focus Mode this row collapses to just the handful of controls
+          that still make sense with the chrome minimized — everything else
+          (Previous/Pause/Flag/progress/session-exit) is one tap away behind
+          the un-focus button, not gone. */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <button className="mb-ss-iconbtn" onClick={goPrev} disabled={idx === 0}
-            title="Previous card" aria-label="Previous card"
-            style={iconBtnStyle({ opacity: idx === 0 ? 0.4 : 1, cursor: idx === 0 ? 'default' : 'pointer' })}>
-            <IconChevronLeft size={16} />
-          </button>
-          <button className="mb-ss-iconbtn" onClick={() => setPaused(true)}
-            title="Pause session" aria-label="Pause session" style={iconBtnStyle()}>
-            <IconPause size={13} />
-          </button>
-          <button className="mb-ss-iconbtn" onClick={() => setFlagPickerOpen(o => !o)}
-            title={card.flag ? `Flagged: ${FLAG_NAMES[card.flag]}` : 'Flag this card'} aria-label="Flag this card"
-            style={iconBtnStyle({ background: flagPickerOpen ? t.surface3 : t.surface2 })}>
-            {/* 🚩 is a fixed-color emoji glyph — CSS `color` can't tint it, so
-                the current flag color is shown as a separate dot instead. */}
-            <span style={{ position: 'relative', fontSize: 14, lineHeight: 1 }}>
-              🚩
-              {card.flag > 0 && (
-                <span style={{ position: 'absolute', right: -3, bottom: -2, width: 6, height: 6,
-                  borderRadius: '50%', background: FLAG_COLORS[card.flag], border: `1px solid ${t.surface2}` }} />
+        {focusMode ? (
+          <>
+            <div />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {sideImages.length > 0 && (
+                <button className="mb-ss-iconbtn" onClick={() => setLightboxSrc(sideImages[0])}
+                  title="Expand image" aria-label="Expand image" style={iconBtnStyle()}>
+                  <IconSearch size={14} />
+                </button>
               )}
+              <button className="mb-ss-iconbtn" onClick={() => setFocusMode(false)}
+                title="Exit Focus Mode (Esc)" aria-label="Exit Focus Mode" style={iconBtnStyle()}>
+                <IconMinimize size={14} />
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button className="mb-ss-iconbtn" onClick={goPrev} disabled={idx === 0}
+                title="Previous card" aria-label="Previous card"
+                style={iconBtnStyle({ opacity: idx === 0 ? 0.4 : 1, cursor: idx === 0 ? 'default' : 'pointer' })}>
+                <IconChevronLeft size={16} />
+              </button>
+              <button className="mb-ss-iconbtn" onClick={() => setPaused(true)}
+                title="Pause session" aria-label="Pause session" style={iconBtnStyle()}>
+                <IconPause size={13} />
+              </button>
+              <button className="mb-ss-iconbtn" onClick={() => setFlagPickerOpen(o => !o)}
+                title={card.flag ? `Flagged: ${FLAG_NAMES[card.flag]}` : 'Flag this card'} aria-label="Flag this card"
+                style={iconBtnStyle({ background: flagPickerOpen ? t.surface3 : t.surface2 })}>
+                {/* 🚩 is a fixed-color emoji glyph — CSS `color` can't tint it, so
+                    the current flag color is shown as a separate dot instead. */}
+                <span style={{ position: 'relative', fontSize: 14, lineHeight: 1 }}>
+                  🚩
+                  {card.flag > 0 && (
+                    <span style={{ position: 'absolute', right: -3, bottom: -2, width: 6, height: 6,
+                      borderRadius: '50%', background: FLAG_COLORS[card.flag], border: `1px solid ${t.surface2}` }} />
+                  )}
+                </span>
+              </button>
+            </div>
+            <span style={{ fontSize: 13, color: t.text3, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+              {idx + 1} / {queue.length}
             </span>
-          </button>
-        </div>
-        <span style={{ fontSize: 13, color: t.text3, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-          {idx + 1} / {queue.length}
-        </span>
-        <button className="mb-ss-iconbtn" onClick={exit} title="Exit session" aria-label="Exit session" style={iconBtnStyle()}>
-          <IconX size={15} />
-        </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {sideImages.length > 0 && (
+                <button className="mb-ss-iconbtn" onClick={() => setLightboxSrc(sideImages[0])}
+                  title="Expand image" aria-label="Expand image" style={iconBtnStyle()}>
+                  <IconSearch size={14} />
+                </button>
+              )}
+              <button className="mb-ss-iconbtn" onClick={() => setFocusMode(true)}
+                title="Focus Mode" aria-label="Enter Focus Mode" style={iconBtnStyle()}>
+                <IconMaximize size={14} />
+              </button>
+              <button className="mb-ss-iconbtn" onClick={exit} title="Exit session" aria-label="Exit session" style={iconBtnStyle()}>
+                <IconX size={15} />
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
-      {flagPickerOpen && (
+      {flagPickerOpen && !focusMode && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexShrink: 0,
           padding: '8px 10px', background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 8 }}>
           <span style={{ fontSize: 12, color: t.text3, fontWeight: 600 }}>Flag:</span>
@@ -354,9 +460,15 @@ export default function StudySession({ deck, userId, onExit }) {
         </div>
       )}
 
-      <div style={{ height: 3, background: t.surface3, borderRadius: 3, marginBottom: 10, flexShrink: 0 }}>
-        <div style={{ height: '100%', background: t.accent, borderRadius: 3,
-          width: `${(idx / queue.length) * 100}%`, transition: 'width .25s ease' }} />
+      {/* Reclaimed (collapsed to 0) in Focus Mode, animated via
+          .mb-ss-progress-wrap rather than just conditionally rendering it,
+          so the card growing to fill the space reads as one smooth motion
+          instead of a jump cut. */}
+      <div className="mb-ss-progress-wrap" style={{ maxHeight: focusMode ? 0 : 13, opacity: focusMode ? 0 : 1, marginBottom: focusMode ? 0 : 10, flexShrink: 0 }}>
+        <div style={{ height: 3, background: t.surface3, borderRadius: 3 }}>
+          <div style={{ height: '100%', background: t.accent, borderRadius: 3,
+            width: `${(idx / queue.length) * 100}%`, transition: 'width .25s ease' }} />
+        </div>
       </div>
 
       {err && <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: 8,
@@ -410,6 +522,31 @@ export default function StudySession({ deck, userId, onExit }) {
           </div>
         )}
       </div>
+
+      {/* Image expansion — see cardSideImages()'s comment for why this is a
+          card-level "expand" affordance rather than a tap directly on the
+          image inside the iframe. Sits outside the toolbar's normal flow
+          when open (position:fixed covers the viewport regardless of this
+          div's own max-width), so it never competes with or covers the
+          card itself — the card isn't even visible underneath it. */}
+      {lightboxSrc && (
+        <div className="mb-ss-lightbox" onClick={() => setLightboxSrc(null)} role="dialog" aria-modal="true"
+          aria-label="Enlarged image" style={{
+            position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.88)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out',
+            padding: 'max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px))',
+          }}>
+          <button className="mb-ss-iconbtn" onClick={() => setLightboxSrc(null)} title="Close" aria-label="Close enlarged image"
+            style={iconBtnStyle({ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.12)',
+              border: '1px solid rgba(255,255,255,0.25)', color: '#fff' })}>
+            <IconX size={16} />
+          </button>
+          <img src={lightboxSrc} alt="" onClick={(e) => e.stopPropagation()} style={{
+            maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 6,
+            boxShadow: '0 8px 40px rgba(0,0,0,0.5)', cursor: 'default',
+          }} />
+        </div>
+      )}
     </div>
   );
 }
