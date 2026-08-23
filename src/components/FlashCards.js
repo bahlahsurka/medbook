@@ -9,6 +9,7 @@ import ImportWizard from './ImportedDecks/ImportWizard';
 import StudySession from './ImportedDecks/StudySession';
 import BrowseDeck from './ImportedDecks/BrowseDeck';
 import ImportedStats from './ImportedDecks/ImportedStats';
+import FavoritesScreen from './ImportedDecks/FavoritesScreen';
 
 // Sentinel key for cards with no system assigned (legacy cards, or anything
 // created before folders existed). Never stored in the DB as this string —
@@ -16,13 +17,24 @@ import ImportedStats from './ImportedDecks/ImportedStats';
 const UNCAT = '__uncategorized__';
 
 // Top-level area within Flashcards. 'own' = the existing self-authored
-// flashcards feature (My Cards), untouched below. 'imported' = the new
-// Imported Decks area (Phase H) — deliberately a tab INSIDE Flashcards,
-// not a new Sidebar entry, per spec.
+// flashcards feature (My Cards), untouched below. 'imported' = the
+// Imported Decks area (Phase H). 'favorites' = batch 4 — same tab-inside-
+// Flashcards language, not a new Sidebar entry or separate app section.
 const AREA_TABS = [
   { id: 'own', label: 'My Cards' },
   { id: 'imported', label: 'Imported Decks' },
+  { id: 'favorites', label: 'Favorite Cards' },
 ];
+
+// A virtual "deck" — StudySession's queue-loading effect branches on
+// `isFavorites` to pull from favorites.getFavoriteCards() instead of
+// api.getSessionCards([deck.id]); everything else in that component (flag/
+// rate/Focus Mode/keyboard shortcuts/the image lightbox) treats it exactly
+// like a real deck. Module-level constant, not created per-render, so its
+// object identity stays stable across renders (StudySession's queue effect
+// keys off deck.id/deck.isFavorites, not `deck` itself, but a stable
+// reference is one less thing to reason about).
+const FAVORITES_DECK = { id: '__favorites__', display_name: 'Favorite Cards', isFavorites: true };
 
 // Shared field styling (add/edit forms) — tokenised, otherwise unchanged
 // from before this batch.
@@ -72,6 +84,7 @@ export default function FlashCards({ userId, userSystems }) {
   const { t } = useTheme();
   const [area, setArea] = useState('own');
   const [importedSub, setImportedSub] = useState(null); // { mode: 'study'|'browse', deck } | null
+  const [favoritesStudyDeck, setFavoritesStudyDeck] = useState(null); // FAVORITES_DECK-shaped object, or null
   const [showImportWizard, setShowImportWizard] = useState(false);
   const [deckBrowserKey, setDeckBrowserKey] = useState(0); // bump to force DeckBrowser to reload after an import completes
   const [cards, setCards]     = useState([]);
@@ -341,6 +354,25 @@ export default function FlashCards({ userId, userSystems }) {
             onClose={() => setShowImportWizard(false)}
             onImported={() => setDeckBrowserKey(k => k + 1)} />
         )}
+      </div>
+    );
+  }
+
+  // ── Favorites area ───────────────────────────────────────────────────
+  // batch 4. Reuses StudySession as-is (see FAVORITES_DECK's own comment)
+  // for both "Study Favorites" (the whole set) and a single row's "Study"
+  // action (the same virtual deck, with onlyCardId narrowing the queue to
+  // just that one card) — one study-session code path either way, not two.
+  if (area === 'favorites') {
+    if (favoritesStudyDeck) return (
+      <StudySession deck={favoritesStudyDeck} userId={userId} onExit={() => setFavoritesStudyDeck(null)} />
+    );
+    return (
+      <div style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
+        <AreaTabs t={t} area={area} setArea={setArea} />
+        <FavoritesScreen userId={userId}
+          onStudy={() => setFavoritesStudyDeck(FAVORITES_DECK)}
+          onStudyOne={(card) => setFavoritesStudyDeck({ ...FAVORITES_DECK, onlyCardId: card.id })} />
       </div>
     );
   }

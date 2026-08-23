@@ -278,3 +278,25 @@ export function IconMinimize({ size=14, style, className }) {
     <polyline points="16 16 16 21 21 21" />
   </Svg>;
 }
+
+// --- Added for Favorites (batch 4) -------------------------------------
+
+// Star — "favorite this card" toggle and the Favorite Cards nav/empty-state
+// icon. `filled` switches between an outline (not favorited) and a solid
+// currentColor fill (favorited), same solid-vs-stroke split IconPlay/
+// IconPause already use elsewhere in this file for an on/off icon state,
+// rather than inventing a second convention for it.
+export function IconStar({ size=14, style, className, filled=false }) {
+  const points = "12 2.5 15.09 8.76 22 9.77 17 14.64 18.18 21.52 12 18.27 5.82 21.52 7 14.64 2 9.77 8.91 8.76";
+  if (filled) {
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" style={style} className={className}
+        fill="currentColor" stroke="none">
+        <polygon points={points} />
+      </svg>
+    );
+  }
+  return <Svg size={size} style={style} className={className}>
+    <polygon points={points} strokeLinejoin="round" />
+  </Svg>;
+}
