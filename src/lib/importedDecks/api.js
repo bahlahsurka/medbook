@@ -449,14 +449,31 @@ export async function rateCard(card, rating) {
   // Same fire-and-forget spirit as the count refresh above, and the same
   // pattern ReviewQueue.js already uses for the main app's review_log:
   // supplementary stats, never allowed to block or fail a rating that
-  // already saved. SUPABASE_MIGRATION_IMPORTED_REVIEW_LOG.sql — powers the
-  // Stats screen (streak/retention/reviews-per-day); nothing else reads it.
+  // already saved. Powers the Stats screen (streak/retention/
+  // reviews-per-day); nothing else reads it.
+  //
+  // This table already existed on the live database before
+  // SUPABASE_MIGRATION_IMPORTED_REVIEW_LOG.sql was ever written — with a
+  // genuinely different, more detailed shape (prev_state/prev_interval_days/
+  // new_interval_days/next_due_at tracking full before/after scheduling
+  // history, no deck_id at all) than that migration assumed. `create table
+  // if not exists` silently no-ops against a same-named table regardless of
+  // its actual columns, so the migration reported success while changing
+  // nothing, and every insert kept failing on a deck_id column that was
+  // never actually going to exist. Matches the REAL table now — deck_id
+  // dropped (Stats has no per-deck breakdown to need it for), the
+  // richer before/after fields populated from data rateCard() already has
+  // in hand (the patch this function just computed, and the card's own
+  // pre-update values).
   supabase.from('imported_review_log').insert({
-    user_id: card.user_id, card_id: card.id, deck_id: card.deck_id, rating,
+    user_id: card.user_id, card_id: card.id, rating,
+    prev_state: card.state, prev_interval_days: card.interval_days ?? 0,
+    new_interval_days: patch.interval_days, next_due_at: patch.due_at,
+    reviewed_at: patch.last_reviewed_at,
   }).then(({ error: logError }) => {
     if (logError && process.env.NODE_ENV !== 'production') {
       // eslint-disable-next-line no-console
-      console.warn('[rateCard] imported_review_log insert failed — has SUPABASE_MIGRATION_IMPORTED_REVIEW_LOG.sql been run?', logError.message);
+      console.warn('[rateCard] imported_review_log insert failed', logError.message);
     }
   });
   return data;
@@ -670,8 +687,13 @@ export async function getDebugSnapshot(userId) {
   let testInsert = null;
   const testCard = (cardsRes.data || [])[0];
   if (testCard) {
+    // Matches the real imported_review_log schema now (see rateCard's own
+    // comment) — no deck_id, the richer prev/new scheduling fields instead.
     const { data, error } = await supabase.from('imported_review_log').insert({
-      user_id: userId, card_id: testCard.id, deck_id: testCard.deck_id, rating: 'good',
+      user_id: userId, card_id: testCard.id, rating: 'good',
+      prev_state: testCard.state, prev_interval_days: 0,
+      new_interval_days: 3, next_due_at: new Date(Date.now() + 3 * 86400_000).toISOString(),
+      reviewed_at: new Date().toISOString(),
     }).select().single();
     testInsert = {
       succeeded: !error,
