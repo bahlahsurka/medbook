@@ -660,9 +660,36 @@ export async function getDebugSnapshot(userId) {
     supabase.from('imported_review_log').select('*', { count: 'exact', head: true }).eq('user_id', userId),
     supabase.from('imported_review_log').select('*').eq('user_id', userId).order('reviewed_at', { ascending: false }).limit(5),
   ]);
+
+  // rateCard()'s own log insert is fire-and-forget, so its error — if any —
+  // is invisible from the outside. row count 0 with no query error above
+  // means the table exists and reads fine, so something about the INSERT
+  // specifically is failing every time. Rather than guess further, do a
+  // real test insert here (against one of the user's own actual cards, to
+  // satisfy the FK constraints) and surface PostgREST's exact error.
+  let testInsert = null;
+  const testCard = (cardsRes.data || [])[0];
+  if (testCard) {
+    const { data, error } = await supabase.from('imported_review_log').insert({
+      user_id: userId, card_id: testCard.id, deck_id: testCard.deck_id, rating: 'good',
+    }).select().single();
+    testInsert = {
+      succeeded: !error,
+      insertedRow: data || null,
+      error: error ? { message: error.message, code: error.code, details: error.details, hint: error.hint } : null,
+    };
+    // Clean up immediately — this is a synthetic "good" rating that never
+    // actually happened, so it shouldn't sit in the log skewing the real
+    // stats every time this panel is opened.
+    if (data?.id) await supabase.from('imported_review_log').delete().eq('id', data.id);
+  } else {
+    testInsert = { skipped: 'no card available to test against' };
+  }
+
   return {
     recentCards: cardsRes.data || [], recentCardsErr: cardsRes.error?.message || null,
     logCount: logCountRes.count ?? null, logCountErr: logCountRes.error?.message || null,
     logSample: logSampleRes.data || [], logSampleErr: logSampleRes.error?.message || null,
+    testInsert,
   };
 }

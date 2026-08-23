@@ -70,6 +70,16 @@ function DebugPanel({ t, snap }) {
               </div>
               <pre style={pre}>{JSON.stringify(snap.recentCards, null, 2)}</pre>
               {snap.recentCardsErr && <pre style={pre}>{snap.recentCardsErr}</pre>}
+
+              <div style={{ fontSize: 11.5, fontWeight: 700, marginTop: 10,
+                color: snap.testInsert?.succeeded ? t.ok : snap.testInsert?.error ? t.danger : t.text3 }}>
+                Test insert into imported_review_log: {
+                  snap.testInsert?.succeeded ? 'SUCCEEDED (and was cleaned up)'
+                  : snap.testInsert?.error ? 'FAILED — see error below'
+                  : snap.testInsert?.skipped || '—'
+                }
+              </div>
+              {snap.testInsert?.error && <pre style={pre}>{JSON.stringify(snap.testInsert.error, null, 2)}</pre>}
             </>
           )}
         </div>
