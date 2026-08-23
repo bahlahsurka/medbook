@@ -12,7 +12,20 @@ import * as api from '../../lib/importedDecks/api';
 import { scheduler } from '../../lib/srs/Scheduler';
 import { useReviewKeyboard } from '../../lib/useReviewKeyboard';
 import { FLAGS, FLAG_COLORS, FLAG_NAMES } from '../../lib/importedDecks/flags';
+import { IconChevronLeft, IconPause, IconX } from '../../lib/icons';
 import CardRenderer, { cardMediaFilenames } from './CardRenderer';
+
+// Rating strip — name first, interval (t.tokenKey) secondary. Theme tokens,
+// not hardcoded hex: identical to the old hardcoded values in light mode
+// (t.danger/t.warn/t.ok/t.accent === the old #dc2626/#d97706/#16a34a/
+// #2563eb exactly), but properly softened in dark mode instead of blasting
+// the same light-mode saturated hex onto a dark background.
+const RATINGS = [
+  ['again', 'Again', 'danger'],
+  ['hard', 'Hard', 'warn'],
+  ['good', 'Good', 'ok'],
+  ['easy', 'Easy', 'accent'],
+];
 
 const SESSION_KEY_PREFIX = 'medbook_imported_session_';
 
@@ -240,60 +253,93 @@ export default function StudySession({ deck, userId, onExit }) {
     );
   }
 
+  // Small, consistently-sized icon tiles — restrained background + subtle
+  // border, not a pill — matching ReviewQueue.js's own toolbar-button
+  // treatment (same brightness-filter hover/active trick, reused verbatim
+  // below for both themes) rather than inventing a second convention.
+  const iconBtnStyle = (extra = {}) => ({
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    width: 34, height: 34, flexShrink: 0, padding: 0,
+    background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 8,
+    color: t.text3, cursor: 'pointer', ...extra,
+  });
+
   return (
-    // Mobile/tablet-first (Phase L4): safe-area padding, large tap targets
-    // on the rating row, single-column layout that doesn't rely on a wide
-    // viewport, no hover-only affordances. The 560px cap from the original
-    // pass made the card itself tiny on anything wider than a phone —
-    // unreadable at a glance and useless for screenshotting content/media,
-    // the exact complaint this raised it to fix — so this now stretches
-    // much wider (still capped, not edge-to-edge sprawl on an ultrawide
-    // monitor) while staying just as narrow as before on an actual phone,
-    // since maxWidth is only ever a ceiling.
+    // Study canvas: the toolbar/progress-bar/rating-row are all trimmed to
+    // their minimum comfortable size specifically so the card gets the
+    // majority of the viewport — see the width/height comments below for
+    // the two axes that make that concrete, and the .mb-ss-root media rule
+    // for the tablet-landscape width bump.
+    //
     // Fills exactly the vertical room this screen was actually measured to
     // have (see availHeight/measureHeight above) instead of sizing the card
     // off a fixed vh guess independent of the header/buttons around it. A
     // vh cap either clipped a long card early or, on a short one, left a
     // dead gap below the rating buttons — both symptoms of the card's size
     // not actually being tied to the space it had to work with.
-    <div ref={setRootRef} style={{ maxWidth: 1100, margin: '0 auto', fontFamily: 'Inter,sans-serif',
+    <div ref={setRootRef} className="mb-ss-root" style={{ margin: '0 auto', fontFamily: 'Inter,sans-serif',
       height: availHeight != null ? availHeight : undefined, display: 'flex', flexDirection: 'column',
       paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+      <style>{`
+        .mb-ss-root { max-width: 1100px; }
+        /* Tablet landscape (the primary device) — let the card actually use
+           the wide viewport instead of capping at the same width as portrait. */
+        @media (min-width: 900px) and (orientation: landscape) {
+          .mb-ss-root { max-width: 1500px; }
+        }
+        .mb-ss-iconbtn { transition: filter .12s ease, transform .12s ease, background-color .12s ease; }
+        .mb-ss-iconbtn:hover:not(:disabled) { filter: brightness(0.97); }
+        body.medbook-dark .mb-ss-iconbtn:hover:not(:disabled) { filter: brightness(1.25); }
+        .mb-ss-iconbtn:active:not(:disabled) { transform: scale(0.93); }
+        .mb-ss-ratebtn { transition: filter .12s ease; }
+        .mb-ss-ratebtn:active:not(:disabled) { filter: brightness(0.92); }
+        .mb-ss-showanswer { transition: filter .12s ease, transform .12s ease; }
+        .mb-ss-showanswer:hover { filter: brightness(1.04); }
+        .mb-ss-showanswer:active { transform: scale(0.99); }
+        @media (prefers-reduced-motion: reduce) {
+          .mb-ss-iconbtn, .mb-ss-ratebtn, .mb-ss-showanswer { transition: none !important; }
+        }
+      `}</style>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          {/* Always-visible "previous card" button, disabled at idx 0 — same
-              placement/behavior as ReviewQueue.js's ← button, not a
-              conditional pill that only appears right after rating. */}
-          <button onClick={goPrev} disabled={idx === 0} title="Previous card" aria-label="Previous card"
-            style={{ background: 'none', border: 'none', color: t.text3, fontSize: 13, fontWeight: 600,
-              padding: '6px 4px 6px 0', cursor: idx === 0 ? 'default' : 'pointer', opacity: idx === 0 ? 0.4 : 1 }}>
-            ← <span style={{ opacity: 0.6, fontWeight: 400 }}>Prev</span>
+      {/* Quiet toolbar — icon-only, consistent 34px tiles, restrained
+          background/border rather than large standalone buttons. Progress
+          stays plainly readable text; Exit stays visually distinct (an X,
+          not just another tile) so it's never mistaken for a study action. */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button className="mb-ss-iconbtn" onClick={goPrev} disabled={idx === 0}
+            title="Previous card" aria-label="Previous card"
+            style={iconBtnStyle({ opacity: idx === 0 ? 0.4 : 1, cursor: idx === 0 ? 'default' : 'pointer' })}>
+            <IconChevronLeft size={16} />
           </button>
-          <button onClick={() => setPaused(true)} style={{ background: 'none', border: 'none',
-            color: t.text3, cursor: 'pointer', fontSize: 13, fontWeight: 600, padding: '6px 4px 6px 0' }}>
-            ⏸ Pause
+          <button className="mb-ss-iconbtn" onClick={() => setPaused(true)}
+            title="Pause session" aria-label="Pause session" style={iconBtnStyle()}>
+            <IconPause size={13} />
           </button>
-          <button onClick={() => setFlagPickerOpen(o => !o)} title={card.flag ? `Flagged: ${FLAG_NAMES[card.flag]}` : 'Flag this card'}
-            style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none',
-              cursor: 'pointer', fontSize: 15, padding: '6px 4px', color: t.text3,
-              opacity: flagPickerOpen || card.flag ? 1 : 0.7 }}>
+          <button className="mb-ss-iconbtn" onClick={() => setFlagPickerOpen(o => !o)}
+            title={card.flag ? `Flagged: ${FLAG_NAMES[card.flag]}` : 'Flag this card'} aria-label="Flag this card"
+            style={iconBtnStyle({ background: flagPickerOpen ? t.surface3 : t.surface2 })}>
             {/* 🚩 is a fixed-color emoji glyph — CSS `color` can't tint it, so
                 the current flag color is shown as a separate dot instead. */}
-            🚩{card.flag > 0 && (
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: FLAG_COLORS[card.flag] }} />
-            )}
+            <span style={{ position: 'relative', fontSize: 14, lineHeight: 1 }}>
+              🚩
+              {card.flag > 0 && (
+                <span style={{ position: 'absolute', right: -3, bottom: -2, width: 6, height: 6,
+                  borderRadius: '50%', background: FLAG_COLORS[card.flag], border: `1px solid ${t.surface2}` }} />
+              )}
+            </span>
           </button>
         </div>
-        <span style={{ fontSize: 13, color: t.text3, fontWeight: 600 }}>{idx + 1} / {queue.length}</span>
-        <button onClick={exit} style={{ background: 'none', border: 'none',
-          color: t.text3, cursor: 'pointer', fontSize: 13, fontWeight: 600, padding: '6px 0' }}>
-          ✕ Exit
+        <span style={{ fontSize: 13, color: t.text3, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+          {idx + 1} / {queue.length}
+        </span>
+        <button className="mb-ss-iconbtn" onClick={exit} title="Exit session" aria-label="Exit session" style={iconBtnStyle()}>
+          <IconX size={15} />
         </button>
       </div>
 
       {flagPickerOpen && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexShrink: 0,
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexShrink: 0,
           padding: '8px 10px', background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 8 }}>
           <span style={{ fontSize: 12, color: t.text3, fontWeight: 600 }}>Flag:</span>
           {FLAGS.map(f => (
@@ -308,44 +354,57 @@ export default function StudySession({ deck, userId, onExit }) {
         </div>
       )}
 
-      <div style={{ height: 4, background: t.surface3, borderRadius: 4, marginBottom: 16, flexShrink: 0 }}>
-        <div style={{ height: '100%', background: t.accent, borderRadius: 4,
-          width: `${(idx / queue.length) * 100}%`, transition: 'width .3s' }} />
+      <div style={{ height: 3, background: t.surface3, borderRadius: 3, marginBottom: 10, flexShrink: 0 }}>
+        <div style={{ height: '100%', background: t.accent, borderRadius: 3,
+          width: `${(idx / queue.length) * 100}%`, transition: 'width .25s ease' }} />
       </div>
 
       {err && <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: 8,
-        padding: '10px 14px', fontSize: 13, color: t.danger, marginBottom: 12, flexShrink: 0 }}>{err}</div>}
+        padding: '10px 14px', fontSize: 13, color: t.danger, marginBottom: 10, flexShrink: 0 }}>{err}</div>}
 
       {card && note && model && (
         // flex:1 + minHeight:0 is what actually lets this claim the leftover
         // space instead of just sizing to its own content — minHeight:0
         // overrides a flex item's default "never shrink below content size",
-        // which is what was fighting the fixed vh cap before.
+        // which is what was fighting the fixed vh cap before. This is the
+        // hero of the screen — everything above/below it is trimmed
+        // specifically so this gets the majority of the viewport.
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
           ...(card.flag ? { borderLeft: `4px solid ${FLAG_COLORS[card.flag]}`, borderRadius: 4, paddingLeft: 10 } : {}) }}>
           <CardRenderer card={card} note={note} model={model} resolvedMedia={resolvedMedia} revealed={revealed} fill />
         </div>
       )}
 
-      <div style={{ marginTop: 16, flexShrink: 0 }}>
+      <div style={{ marginTop: 10, flexShrink: 0 }}>
         {!revealed ? (
           // Large single tap target — the primary touch action (Phase L4).
-          <button onClick={() => setRevealed(true)} style={{ ...B(t.accent), width: '100%', padding: '16px 10px', fontSize: 15 }}>
+          <button onClick={() => setRevealed(true)} className="mb-ss-showanswer" style={{
+            width: '100%', background: t.accent, color: '#fff', border: 'none', borderRadius: 12,
+            padding: '14px 10px', fontSize: 14.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
             Show Answer
           </button>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-            {[
-              ['again', 'Again', '#dc2626'],
-              ['hard', 'Hard', '#d97706'],
-              ['good', 'Good', '#16a34a'],
-              ['easy', 'Easy', '#2563eb'],
-            ].map(([key, label, color]) => (
-              <button key={key} onClick={() => rate(key)} disabled={!!rating}
-                style={{ ...B(color), opacity: (rating && rating !== key) ? 0.5 : 1,
-                  display: 'flex', flexDirection: 'column', gap: 4, minHeight: 58 }}>
-                <span>{label}</span>
-                <span style={{ fontSize: 11, fontWeight: 500, opacity: 0.9 }}>{intervals?.[key]?.label}</span>
+          // One cohesive rating strip — a shared rounded container with a
+          // hairline divider between segments, not four separately-rounded
+          // buttons with gaps between them. Name is the primary label;
+          // the interval sits underneath, smaller and dimmer — secondary
+          // information, per the brief.
+          <div style={{ display: 'flex', borderRadius: 12, overflow: 'hidden', boxShadow: `0 1px 3px ${t.shadow}` }}>
+            {RATINGS.map(([key, label, tokenKey], i) => (
+              <button key={key} className="mb-ss-ratebtn" onClick={() => rate(key)} disabled={!!rating}
+                style={{
+                  flex: 1, minHeight: 54, padding: '10px 6px',
+                  // A touch softer than the raw token — blended toward the
+                  // card's own surface rather than a hardcoded new hex, so
+                  // it stays theme-correct (and restrained) in both modes.
+                  background: `color-mix(in srgb, ${t[tokenKey]} 90%, ${t.surface})`,
+                  color: '#fff', border: 'none', cursor: 'pointer', fontFamily: 'Inter,sans-serif',
+                  borderRight: i < RATINGS.length - 1 ? '1px solid rgba(255,255,255,0.22)' : 'none',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
+                  opacity: (rating && rating !== key) ? 0.5 : 1,
+                }}>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>{label}</span>
+                <span style={{ fontSize: 10.5, fontWeight: 500, opacity: 0.78 }}>{intervals?.[key]?.label}</span>
               </button>
             ))}
           </div>
