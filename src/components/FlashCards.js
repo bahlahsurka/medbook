@@ -85,6 +85,7 @@ export default function FlashCards({ userId, userSystems }) {
   const [area, setArea] = useState('own');
   const [importedSub, setImportedSub] = useState(null); // { mode: 'study'|'browse', deck } | null
   const [favoritesStudyDeck, setFavoritesStudyDeck] = useState(null); // FAVORITES_DECK-shaped object, or null
+  const [favoritesKey, setFavoritesKey] = useState(0); // bump to refresh FavoritesScreen after a Study Favorites round trip
   const [showImportWizard, setShowImportWizard] = useState(false);
   const [deckBrowserKey, setDeckBrowserKey] = useState(0); // bump to force DeckBrowser to reload after an import completes
   const [cards, setCards]     = useState([]);
@@ -322,15 +323,18 @@ export default function FlashCards({ userId, userSystems }) {
     .mb-fc-fade { animation: medbook-fade-in ${MOTION.normal} ${MOTION.ease}; }
   `;
 
-  if (loading) return (
-    <div style={{ textAlign:'center', paddingTop:60, color:t.text4, fontFamily:'Inter,sans-serif', fontSize:FONT.size.sm }}>
-      Loading flashcards…
-    </div>
-  );
-
   // ── Imported Decks area ─────────────────────────────────────────────
   // A tab inside Flashcards, not a new Sidebar section. Everything below
   // this branch is the pre-existing "My Cards" feature, untouched.
+  //
+  // Batch 6: `loading` only ever tracks the My Cards (`cards` table) fetch
+  // below — Imported Decks and Favorites load their own data independently
+  // and don't read `cards`/`loading` at all. This used to gate the whole
+  // component before the area switch, so opening Imported Decks or
+  // Favorites sat behind "Loading flashcards…" until My Cards' own fetch
+  // finished (or hung) — an unnecessary loading state for screens that
+  // had nothing to do with what was loading. The check now lives after
+  // both of those branches, so it only ever applies to the 'own' area.
   if (area === 'imported') {
     // Batch 5 fix: DeckBrowser stays mounted the whole time the user is in
     // the Imported Decks area — Study/Browse/Stats render as SIBLINGS on
@@ -390,18 +394,37 @@ export default function FlashCards({ userId, userSystems }) {
   // action (the same virtual deck, with onlyCardId narrowing the queue to
   // just that one card) — one study-session code path either way, not two.
   if (area === 'favorites') {
-    if (favoritesStudyDeck) return (
-      <StudySession deck={favoritesStudyDeck} userId={userId} onExit={() => setFavoritesStudyDeck(null)} />
-    );
+    // Batch 6: same fix as Imported Decks (Batch 5) — FavoritesScreen stays
+    // mounted across a Study Favorites round trip instead of being replaced
+    // by a differently-shaped root, so exiting a study session doesn't
+    // force a full refetch + "Loading…" flash + lost search/filter state
+    // just to get back to a list that (usually) hasn't changed. It DOES
+    // still refetch once specifically on return from Study — not blindly
+    // trusting staleness — via favoritesKey, since favoriting/unfavoriting
+    // cards during that session is a real way the list itself changes;
+    // this is a deliberate one-time refresh, not the old unconditional
+    // remount-on-every-transition.
     return (
-      <div style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
-        <AreaTabs t={t} area={area} setArea={setArea} />
-        <FavoritesScreen userId={userId}
-          onStudy={() => setFavoritesStudyDeck(FAVORITES_DECK)}
-          onStudyOne={(card) => setFavoritesStudyDeck({ ...FAVORITES_DECK, onlyCardId: card.id })} />
-      </div>
+      <>
+        {favoritesStudyDeck && (
+          <StudySession deck={favoritesStudyDeck} userId={userId}
+            onExit={() => { setFavoritesStudyDeck(null); setFavoritesKey(k => k + 1); }} />
+        )}
+        <div style={{ display: favoritesStudyDeck ? 'none' : 'block', maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
+          <AreaTabs t={t} area={area} setArea={setArea} />
+          <FavoritesScreen key={favoritesKey} userId={userId}
+            onStudy={() => setFavoritesStudyDeck(FAVORITES_DECK)}
+            onStudyOne={(card) => setFavoritesStudyDeck({ ...FAVORITES_DECK, onlyCardId: card.id })} />
+        </div>
+      </>
     );
   }
+
+  if (loading) return (
+    <div style={{ textAlign:'center', paddingTop:60, color:t.text4, fontFamily:'Inter,sans-serif', fontSize:FONT.size.sm }}>
+      Loading flashcards…
+    </div>
+  );
 
   // ── Study mode ────────────────────────────────────────────────────────
   if (view === 'study' || view === 'studyOne') {
