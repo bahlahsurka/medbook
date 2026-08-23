@@ -14,7 +14,7 @@ import * as api from '../../lib/importedDecks/api';
 import * as favoritesApi from '../../lib/importedDecks/favorites';
 import { FLAG_COLORS } from '../../lib/importedDecks/flags';
 import { IconStar, IconPlay, IconSearch } from '../../lib/icons';
-import CardRenderer from './CardRenderer';
+import CardRenderer, { cardMediaFilenames } from './CardRenderer';
 
 /** Mirrors BrowseDeck.js's own stripHtml — a one-line pure helper, cheaper
  *  to duplicate than to thread through a shared-utils import for. */
@@ -260,6 +260,24 @@ function FavoritePreviewModal({ t, card, onClose }) {
   const { note, model } = noteModel;
   const [revealed, setRevealed] = useState(false);
 
+  // Batch 6 fix: same bug as BrowseDeck's own CardPreviewModal — this used
+  // to hardcode resolvedMedia={{}}, so any favorited card with an image or
+  // audio reference always showed the "missing media" placeholder here even
+  // when it plays/displays fine in the real study screen. Scoped by this
+  // card's own deck_id (favorites can span multiple decks — see
+  // StudySession's identical comment on why the per-card id matters, not
+  // some single static deck).
+  const [resolvedMedia, setResolvedMedia] = useState({});
+  useEffect(() => {
+    if (!note || !model) return;
+    let cancelled = false;
+    const filenames = cardMediaFilenames({ card, note, model });
+    if (!filenames.length) { setResolvedMedia({}); return; }
+    api.resolveMedia(card.deck_id, filenames).then(map => { if (!cancelled) setResolvedMedia(map); })
+      .catch(() => { if (!cancelled) setResolvedMedia({}); });
+    return () => { cancelled = true; };
+  }, [card, note, model]);
+
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: t.overlay, zIndex: 250,
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
@@ -276,7 +294,7 @@ function FavoritePreviewModal({ t, card, onClose }) {
           <div style={{ fontSize: 11, color: t.text4, marginBottom: 10 }}>{deckPath(card.deck.full_name)}</div>
         )}
         {note && model
-          ? <CardRenderer card={card} note={note} model={model} resolvedMedia={{}} revealed={revealed} />
+          ? <CardRenderer card={card} note={note} model={model} resolvedMedia={resolvedMedia} revealed={revealed} />
           : <div style={{ padding: '20px 0', textAlign: 'center', color: t.text4, fontSize: 13 }}>Loading…</div>}
         <button onClick={() => setRevealed(p => !p)} style={{ marginTop: 12, width: '100%',
           background: t.accent, color: '#fff', border: 'none', borderRadius: 8, padding: '10px 16px',

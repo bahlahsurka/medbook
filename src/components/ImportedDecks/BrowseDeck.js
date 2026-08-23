@@ -11,7 +11,7 @@ import { useTheme } from '../../lib/theme';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import * as api from '../../lib/importedDecks/api';
 import { FLAGS, FLAG_COLORS, FLAG_NAMES } from '../../lib/importedDecks/flags';
-import CardRenderer from './CardRenderer';
+import CardRenderer, { cardMediaFilenames } from './CardRenderer';
 
 const PAGE_SIZE = 30;
 const STATES = ['new', 'learning', 'review', 'suspended']; // Phase K's required state filters
@@ -178,6 +178,26 @@ function CardPreviewModal({ t, card, onClose, onFlagChange }) {
     return () => { cancelled = true; };
   }, [card.note_id]);
   const { note, model } = noteModel;
+
+  // Batch 6 fix: this preview used to hardcode resolvedMedia={{}}, so any
+  // card with an image or audio reference always rendered the "missing
+  // media" placeholder here even when the same card's media resolves fine
+  // in the real study screen — same resolveMedia() call StudySession makes,
+  // scoped by this card's own deck_id (see StudySession's own comment on
+  // why: the endpoint walks up to the card's real root deck regardless of
+  // which id it's given, so this is a no-op for an ordinary single-deck
+  // browse and the actually-correct scoping for any future caller where it
+  // isn't).
+  const [resolvedMedia, setResolvedMedia] = useState({});
+  useEffect(() => {
+    if (!note || !model) return;
+    let cancelled = false;
+    const filenames = cardMediaFilenames({ card, note, model });
+    if (!filenames.length) { setResolvedMedia({}); return; }
+    api.resolveMedia(card.deck_id, filenames).then(map => { if (!cancelled) setResolvedMedia(map); })
+      .catch(() => { if (!cancelled) setResolvedMedia({}); });
+    return () => { cancelled = true; };
+  }, [card, note, model]);
   const [revealed, setRevealed] = useState(false);
   const [flagBusy, setFlagBusy] = useState(false);
   const toggleFlag = async (f) => {
@@ -210,7 +230,7 @@ function CardPreviewModal({ t, card, onClose, onFlagChange }) {
           ))}
         </div>
         {note && model
-          ? <CardRenderer card={card} note={note} model={model} resolvedMedia={{}} revealed={revealed} />
+          ? <CardRenderer card={card} note={note} model={model} resolvedMedia={resolvedMedia} revealed={revealed} />
           : <div style={{ padding: '20px 0', textAlign: 'center', color: t.text4, fontSize: 13 }}>Loading…</div>}
         <button onClick={() => setRevealed(p => !p)} style={{ marginTop: 12, width: '100%',
           background: t.accent, color: '#fff', border: 'none', borderRadius: 8, padding: '10px 16px',
