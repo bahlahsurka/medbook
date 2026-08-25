@@ -10,6 +10,7 @@ import StudySession from './ImportedDecks/StudySession';
 import BrowseDeck from './ImportedDecks/BrowseDeck';
 import ImportedStats from './ImportedDecks/ImportedStats';
 import FavoritesScreen from './ImportedDecks/FavoritesScreen';
+import { loadActiveStudy, saveActiveStudy, clearActiveStudy } from '../lib/importedDecks/studySessionStore';
 
 // Sentinel key for cards with no system assigned (legacy cards, or anything
 // created before folders existed). Never stored in the DB as this string —
@@ -82,9 +83,41 @@ function Btn({ t, tone='primary', icon, children, ...props }) {
 
 export default function FlashCards({ userId, userSystems }) {
   const { t } = useTheme();
-  const [area, setArea] = useState('own');
-  const [importedSub, setImportedSub] = useState(null); // { mode: 'study'|'browse', deck } | null
-  const [favoritesStudyDeck, setFavoritesStudyDeck] = useState(null); // FAVORITES_DECK-shaped object, or null
+
+  // Critical Bug Fix Batch 1 — "no automatic navigation to Flashcards
+  // home". A page reload (whether the user triggered it or a mobile
+  // browser did, discarding a backgrounded tab) used to always boot this
+  // component to the 'own' folders view, no matter what the user was
+  // actually doing — there was zero persistence above StudySession itself
+  // of WHICH deck/area was even active. That's the other half of "the app
+  // loses my study session": even a perfectly resumable StudySession (see
+  // that component's own header comment) is useless if nothing ever routes
+  // back to it automatically.
+  //
+  // Read once, synchronously, before the first paint (a lazy useState
+  // initializer, not an effect) so a restored session renders immediately
+  // — no flash of the folders homepage first. Only ever points at an
+  // in-progress STUDY session (imported deck or Favorites): Browse/Stats
+  // have no meaningful position to lose, and restoring into those too
+  // would be a bigger behavior change than this bug fix calls for.
+  const [restoredStudy] = useState(() => loadActiveStudy(userId));
+  const [area, setArea] = useState(() => restoredStudy?.area || 'own');
+  // { mode: 'study'|'browse', deck } | null — a restored pointer only ever
+  // carries enough to reconstruct the minimal deck shape StudySession
+  // itself actually reads (id + display_name; see that component). It
+  // deliberately does NOT refetch the real deck row here: that would be
+  // an extra request on every single reload just to repaint a name that's
+  // about to be replaced by StudySession's own fresh data anyway.
+  const [importedSub, setImportedSub] = useState(() => (
+    restoredStudy?.area === 'imported' && restoredStudy.mode === 'study'
+      ? { mode: 'study', deck: { id: restoredStudy.deckId, display_name: restoredStudy.displayName || '' } }
+      : null
+  ));
+  const [favoritesStudyDeck, setFavoritesStudyDeck] = useState(() => (
+    restoredStudy?.area === 'favorites'
+      ? { ...FAVORITES_DECK, ...(restoredStudy.onlyCardId ? { onlyCardId: restoredStudy.onlyCardId } : {}) }
+      : null
+  )); // FAVORITES_DECK-shaped object, or null
   const [favoritesKey, setFavoritesKey] = useState(0); // bump to refresh FavoritesScreen after a Study Favorites round trip
   const [showImportWizard, setShowImportWizard] = useState(false);
   const [deckBrowserKey, setDeckBrowserKey] = useState(0); // bump to force DeckBrowser to reload after an import completes
@@ -360,10 +393,14 @@ export default function FlashCards({ userId, userSystems }) {
     // all, and any scroll position inside the tree survives a study trip
     // for free.
     const subOpen = !!importedSub;
+    // Exiting Study clears the active-study pointer (Browse/Stats never
+    // set one in the first place, so clearing on their exit too is just a
+    // harmless no-op, not worth a separate exit handler).
+    const exitImportedSub = () => { clearActiveStudy(userId); setImportedSub(null); };
     return (
       <>
         {importedSub?.mode === 'study' && (
-          <StudySession deck={importedSub.deck} userId={userId} onExit={() => setImportedSub(null)} />
+          <StudySession deck={importedSub.deck} userId={userId} onExit={exitImportedSub} />
         )}
         {importedSub?.mode === 'browse' && (
           <BrowseDeck deck={importedSub.deck} userId={userId} onExit={() => setImportedSub(null)} />
@@ -374,7 +411,10 @@ export default function FlashCards({ userId, userSystems }) {
         <div style={{ display: subOpen ? 'none' : 'block', maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
           <AreaTabs t={t} area={area} setArea={setArea} />
           <DeckBrowser key={deckBrowserKey} userId={userId}
-            onStudy={(deck) => setImportedSub({ mode: 'study', deck })}
+            onStudy={(deck) => {
+              saveActiveStudy(userId, { area: 'imported', mode: 'study', deckId: deck.id, displayName: deck.display_name });
+              setImportedSub({ mode: 'study', deck });
+            }}
             onBrowse={(deck) => setImportedSub({ mode: 'browse', deck })}
             onImportClick={() => setShowImportWizard(true)}
             onStatsClick={() => setImportedSub({ mode: 'stats' })} />
@@ -408,13 +448,19 @@ export default function FlashCards({ userId, userSystems }) {
       <>
         {favoritesStudyDeck && (
           <StudySession deck={favoritesStudyDeck} userId={userId}
-            onExit={() => { setFavoritesStudyDeck(null); setFavoritesKey(k => k + 1); }} />
+            onExit={() => { clearActiveStudy(userId); setFavoritesStudyDeck(null); setFavoritesKey(k => k + 1); }} />
         )}
         <div style={{ display: favoritesStudyDeck ? 'none' : 'block', maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
           <AreaTabs t={t} area={area} setArea={setArea} />
           <FavoritesScreen key={favoritesKey} userId={userId}
-            onStudy={() => setFavoritesStudyDeck(FAVORITES_DECK)}
-            onStudyOne={(card) => setFavoritesStudyDeck({ ...FAVORITES_DECK, onlyCardId: card.id })} />
+            onStudy={() => {
+              saveActiveStudy(userId, { area: 'favorites' });
+              setFavoritesStudyDeck(FAVORITES_DECK);
+            }}
+            onStudyOne={(card) => {
+              saveActiveStudy(userId, { area: 'favorites', onlyCardId: card.id });
+              setFavoritesStudyDeck({ ...FAVORITES_DECK, onlyCardId: card.id });
+            }} />
         </div>
       </>
     );

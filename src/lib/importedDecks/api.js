@@ -409,6 +409,39 @@ export async function getSessionCards(deckIds, { limit = 50, userId } = {}) {
 }
 
 /**
+ * Critical Bug Fix Batch 1 — the other half of resumable study sessions.
+ * getSessionCards() (above) and favorites.getFavoriteCards() are how a
+ * session's card SET gets chosen, once, when a session is first created;
+ * this is how StudySession re-fetches CURRENT row data for an already-
+ * frozen set of ids on resume, without ever re-running either of those
+ * queries (which aren't stable across repeated calls — see
+ * studySessionStore.js's own comment for why that instability is the root
+ * cause this whole mechanism exists to route around).
+ *
+ * Plain `imported_cards` rows, not a joined/enriched shape — StudySession
+ * itself never reads anything beyond the base row (id/deck_id/note_id/
+ * flag/state/scheduling fields); the note/model fetch and media resolution
+ * are already separate, per-card, keyed off note_id, same as any other
+ * session. RLS on imported_cards is already scoped to auth.uid()=user_id,
+ * so this naturally only ever returns the caller's own cards regardless of
+ * which deck(s) they originally came from — exactly what a resumed Study
+ * Favorites session (cards from many different decks) needs, with no
+ * special-casing here.
+ *
+ * Returns rows in NO particular order — the caller re-sorts them back into
+ * the persisted id order (a card that no longer exists just won't be in
+ * the result, which the caller drops from the resumed queue rather than
+ * erroring on).
+ */
+export async function getCardsByIds(cardIds) {
+  if (!cardIds?.length) return [];
+  if (MOCK_MODE) return mock.cards.filter(c => cardIds.includes(c.id));
+  const { data, error } = await supabase.from('imported_cards').select('*').in('id', cardIds);
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+/**
  * Set (or clear, with 0) a card's flag — Anki's 7-color flag system,
  * SUPABASE_MIGRATION_STUDY_CONTROLS.sql. Independent of rating/scheduling:
  * flagging a card never touches state/due_at/review_count, so unlike
@@ -431,10 +464,30 @@ export async function setCardFlag(cardId, flag) {
   return data;
 }
 
-/** Persist a rating via the existing scheduler — no interval math here. */
+// Critical Bug Fix Batch 2 — the exact scheduling fields a rating can
+// change, and therefore the exact fields Previous needs to snapshot
+// beforehand and restore on undo. Shared by rateCard (what it patches) and
+// StudySession (what it captures as `previousState` before calling
+// rateCard, and what it hands back to unrateCard). One list, not
+// duplicated between the two, so a future scheduler field can't be added
+// to one side and silently forgotten on the other.
+export const SCHEDULING_FIELDS = ['state', 'due_at', 'interval_days', 'ease_factor', 'review_count', 'lapse_count', 'last_reviewed_at'];
+
+/**
+ * Persist a rating via the existing scheduler — no interval math here.
+ *
+ * Returns `{ card, logInsert }`, not just the card row (Critical Bug Fix
+ * Batch 2) — `logInsert` is the imported_review_log insert's own promise,
+ * still fire-and-forget as far as THIS rating is concerned (nothing here
+ * awaits it, so rating a card is exactly as fast as before), but exposed
+ * so a same-session Previous can await it before deleting that specific
+ * log row — undoing a rating whose log insert hasn't landed yet would
+ * either delete nothing (leaving a false review event behind) or race the
+ * insert outright. See unrateCard()'s own comment.
+ */
 export async function rateCard(card, rating) {
   const patch = scheduler.calculateNextReview(card, rating);
-  if (MOCK_MODE) return { ...card, ...patch };
+  if (MOCK_MODE) return { card: { ...card, ...patch }, logInsert: Promise.resolve() };
   const { data, error } = await supabase.from('imported_cards')
     .update(patch).eq('id', card.id).select().single();
   if (error) throw new Error(error.message);
@@ -465,7 +518,7 @@ export async function rateCard(card, rating) {
   // richer before/after fields populated from data rateCard() already has
   // in hand (the patch this function just computed, and the card's own
   // pre-update values).
-  supabase.from('imported_review_log').insert({
+  const logInsert = supabase.from('imported_review_log').insert({
     user_id: card.user_id, card_id: card.id, rating,
     prev_state: card.state, prev_interval_days: card.interval_days ?? 0,
     new_interval_days: patch.interval_days, next_due_at: patch.due_at,
@@ -476,6 +529,57 @@ export async function rateCard(card, rating) {
       console.warn('[rateCard] imported_review_log insert failed', logError.message);
     }
   });
+  return { card: data, logInsert };
+}
+
+/**
+ * Critical Bug Fix Batch 2 — reverses ONE specific rating from earlier in
+ * the CURRENT session (what Previous needs: not "just move the index
+ * back," but "restore the card's scheduling state to what it was before
+ * its most recent current-session rating"). `previousState` is the exact
+ * pre-rating snapshot the caller captured client-side before the original
+ * rateCard() call — restoring it is a plain field-for-field UPDATE, not a
+ * recomputation, so this can never itself produce a "wrong" interval:
+ * whatever the row looked like before is exactly what it looks like after.
+ *
+ * `ratedAtIso` is the original rating's own `last_reviewed_at` timestamp
+ * (what rateCard stamped as imported_review_log.reviewed_at) — used as a
+ * precise natural key to delete ONLY that one log row, never a broader
+ * card_id-only match that could reach into legitimate review history from
+ * a previous day or a previous session ("older legitimate review history
+ * must remain untouched" — a session-scoped delete-by-timestamp is what
+ * makes that true by construction, not by convention). await the
+ * caller-supplied `logInsert` promise BEFORE deleting — see rateCard's own
+ * comment on why deleting before that insert lands would be a race, not a
+ * safety margin.
+ *
+ * The card row restore is the half that MUST succeed for correctness (an
+ * undone rating that leaves the wrong interval behind is the exact bug
+ * this batch exists to fix) — it throws on failure, same as rateCard.
+ * The log-row cleanup is best-effort, same fire-and-forget philosophy as
+ * rateCard's own log insert: a failure here means Stats may still show a
+ * rating that was actually undone until it's retried, not that the card's
+ * actual scheduling is wrong.
+ */
+export async function unrateCard(cardId, deckId, previousState, ratedAtIso, logInsert) {
+  if (logInsert) { try { await logInsert; } catch { /* rateCard already reports insert failures itself */ } }
+  if (MOCK_MODE) {
+    const existing = mock.cards.find(c => c.id === cardId);
+    if (existing) Object.assign(existing, previousState);
+    return { ...existing, ...previousState, id: cardId };
+  }
+  const { data, error } = await supabase.from('imported_cards')
+    .update(previousState).eq('id', cardId).select().single();
+  if (error) throw new Error(error.message);
+  refreshDeckCountsAfterRating(deckId).catch(() => {});
+  if (ratedAtIso) {
+    const { error: logError } = await supabase.from('imported_review_log')
+      .delete().eq('card_id', cardId).eq('reviewed_at', ratedAtIso);
+    if (logError && process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line no-console
+      console.warn('[unrateCard] review_log cleanup failed (card row was still correctly restored)', logError.message);
+    }
+  }
   return data;
 }
 
