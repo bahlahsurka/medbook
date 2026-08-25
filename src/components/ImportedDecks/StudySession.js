@@ -5,7 +5,26 @@
 // ordering, no manual interval math — every number shown comes from
 // scheduler.previewIntervals() / rateCard() (which itself calls
 // scheduler.calculateNextReview()).
-
+//
+// ── Critical Bug Fix Batch 1 — resumable sessions ──────────────────────
+// Root cause of "reopening a deck shuffles the cards and starts over":
+// this component used to call api.getSessionCards()/getFavoriteCards()
+// fresh on every mount, and only sanity-checked a saved position by
+// ARRAY LENGTH (`saved.total === cards.length`) before trusting it — never
+// verifying the freshly-fetched cards were even the SAME cards. But
+// getSessionCards() isn't stable across repeated calls: its "new" portion
+// has no ORDER BY, and its "due" portion depends on the current wall-clock
+// time and today's already-studied counts, both of which drift between
+// calls. So a saved idx could — and did — end up pointing at a different
+// card than the one the user was actually looking at, on ANY remount
+// (reopening the deck, or a mobile browser discarding/recreating the tab
+// on backgrounding — see studySessionStore.js's own comment for why that
+// specific case matters and why localStorage, not sessionStorage, is used).
+//
+// Fix: once a session is created, its card ORDER is frozen (persisted as
+// an id list, via studySessionStore.js) and never rebuilt on remount.
+// Resuming re-fetches CURRENT row data for exactly those ids
+// (api.getCardsByIds) instead of re-running the query that chose them.
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTheme } from '../../lib/theme';
@@ -16,6 +35,7 @@ import { useReviewKeyboard } from '../../lib/useReviewKeyboard';
 import { FLAGS, FLAG_COLORS, FLAG_NAMES } from '../../lib/importedDecks/flags';
 import { IconChevronLeft, IconPause, IconX, IconMaximize, IconMinimize, IconSearch, IconStar } from '../../lib/icons';
 import CardRenderer, { cardMediaFilenames, cardSideImages } from './CardRenderer';
+import { deckKeyFor, newSessionId, loadSession, saveSession, clearSession } from '../../lib/importedDecks/studySessionStore';
 
 // Rating strip — name first, interval (t.tokenKey) secondary. Theme tokens,
 // not hardcoded hex: identical to the old hardcoded values in light mode
@@ -28,19 +48,6 @@ const RATINGS = [
   ['good', 'Good', 'ok'],
   ['easy', 'Easy', 'accent'],
 ];
-
-const SESSION_KEY_PREFIX = 'medbook_imported_session_';
-
-function loadSaved(deckId) {
-  try { return JSON.parse(sessionStorage.getItem(SESSION_KEY_PREFIX + deckId) || 'null'); }
-  catch { return null; }
-}
-function saveSession(deckId, state) {
-  try { sessionStorage.setItem(SESSION_KEY_PREFIX + deckId, JSON.stringify(state)); } catch {}
-}
-function clearSession(deckId) {
-  try { sessionStorage.removeItem(SESSION_KEY_PREFIX + deckId); } catch {}
-}
 
 export default function StudySession({ deck, userId, onExit }) {
   const { t } = useTheme();
@@ -89,10 +96,22 @@ export default function StudySession({ deck, userId, onExit }) {
   const [headerSlot, setHeaderSlot] = useState(null);
   useEffect(() => { setHeaderSlot(document.getElementById('mb-study-toolbar-slot')); }, []);
 
-  // Load session — recover a saved position for this deck if one exists
-  // (Phase L3: "if the user leaves and returns while a session is active,
-  // recover the session state"), otherwise build a fresh queue.
-  //
+  // deck.id/isFavorites/onlyCardId together identify WHICH study target
+  // this is — stable for the component's whole mount (a different target
+  // means a different `deck` prop, which unmounts and remounts this
+  // component entirely, per FlashCards.js's own key/prop wiring). Plain
+  // const, not memoized: deckKeyFor() is a cheap string computation, not
+  // worth useMemo's own bookkeeping.
+  const deckKey = deckKeyFor(deck);
+
+  // Any session previously saved for this exact target — read ONCE, at
+  // mount, via a lazy useState initializer (not an effect: this has to be
+  // known synchronously on the very first render, so the resume prompt
+  // below can show immediately with no loading flash first). It never
+  // changes for the life of this mount, which is also why it's safe to
+  // reference from the effect below without listing it as a dependency —
+  // same reasoning as DeckBrowser's own mount-time-only effect.
+  const [pendingResume] = useState(() => loadSession(userId, deckKey));
   // Batch 4 — `deck.isFavorites` is how "Study Favorites" reuses this exact
   // component instead of a second study-session implementation: a virtual
   // deck-shaped object (see FAVORITES_DECK in FlashCards.js), not a real
@@ -103,31 +122,128 @@ export default function StudySession({ deck, userId, onExit }) {
   // favorited card's own "Study" action, filters that same fetch down to
   // one card — still the real queue/advance/rate machinery below, not a
   // special-cased single-card mode.
+  //
+  // `resumeChoice` starts already resolved (no prompt) UNLESS there's
+  // actual progress worth asking the user about — a saved session that
+  // never got past card 1 has nothing meaningful to choose between
+  // "resume" and "start new" for, so it's just silently reused/extended
+  // rather than interrupting the user with a pointless prompt every time
+  // Study is opened. See the render-time early return below for the
+  // prompt itself.
+  const [resumeChoice, setResumeChoice] = useState(() => (
+    pendingResume && pendingResume.idx > 0 && Array.isArray(pendingResume.cardIds) && pendingResume.cardIds.length
+      ? null
+      : (pendingResume ? 'resume' : 'new')
+  ));
+  const sessionIdRef = useRef(null);
+  const createdAtRef = useRef(null);
+
+  // Load session — RESUME re-fetches current row data for the FROZEN set
+  // of card ids a previous session already chose (never re-running
+  // getSessionCards/getFavoriteCards, which is exactly what was producing
+  // a different card set on every remount — see this file's own header
+  // comment). NEW builds a fresh queue exactly as before and immediately
+  // establishes a session identity for it, so the very next remount — even
+  // one caused by a mobile browser discarding the tab mid-session — has
+  // something to resume into instead of starting from nothing again.
   useEffect(() => {
+    if (resumeChoice === null) return; // waiting on the user's resume/start-new choice
     let cancelled = false;
     (async () => {
       setErr('');
       try {
-        const saved = loadSaved(deck.id);
-        const cards = deck.isFavorites
-          ? (await favoritesApi.getFavoriteCards(userId)).filter(c => !deck.onlyCardId || c.id === deck.onlyCardId)
-          : await api.getSessionCards([deck.id], { limit: 50, userId });
-        if (cancelled) return;
-        setQueue(cards);
-        // Only trust a saved index if the queue is still the same length —
-        // a cheap sanity check against a queue that's since changed server-side.
-        setIdx(saved && saved.total === cards.length ? Math.min(saved.idx, cards.length - 1) : 0);
+        if (resumeChoice === 'resume' && pendingResume) {
+          sessionIdRef.current = pendingResume.sessionId || newSessionId();
+          createdAtRef.current = pendingResume.createdAt || pendingResume.lastActiveAt || new Date().toISOString();
+          const rows = await api.getCardsByIds(pendingResume.cardIds);
+          if (cancelled) return;
+          const byId = new Map(rows.map(r => [r.id, r]));
+          // Reassemble in the FROZEN order, dropping any id that no longer
+          // exists (deleted/reset since) rather than erroring on it.
+          const ordered = pendingResume.cardIds.map(id => byId.get(id)).filter(Boolean);
+          setQueue(ordered);
+          let restoredIdx = Math.min(pendingResume.idx || 0, Math.max(0, ordered.length - 1));
+          // Duplicate-review guard — see the file header comment and
+          // rate()'s own doc comment for the exact race this covers: a
+          // rating whose write reached the server but whose response
+          // never reached the client before an interruption. Detected via
+          // last_reviewed_at moving past this session's own last
+          // confirmed activity — not a new column, just the same field
+          // getSessionCards' daily-cap query already reads.
+          const atSavedIdx = ordered[restoredIdx];
+          if (atSavedIdx?.last_reviewed_at && pendingResume.lastActiveAt
+              && new Date(atSavedIdx.last_reviewed_at) > new Date(pendingResume.lastActiveAt)) {
+            restoredIdx += 1;
+          }
+          setIdx(restoredIdx);
+          setPaused(!!pendingResume.paused);
+        } else {
+          sessionIdRef.current = newSessionId();
+          createdAtRef.current = new Date().toISOString();
+          const cards = deck.isFavorites
+            ? (await favoritesApi.getFavoriteCards(userId)).filter(c => !deck.onlyCardId || c.id === deck.onlyCardId)
+            : await api.getSessionCards([deck.id], { limit: 50, userId });
+          if (cancelled) return;
+          setQueue(cards);
+          setIdx(0);
+        }
       } catch (e) {
         if (!cancelled) { setErr(e.message || 'Could not load session cards'); setQueue([]); }
       }
     })();
     return () => { cancelled = true; };
-  }, [deck.id, deck.isFavorites, deck.onlyCardId, userId]);
+    // `pendingResume` is a mount-stable lazy-init value (see above) —
+    // intentionally not listed as a dependency, same reasoning as
+    // DeckBrowser's own mount-time-only effect.
+  }, [deck.id, deck.isFavorites, deck.onlyCardId, userId, resumeChoice]);
 
+  // Persist proactively on every meaningful change — card advances, a
+  // rating lands, pause/resume — rather than trying to catch a single
+  // "leaving" event. Mobile browsers don't reliably fire beforeunload at
+  // all, which is exactly why this can't be the only mechanism (see
+  // pagehide/visibilitychange handling further down for the belt-and-
+  // suspenders flush on the way out). Pure localStorage writes — no
+  // network request here, so there's no backend "request storm" risk from
+  // writing this often.
+  // Mirrors the latest snapshot into a ref (not just localStorage) so the
+  // pagehide/visibilitychange listener below can re-flush the exact same
+  // payload synchronously, without needing to re-subscribe those listeners
+  // on every idx/queue/paused change.
+  const sessionSnapshotRef = useRef(null);
   useEffect(() => {
-    if (queue === null || !queue.length) return;
-    saveSession(deck.id, { idx, total: queue.length });
-  }, [deck.id, idx, queue]);
+    if (queue === null || !queue.length || !sessionIdRef.current) { sessionSnapshotRef.current = null; return; }
+    const snapshot = {
+      sessionId: sessionIdRef.current,
+      deckId: deck.id,
+      cardIds: queue.map(c => c.id),
+      idx,
+      paused,
+      status: 'active',
+      createdAt: createdAtRef.current || new Date().toISOString(),
+    };
+    sessionSnapshotRef.current = snapshot;
+    saveSession(userId, deckKey, snapshot);
+  }, [userId, deckKey, deck.id, idx, queue, paused]);
+
+  // Belt-and-suspenders flush for exactly the mobile lifecycle events this
+  // batch is about — pagehide fires more reliably than visibilitychange on
+  // some mobile browsers when a PWA is swiped away, so both are handled
+  // (same reasoning lib/useStudySession.js's own heartbeat already
+  // documents for the App-level "time spent studying" tracker). In
+  // practice the effect above already writes on every relevant state
+  // change before any of these can fire — this is defensive insurance
+  // against a delayed/batched write racing an interruption, not the
+  // primary mechanism.
+  useEffect(() => {
+    const flush = () => { if (sessionSnapshotRef.current) saveSession(userId, deckKey, sessionSnapshotRef.current); };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flush(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', flush);
+    };
+  }, [userId, deckKey]);
 
   const card = queue?.[idx];
 
@@ -184,6 +300,17 @@ export default function StudySession({ deck, userId, onExit }) {
     setIdx(p => p + 1);
   }, []);
 
+  // Duplicate-review note: if the app is interrupted while api.rateCard's
+  // request is in flight — the write reaches the server, but the response
+  // never reaches this client — `idx` never advances locally (setQueue/
+  // advance below never run), so a naive resume would show this exact
+  // card again as if it were never rated, and a second rating would
+  // compound an interval that had already moved. The queue-loading effect
+  // above guards against exactly this on resume (comparing the card's
+  // last_reviewed_at against the session's last confirmed activity) — see
+  // its own comment. Nothing extra is needed here: this function doesn't
+  // know whether a future interruption will land mid-flight, only the
+  // resume path can detect that after the fact.
   const rate = async (label) => {
     if (!card || rating) return;
     const ratedIdx = idx;
@@ -237,8 +364,14 @@ export default function StudySession({ deck, userId, onExit }) {
     setRevealed(false);
   };
 
-  const exit = () => { clearSession(deck.id); onExit(); };
-  const finishedNormally = () => { clearSession(deck.id); };
+  // Exiting mid-session is a deliberate "leave for now", not "abandon my
+  // progress" — the persisted session is left in place (subject to its own
+  // 24h expiry) so a later "Study" click on this same deck offers to
+  // resume it, same as recovering from an actual interruption would. Only
+  // an actually-finished session (below) gets cleared: there's nothing
+  // left to resume into once every card's been seen.
+  const exit = () => { onExit(); };
+  const finishedNormally = () => { clearSession(userId, deckKey); };
 
   // Toggling the SAME flag again clears it (0) — same convention Anki
   // itself uses, so "flag this card red" and "unflag it" are the same
@@ -339,6 +472,29 @@ export default function StudySession({ deck, userId, onExit }) {
 
   const B = (bg, color = '#fff') => ({ background: bg, color, border: 'none', borderRadius: 10,
     padding: '14px 10px', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' });
+
+  // Explicit "Resume Study?" choice — shown only when there's real
+  // progress worth asking about (see resumeChoice's own init above). This
+  // is the one place "opening the same deck" is NOT allowed to silently
+  // mean "start a new session": the user picks, every time, rather than
+  // either always resuming (which would be surprising if they genuinely
+  // wanted a fresh pass) or always restarting (the bug this whole batch
+  // exists to fix).
+  if (resumeChoice === null) return (
+    <div style={{ maxWidth: 420, margin: '80px auto 0', textAlign: 'center', fontFamily: 'Inter,sans-serif' }}>
+      <div style={{ fontSize: 34, marginBottom: 14 }}>↩️</div>
+      <div style={{ fontSize: 16, fontWeight: 700, color: t.text, marginBottom: 6 }}>Resume Study?</div>
+      <div style={{ fontSize: 13, color: t.text3, marginBottom: 22 }}>
+        {deck.display_name} — card {pendingResume.idx + 1} of {pendingResume.cardIds.length}
+      </div>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+        <button onClick={() => setResumeChoice('resume')} style={B(t.accent)}>▶ Resume</button>
+        <button onClick={() => { clearSession(userId, deckKey); setResumeChoice('new'); }} style={B(t.surface3, t.text2)}>
+          Start New Session
+        </button>
+      </div>
+    </div>
+  );
 
   if (queue === null) return (
     <div style={{ textAlign: 'center', paddingTop: 60, color: t.text4, fontFamily: 'Inter,sans-serif' }}>

@@ -409,6 +409,39 @@ export async function getSessionCards(deckIds, { limit = 50, userId } = {}) {
 }
 
 /**
+ * Critical Bug Fix Batch 1 — the other half of resumable study sessions.
+ * getSessionCards() (above) and favorites.getFavoriteCards() are how a
+ * session's card SET gets chosen, once, when a session is first created;
+ * this is how StudySession re-fetches CURRENT row data for an already-
+ * frozen set of ids on resume, without ever re-running either of those
+ * queries (which aren't stable across repeated calls — see
+ * studySessionStore.js's own comment for why that instability is the root
+ * cause this whole mechanism exists to route around).
+ *
+ * Plain `imported_cards` rows, not a joined/enriched shape — StudySession
+ * itself never reads anything beyond the base row (id/deck_id/note_id/
+ * flag/state/scheduling fields); the note/model fetch and media resolution
+ * are already separate, per-card, keyed off note_id, same as any other
+ * session. RLS on imported_cards is already scoped to auth.uid()=user_id,
+ * so this naturally only ever returns the caller's own cards regardless of
+ * which deck(s) they originally came from — exactly what a resumed Study
+ * Favorites session (cards from many different decks) needs, with no
+ * special-casing here.
+ *
+ * Returns rows in NO particular order — the caller re-sorts them back into
+ * the persisted id order (a card that no longer exists just won't be in
+ * the result, which the caller drops from the resumed queue rather than
+ * erroring on).
+ */
+export async function getCardsByIds(cardIds) {
+  if (!cardIds?.length) return [];
+  if (MOCK_MODE) return mock.cards.filter(c => cardIds.includes(c.id));
+  const { data, error } = await supabase.from('imported_cards').select('*').in('id', cardIds);
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+/**
  * Set (or clear, with 0) a card's flag — Anki's 7-color flag system,
  * SUPABASE_MIGRATION_STUDY_CONTROLS.sql. Independent of rating/scheduling:
  * flagging a card never touches state/due_at/review_count, so unlike
