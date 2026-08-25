@@ -644,9 +644,14 @@ export default function StudySession({ deck, userId, onExit }) {
   // border, not a pill — matching ReviewQueue.js's own toolbar-button
   // treatment (same brightness-filter hover/active trick, reused verbatim
   // below for both themes) rather than inventing a second convention.
+  // width/height live in the .mb-ss-iconbtn CSS class (below), not here —
+  // inline styles always beat a CSS class for the same property, and the
+  // narrow-viewport media queries need to be able to override the tile
+  // size without an !important fight. Everything else about a tile stays
+  // here since it doesn't need to respond to viewport width.
   const iconBtnStyle = (extra = {}) => ({
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    width: 34, height: 34, flexShrink: 0, padding: 0,
+    flexShrink: 0, padding: 0,
     background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 8,
     color: t.text3, cursor: 'pointer', ...extra,
   });
@@ -689,10 +694,51 @@ export default function StudySession({ deck, userId, onExit }) {
         @media (min-width: 900px) and (orientation: landscape) {
           .mb-ss-root { max-width: 1500px; }
         }
-        .mb-ss-iconbtn { transition: filter .12s ease, transform .12s ease, background-color .12s ease; }
+        .mb-ss-iconbtn { width: 34px; height: 34px; transition: filter .12s ease, transform .12s ease, background-color .12s ease; }
         .mb-ss-iconbtn:hover:not(:disabled) { filter: brightness(0.97); }
         body.medbook-dark .mb-ss-iconbtn:hover:not(:disabled) { filter: brightness(1.25); }
         .mb-ss-iconbtn:active:not(:disabled) { transform: scale(0.93); }
+        /* Toolbar counter fix — root cause of "1 /\n50": this span sat in a
+           plain flex row (space-between) with no whiteSpace/flexShrink of
+           its own, so once the icon tiles on either side genuinely didn't
+           fit the viewport, the browser shrank the LEAST-constrained item —
+           this text — by wrapping it, rather than the icon tiles (all
+           width:34/flexShrink:0, so they can't shrink at all). nowrap makes
+           wrapping impossible outright; flexShrink:0 stops it from being
+           compressed below its own content width either. min-width reserves
+           room for the widest realistic case ("50 / 50") so the icon groups
+           on either side don't visibly shift as the digit count changes
+           between single- and double-digit positions. */
+        .mb-ss-counter { font-size: 13px; white-space: nowrap; flex-shrink: 0; min-width: 46px; text-align: center; }
+        /* Icon-group gaps live in CSS (not inline) for the same reason
+           iconbtn's size does — the narrow-viewport rules below need to
+           shrink them without an inline-style fight. */
+        .mb-ss-icongroup { display: flex; align-items: center; gap: 6px; }
+        /* Reclaim just enough room for the counter to comfortably read as
+           one unit on real phone widths (320-430px) — tiles and gaps step
+           down together rather than any one control disappearing. "Do not
+           remove controls" is satisfied by construction: every rule here
+           only ever resizes/re-spaces what's already there. */
+        @media (max-width: 480px) {
+          .mb-ss-iconbtn { width: 32px; height: 32px; }
+          .mb-ss-icongroup { gap: 4px; }
+          .mb-ss-counter { font-size: 12px; min-width: 42px; }
+        }
+        @media (max-width: 360px) {
+          .mb-ss-iconbtn { width: 29px; height: 29px; }
+          .mb-ss-icongroup { gap: 3px; }
+        }
+        /* Measured (not guessed) against a worst-case toolbar — all 7 icon
+           tiles including the image-zoom one, plus a realistic "50 / 50"
+           counter, which is wider than its min-width once double digits
+           appear on both sides — the 360px tier's own numbers start
+           genuinely overflowing the available header width below ~332px
+           (an iPhone SE/similar being the real case that hits this, not a
+           hypothetical). One more step down closes it with room to spare. */
+        @media (max-width: 340px) {
+          .mb-ss-iconbtn { width: 27px; height: 27px; }
+          .mb-ss-icongroup { gap: 2px; }
+        }
         .mb-ss-ratebtn { transition: filter .12s ease; }
         .mb-ss-ratebtn:active:not(:disabled) { filter: brightness(0.92); }
         .mb-ss-showanswer { transition: filter .12s ease, transform .12s ease; }
@@ -730,7 +776,7 @@ export default function StudySession({ deck, userId, onExit }) {
         {focusMode ? (
           <>
             <div />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div className="mb-ss-icongroup">
               <button className="mb-ss-iconbtn" onClick={toggleCardFavorite}
                 title={favoriteIds.has(card.id) ? 'Remove favorite' : 'Favorite this card'}
                 aria-label={favoriteIds.has(card.id) ? 'Remove favorite' : 'Favorite this card'}
@@ -751,7 +797,7 @@ export default function StudySession({ deck, userId, onExit }) {
           </>
         ) : (
           <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div className="mb-ss-icongroup">
               <button className="mb-ss-iconbtn" onClick={goPrev} disabled={idx === 0 || restoring || !!rating}
                 title="Previous card" aria-label="Previous card"
                 style={iconBtnStyle({ opacity: (idx === 0 || restoring) ? 0.4 : 1, cursor: (idx === 0 || restoring) ? 'default' : 'pointer' })}>
@@ -815,10 +861,10 @@ export default function StudySession({ deck, userId, onExit }) {
                 <IconStar size={14} filled={favoriteIds.has(card.id)} />
               </button>
             </div>
-            <span style={{ fontSize: 13, color: t.text3, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+            <span className="mb-ss-counter" style={{ color: t.text3, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
               {idx + 1} / {queue.length}
             </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div className="mb-ss-icongroup">
               {sideImages.length > 0 && (
                 <button className="mb-ss-iconbtn" onClick={() => setLightboxSrc(sideImages[0])}
                   title="Expand image" aria-label="Expand image" style={iconBtnStyle()}>

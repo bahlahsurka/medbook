@@ -900,15 +900,32 @@ export default function FlashCards({ userId, userSystems }) {
 // (add/edit/study, deck browse/study) use their own "← Back" convention,
 // same as the rest of the app.
 function AreaTabs({ t, area, setArea }) {
+  // "My Cards" / "Imported Decks" / "Favorite Cards" at their normal
+  // padding+font don't all fit side by side much below ~390px — width:
+  // 'fit-content' with no cap would then render WIDER than the viewport,
+  // which is what actually causes page-level horizontal scroll (not the
+  // tab labels themselves). maxWidth:'100%' + overflowX:'auto' turns that
+  // into a contained, scrollable strip instead — the tabs still all exist
+  // and are all reachable, just scroll horizontally AS A UNIT on the
+  // narrowest phones rather than ever forcing the whole page to. The
+  // slightly tighter mobile padding below means this only actually
+  // engages at the very smallest widths this batch tests (320-360px);
+  // 375px+ fits without scrolling either way.
   return (
-    <div style={{ display:'flex', gap:4, marginBottom:18, background:t.surface2,
-      border:`1px solid ${t.border}`, borderRadius:9, padding:3, width:'fit-content' }}>
+    <div className="mb-area-tabs" style={{ display:'flex', gap:4, marginBottom:18, background:t.surface2,
+      border:`1px solid ${t.border}`, borderRadius:9, padding:3, width:'fit-content', maxWidth:'100%',
+      overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
+      <style>{`
+        @media (max-width: 480px) {
+          .mb-area-tabs button { padding: 7px 11px !important; font-size: 12.5px !important; white-space: nowrap; }
+        }
+      `}</style>
       {AREA_TABS.map(tab => (
         <button key={tab.id} onClick={()=>setArea(tab.id)} style={{
           background: area===tab.id ? t.surface : 'transparent',
           color: area===tab.id ? t.text : t.text3,
           border:'none', borderRadius:7, padding:'7px 16px', fontSize:13,
-          fontWeight:600, cursor:'pointer', fontFamily:'Inter,sans-serif',
+          fontWeight:600, cursor:'pointer', fontFamily:'Inter,sans-serif', flexShrink:0,
           boxShadow: area===tab.id ? `0 1px 2px ${t.shadow}` : 'none' }}>
           {tab.label}
         </button>
