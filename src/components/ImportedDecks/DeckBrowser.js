@@ -10,7 +10,7 @@
 // schema-gap note: a deck with due_cards === null means the live column
 // doesn't exist yet, not that nothing is due — rendered as "—", not "0".
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTheme } from '../../lib/theme';
 import * as api from '../../lib/importedDecks/api';
 import { IconChevronRight } from '../../lib/icons';
@@ -27,7 +27,7 @@ function saveExpanded(set) {
   try { sessionStorage.setItem(EXPANDED_KEY, JSON.stringify([...set])); } catch {}
 }
 
-export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick, onStatsClick }) {
+export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick, onStatsClick, refreshSignal }) {
   const { t } = useTheme();
   const [roots, setRoots] = useState(null);      // null = loading
   const [children, setChildren] = useState({});  // parentId -> deck[] | 'loading'
@@ -72,6 +72,46 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick, 
     // refetch the whole open subtree on every single click, not just the
     // newly-toggled node.
   }, []);
+
+  // Refresh on demand, without a remount — a sibling of the mount-time
+  // reconciliation effect above, not a replacement for it. DeckBrowser
+  // deliberately stays mounted for the whole time the user is in Imported
+  // Decks (FlashCards.js renders Study/Browse/Stats as siblings on top of
+  // it, not as a replacement — see that file's own comment), which is
+  // exactly right for avoiding the forced-open bug that fix was for, but
+  // it also means nothing here ever re-fetches root/subdeck counts after
+  // studying actually changes them — new_cards/due_cards on the decks a
+  // session touched go stale the moment the user returns, with nothing
+  // short of leaving Imported Decks entirely (which remounts everything)
+  // to notice. `refreshSignal` is how FlashCards.js says "something
+  // outside this component just changed deck data, re-fetch" without
+  // forcing a full remount (and the state loss/loading flash/lost scroll
+  // position that would bring back) — same load()+reloadExpandedChildren()
+  // pair runAction already uses after a rename/archive/delete/reset,
+  // reused here rather than a second refresh mechanism. Guarded against
+  // its own first run via a REMEMBERED VALUE comparison (not a one-shot
+  // boolean flag) — that initial load is already the mount-time effect's
+  // job above, and a plain "have I run before" flag would still fire a
+  // spurious extra fetch under React 18 StrictMode's dev-only double-
+  // invoke (mount -> cleanup -> mount again): a flag flips permanently
+  // false on the FIRST of those two synthetic runs, so the second one
+  // would incorrectly read as "a real subsequent change." Comparing
+  // against the actual last-seen value doesn't have that problem — both
+  // synthetic runs see the same unchanged `refreshSignal` and correctly
+  // skip either way; only a genuine bump reads as different from what's
+  // remembered.
+  const lastRefreshSignal = useRef(refreshSignal);
+  useEffect(() => {
+    if (refreshSignal === lastRefreshSignal.current) return;
+    lastRefreshSignal.current = refreshSignal;
+    load();
+    reloadExpandedChildren(expanded);
+    // `expanded`/`load`/`reloadExpandedChildren` are read at the moment
+    // this fires, which is exactly what's wanted (whatever's currently
+    // expanded) — deliberately not listed as deps: this should only
+    // re-run when the caller explicitly bumps refreshSignal, not merely
+    // because the user expanded/collapsed a node in between.
+  }, [refreshSignal]);
 
   const toggleExpand = async (deck) => {
     const next = new Set(expanded);

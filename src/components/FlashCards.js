@@ -121,6 +121,7 @@ export default function FlashCards({ userId, userSystems }) {
   const [favoritesKey, setFavoritesKey] = useState(0); // bump to refresh FavoritesScreen after a Study Favorites round trip
   const [showImportWizard, setShowImportWizard] = useState(false);
   const [deckBrowserKey, setDeckBrowserKey] = useState(0); // bump to force DeckBrowser to reload after an import completes
+  const [deckRefreshSignal, setDeckRefreshSignal] = useState(0); // bump to refresh DeckBrowser's counts (no remount) after Study changes deck data
   const [cards, setCards]     = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -393,14 +394,22 @@ export default function FlashCards({ userId, userSystems }) {
     // all, and any scroll position inside the tree survives a study trip
     // for free.
     const subOpen = !!importedSub;
-    // Exiting Study clears the active-study pointer (Browse/Stats never
-    // set one in the first place, so clearing on their exit too is just a
-    // harmless no-op, not worth a separate exit handler).
-    const exitImportedSub = () => { clearActiveStudy(userId); setImportedSub(null); };
+    // Exiting a STUDY session bumps deckRefreshSignal — studying is the one
+    // sub-mode that actually changes deck data (new_cards/due_cards, via
+    // rateCard's own count refresh) that the deck list itself displays.
+    // DeckBrowser stays mounted the whole time (Batch 5), which is exactly
+    // right for avoiding the forced-open bug, but means nothing re-fetches
+    // those counts on its own once studying changes them — bumping the
+    // signal is how it's told to, without forcing the full remount (and
+    // the loading flash / lost scroll position) that would undo that fix.
+    // Browse/Stats never change scheduling, so their own exits don't need
+    // this — only clearing the active-study pointer, which they never set
+    // in the first place, so that's a harmless no-op too.
+    const exitImportedStudy = () => { clearActiveStudy(userId); setImportedSub(null); setDeckRefreshSignal(s => s + 1); };
     return (
       <>
         {importedSub?.mode === 'study' && (
-          <StudySession deck={importedSub.deck} userId={userId} onExit={exitImportedSub} />
+          <StudySession deck={importedSub.deck} userId={userId} onExit={exitImportedStudy} />
         )}
         {importedSub?.mode === 'browse' && (
           <BrowseDeck deck={importedSub.deck} userId={userId} onExit={() => setImportedSub(null)} />
@@ -410,7 +419,7 @@ export default function FlashCards({ userId, userSystems }) {
         )}
         <div style={{ display: subOpen ? 'none' : 'block', maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
           <AreaTabs t={t} area={area} setArea={setArea} />
-          <DeckBrowser key={deckBrowserKey} userId={userId}
+          <DeckBrowser key={deckBrowserKey} refreshSignal={deckRefreshSignal} userId={userId}
             onStudy={(deck) => {
               saveActiveStudy(userId, { area: 'imported', mode: 'study', deckId: deck.id, displayName: deck.display_name });
               setImportedSub({ mode: 'study', deck });
