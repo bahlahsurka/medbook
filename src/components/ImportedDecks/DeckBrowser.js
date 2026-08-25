@@ -228,21 +228,75 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick, 
       from { opacity: 0; transform: translateY(-3px); }
       to { opacity: 1; transform: translateY(0); }
     }
+
+    /* Mobile deck-row redesign — see DeckNode's own comment for the full
+       reasoning. The desktop composition (one horizontal line: toggle,
+       name+stats, Study, Browse, ⋯) and the mobile composition (toggle,
+       name+stats, ⋯ on one line; Study+Browse on their own full-width row
+       below) are the SAME DOM nodes throughout, purely reordered/resized
+       via flex order/flex-basis per breakpoint — never two parallel
+       implementations, never duplicated buttons/menu state. */
+    .mb-deck-browser { --mb-deck-indent: 18px; }
+    @media (max-width: 640px) {
+      .mb-deck-browser { --mb-deck-indent: 14px; }
+    }
+    .mb-deck-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 6px; }
+    .mb-deck-toggle { order: 1; }
+    .mb-deck-info { order: 2; flex: 1 1 140px; min-width: 0; }
+    .mb-deck-primary-actions { order: 3; display: flex; gap: 6px; flex: 0 0 auto; }
+    .mb-deck-menu-wrap { order: 4; flex-shrink: 0; }
+    .mb-deck-name {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    @media (max-width: 640px) {
+      .mb-deck-row { align-items: flex-start; }
+      .mb-deck-menu-wrap { order: 3; margin-left: auto; }
+      .mb-deck-primary-actions { order: 5; flex-basis: 100%; margin-top: 2px; }
+      .mb-deck-primary-actions .mb-deck-study-btn { flex: 1; }
+      .mb-deck-primary-actions .mb-deck-study-btn, .mb-deck-primary-actions .mb-deck-browse-btn {
+        padding-top: 10px; padding-bottom: 10px;
+      }
+      /* Two lines max, never the mid-word/mid-number split the old
+         single-line ellipsis produced on a narrow phone ("Tzanki Ste…",
+         "Biostati…") — deck identity is too important to guess at.
+         -webkit-line-clamp despite the prefix has universal current
+         browser support (Safari/Chrome/Firefox/Edge all ship it) and is
+         still the only concise way to express "wrap, but at most N lines,
+         ellipsize the rest" in CSS. */
+      .mb-deck-name {
+        white-space: normal; display: -webkit-box; -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical; word-break: break-word;
+      }
+    }
+    /* Stats / + Import Anki Deck — same padding step-down reasoning as the
+       study toolbar's icon tiles. !important because these reuse the
+       shared B() button-style helper's inline padding (used all over this
+       file, for modal buttons too) — scoping the override to this one
+       class keeps every other B()-styled button untouched. */
+    @media (max-width: 380px) {
+      .mb-deck-topbtn { padding-left: 12px !important; padding-right: 12px !important; }
+    }
   `;
 
   return (
-    <div style={{ maxWidth: 680, margin: '0 auto', fontFamily: 'Inter,sans-serif' }}>
+    <div className="mb-deck-browser" style={{ maxWidth: 680, margin: '0 auto', fontFamily: 'Inter,sans-serif' }}>
       <style>{css}</style>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: t.text }}>
           Imported Decks <span style={{ fontSize: 13, color: t.text4, fontWeight: 400 }}>({roots.length})</span>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        {/* flexWrap here too (not just on the outer row above) is a
+            narrow-phone safety net, not the primary fix — the two buttons
+            comfortably fit side by side down to 320px once their own
+            padding steps down via .mb-deck-topbtn's media query below; this
+            only ever engages if that estimate is ever off on a real device,
+            wrapping cleanly instead of clipping/overflowing. */}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {onStatsClick && (
-            <button onClick={onStatsClick} style={B(t.surface2, t.text2)}>📊 Stats</button>
+            <button className="mb-deck-topbtn" onClick={onStatsClick} style={B(t.surface2, t.text2)}>📊 Stats</button>
           )}
-          <button onClick={onImportClick} style={B(t.accent)}>+ Import Anki Deck</button>
+          <button className="mb-deck-topbtn" onClick={onImportClick} style={B(t.accent)}>+ Import Anki Deck</button>
         </div>
       </div>
 
@@ -375,6 +429,12 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick, 
   );
 }
 
+// Depth is capped for indentation purposes ("use a reasonable maximum" —
+// a hierarchy 5+ levels deep shouldn't keep eating row width forever; the
+// hierarchy itself is still fully navigable past this depth, only the
+// VISUAL indent stops growing).
+const MAX_INDENT_DEPTH = 4;
+
 function DeckNode({ deck, depth, expanded, childrenMap, onToggleExpand, onStudy, onBrowse,
   onRename, onArchive, onDeleteRequest, onResetRequest, onOptionsRequest, busyId, t }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -382,16 +442,35 @@ function DeckNode({ deck, depth, expanded, childrenMap, onToggleExpand, onStudy,
   const kids = childrenMap[deck.id];
   const hasKidsLoaded = Array.isArray(kids);
   const busy = busyId === deck.id;
+  const canStudy = !!(deck.new_cards || deck.due_cards);
+  const hasDue = !!deck.due_cards;
+  const indentLevel = Math.min(depth, MAX_INDENT_DEPTH);
+  const indent = `calc(var(--mb-deck-indent) * ${indentLevel})`;
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10,
+      {/* Desktop: one horizontal line (toggle, name+stats, Study, Browse,
+          ⋯). Mobile: toggle+name+⋯ on the top line, Study+Browse get their
+          own full-width line below — the SAME elements, reordered/resized
+          via the .mb-deck-row/.mb-deck-info/.mb-deck-primary-actions/
+          .mb-deck-menu-wrap flex rules in DeckBrowser's own <style>, not a
+          second parallel layout. */}
+      <div className="mb-deck-row" style={{
         background: t.surface, border: `1px solid ${t.border}`, borderRadius: 10,
-        padding: '12px 14px', marginLeft: depth * 18, boxShadow: `0 1px 2px ${t.shadow}`,
-        opacity: busy ? 0.6 : 1 }}>
+        padding: '12px 14px', marginLeft: indent, boxShadow: `0 1px 2px ${t.shadow}`,
+        opacity: busy ? 0.6 : 1,
+        // The parent's vertical guide line (an absolutely-positioned sibling
+        // one level up, in .mb-deck-children) paints above normal-flow
+        // content regardless of DOM order — without this the line visibly
+        // cut across indented rows' Study button instead of stopping at
+        // their left edge. `position:relative` (no z-index needed) gives
+        // this row its own stacking box so it paints over the line, same as
+        // the un-indented root cards already visually occlude nothing since
+        // they sit outside any .mb-deck-children container at all.
+        position: 'relative' }}>
 
         {/* Hierarchy control — a deliberately roomy, standalone tap target
-            (36x36) so expand/collapse never has to compete with Study/
+            (40x40) so expand/collapse never has to compete with Study/
             Browse/⋯ for precision, and never risks being mistaken for
             "open this deck". The icon itself stays small and restrained;
             the button around it is what's actually comfortable to hit —
@@ -399,41 +478,38 @@ function DeckNode({ deck, depth, expanded, childrenMap, onToggleExpand, onStudy,
         <button onClick={() => onToggleExpand(deck)} aria-expanded={isOpen}
           title={isOpen ? 'Collapse subdecks' : 'Expand subdecks'} className="mb-deck-toggle"
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
-            width: 36, height: 36, flexShrink: 0, padding: 0,
+            width: 40, height: 40, flexShrink: 0, padding: 0,
             background: isOpen ? t.surface2 : 'transparent', color: t.text3,
-            border: 'none', borderRadius: 9, cursor: 'pointer' }}>
+            border: 'none', borderRadius: 10, cursor: 'pointer' }}>
           <IconChevronRight size={15} className="mb-deck-toggle-icon"
             style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }} />
         </button>
 
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: t.text, overflow: 'hidden',
-            textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div className="mb-deck-info">
+          <div className="mb-deck-name" style={{ fontSize: 14, fontWeight: 600, color: t.text }}>
             {deck.display_name}
           </div>
-          <div style={{ display: 'flex', gap: 10, fontSize: 11.5, color: t.text4, marginTop: 3 }}>
-            <span>{deck.new_cards ?? 0} new</span>
-            <span>{deck.due_cards == null ? '— due' : `${deck.due_cards} due`}</span>
-            <span>{deck.total_cards ?? 0} total</span>
+          {/* One text line with middle-dot separators, not three separate
+              flex/gap spans — the old per-stat spans had no whiteSpace of
+              their own, so under mobile width pressure a single stat like
+              "2587 new" could wrap BETWEEN its number and its word ("2587"
+              / "new" stacked). Plain text wraps as a whole phrase if it
+              ever truly has to, never mid-stat. Large decks get thousands
+              separators (deck.new_cards.toLocaleString()) for the same
+              scannability reason the spec's own mobile example uses them.
+              Due gets a restrained color-only emphasis (not a badge) when
+              there's actually something due — it's the one number that
+              means "something to act on right now". */}
+          <div style={{ fontSize: 11.5, color: t.text4, marginTop: 3 }}>
+            {(deck.new_cards ?? 0).toLocaleString()} new · <span style={{
+              color: hasDue ? t.accent : t.text4, fontWeight: hasDue ? 700 : 400 }}>
+              {deck.due_cards == null ? '—' : deck.due_cards.toLocaleString()} due
+            </span> · {(deck.total_cards ?? 0).toLocaleString()} total
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 6, flexShrink: 0, position: 'relative' }}>
-          <button onClick={() => onStudy(deck)} disabled={!(deck.new_cards || deck.due_cards)} style={{
-            background: (deck.new_cards || deck.due_cards) ? t.accent : t.surface3,
-            color: (deck.new_cards || deck.due_cards) ? '#fff' : t.text4,
-            border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600,
-            cursor: (deck.new_cards || deck.due_cards) ? 'pointer' : 'default',
-            fontFamily: 'Inter,sans-serif' }}>
-            ▶ Study
-          </button>
-          <button onClick={() => onBrowse(deck)} style={{
-            background: t.surface2, border: `1px solid ${t.border}`, color: t.text2,
-            borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600,
-            cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
-            Browse
-          </button>
-          <button onClick={() => setMenuOpen(p => !p)} style={{
+        <div className="mb-deck-menu-wrap" style={{ position: 'relative' }}>
+          <button onClick={() => setMenuOpen(p => !p)} title="More actions" aria-label="More actions" style={{
             background: t.surface2, border: `1px solid ${t.border}`, color: t.text2,
             borderRadius: 6, padding: '6px 9px', fontSize: 12, cursor: 'pointer' }}>
             ⋯
@@ -462,6 +538,23 @@ function DeckNode({ deck, depth, expanded, childrenMap, onToggleExpand, onStudy,
             </>
           )}
         </div>
+
+        <div className="mb-deck-primary-actions">
+          <button className="mb-deck-study-btn" onClick={() => onStudy(deck)} disabled={!canStudy} style={{
+            background: canStudy ? t.accent : t.surface3,
+            color: canStudy ? '#fff' : t.text4,
+            border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600,
+            cursor: canStudy ? 'pointer' : 'default',
+            fontFamily: 'Inter,sans-serif' }}>
+            ▶ Study
+          </button>
+          <button className="mb-deck-browse-btn" onClick={() => onBrowse(deck)} style={{
+            background: t.surface2, border: `1px solid ${t.border}`, color: t.text2,
+            borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600,
+            cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+            Browse
+          </button>
+        </div>
       </div>
 
       {isOpen && (
@@ -470,16 +563,18 @@ function DeckNode({ deck, depth, expanded, childrenMap, onToggleExpand, onStudy,
           {/* Subtle vertical guide connecting this deck to its subdecks —
               a folder-like hierarchy cue instead of indentation alone, so
               the relationship reads at a glance without any extra chrome. */}
-          <div aria-hidden style={{ position: 'absolute', left: depth * 18 + 32, top: 0, bottom: 8,
+          <div aria-hidden style={{ position: 'absolute', left: `calc(${indent} + 34px)`, top: 0, bottom: 8,
             width: 1, background: t.border }} />
 
           {!hasKidsLoaded && (
-            <div style={{ marginLeft: (depth + 1) * 18, fontSize: 12, color: t.text4, padding: '6px 0' }}>
+            <div style={{ marginLeft: `calc(var(--mb-deck-indent) * ${Math.min(depth + 1, MAX_INDENT_DEPTH)})`,
+              fontSize: 12, color: t.text4, padding: '6px 0' }}>
               Loading subdecks…
             </div>
           )}
           {hasKidsLoaded && kids.length === 0 && (
-            <div style={{ marginLeft: (depth + 1) * 18, fontSize: 12, color: t.text4, padding: '6px 0' }}>
+            <div style={{ marginLeft: `calc(var(--mb-deck-indent) * ${Math.min(depth + 1, MAX_INDENT_DEPTH)})`,
+              fontSize: 12, color: t.text4, padding: '6px 0' }}>
               No subdecks.
             </div>
           )}

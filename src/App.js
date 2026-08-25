@@ -538,7 +538,7 @@ export default function App() {
       <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minWidth:0}}>
 
         {/* Header */}
-        <div style={{display:'flex',alignItems:'center',gap:SPACE.sm+2,padding:`${SPACE.md}px ${SPACE.lg}px`,
+        <div className="mb-app-header" style={{display:'flex',alignItems:'center',gap:SPACE.sm+2,padding:`${SPACE.md}px ${SPACE.lg}px`,
           borderBottom:`1px solid ${t.border}`,background:t.surface,flexShrink:0,
           boxShadow:elevation(t,'sm')}}>
           <style>{`
@@ -552,6 +552,21 @@ export default function App() {
             .mb-bulkbtn { transition: background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}, transform ${MOTION.fast} ${MOTION.ease}; }
             .mb-bulkbtn:active { transform: scale(0.96); }
             .mb-hero-cta:active { transform: scale(0.97); }
+            /* A study session portals its own toolbar into #mb-study-toolbar-slot
+               (see that div's own comment below) and on a narrow phone needs
+               every pixel of this row to fit Previous/Pause/Flag/Favorite/the
+               "N / N" counter/Fullscreen/Exit without the counter wrapping
+               (StudySession.js's own .mb-ss-counter fix handles that once
+               there's room to work with). The "Flashcards" label here is
+               genuinely redundant the moment that's happening — the study
+               toolbar itself already makes it obvious what screen this is —
+               so it steps aside on narrow viewports specifically while a
+               session has actually populated the slot (:has, not a bare
+               width check: DeckBrowser/Browse/Stats/Favorites never portal
+               anything into it, so the label stays for those, unchanged). */
+            @media (max-width: 480px) {
+              .mb-app-header:has(#mb-study-toolbar-slot > *) .mb-flashcards-label { display: none; }
+            }
           `}</style>
           <button className="mb-headerbtn" onClick={()=>setSB(p=>!p)} title={sidebarOpen?'Close sidebar':'Open sidebar'}
             style={{background:'none',border:'none',
@@ -572,7 +587,7 @@ export default function App() {
           {view==='stats'  && <span style={{fontWeight:FONT.weight.bold,color:t.text,fontSize:FONT.size.md}}>Dashboard</span>}
           {view==='search' && <span style={{fontWeight:FONT.weight.bold,color:t.text,fontSize:FONT.size.md}}>Global Search</span>}
           {view==='review' && <span style={{fontWeight:FONT.weight.bold,color:t.text,fontSize:FONT.size.md}}>Review Queue</span>}
-          {view==='cards'  && <span style={{fontWeight:FONT.weight.bold,color:t.text,fontSize:FONT.size.md}}>Flashcards</span>}
+          {view==='cards'  && <span className="mb-flashcards-label" style={{fontWeight:FONT.weight.bold,color:t.text,fontSize:FONT.size.md}}>Flashcards</span>}
           {view==='insights' && <span style={{fontWeight:FONT.weight.bold,color:t.text,fontSize:FONT.size.md}}>Insights</span>}
           {['list','add','detail'].includes(view) && (
             <>
