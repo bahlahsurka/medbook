@@ -25,6 +25,33 @@
 // an id list, via studySessionStore.js) and never rebuilt on remount.
 // Resuming re-fetches CURRENT row data for exactly those ids
 // (api.getCardsByIds) instead of re-running the query that chose them.
+//
+// ── Critical Bug Fix Batch 2 — Previous actually undoes the rating ─────
+// Root cause: goPrev() used to be `setIdx(p => p - 1)` and nothing else —
+// pure UI navigation with zero awareness that rating a card had already
+// written a permanent scheduling change (a card row UPDATE plus an
+// imported_review_log INSERT, both already committed by the time Previous
+// could even be pressed). Pressing Previous then rating the same card
+// again computed the new interval from the ALREADY-rated state — Good
+// (0d->3d) then Previous then Good again would compute the second Good
+// from a 3-day-old interval instead of the original 0, compounding
+// instead of replacing.
+//
+// Fix: rate() snapshots the card's exact pre-rating scheduling fields
+// before calling rateCard, and records `{previousState, rating,
+// ratedAtIso}` keyed by card id in `actions` — the ONLY state this needs
+// beyond what Batch 1 already persists, so it's added to that same
+// session snapshot rather than a second, incompatible history mechanism.
+// goPrev() checks `actions` for the card it's returning to: if that card
+// has an undo-able current-session rating, it calls api.unrateCard to
+// restore the card row to `previousState` field-for-field (a plain write,
+// not a recomputation — it can't itself produce a wrong interval) and
+// delete ONLY that rating's own imported_review_log row (matched by
+// card_id + its exact reviewed_at timestamp, never a broader match that
+// could reach into legitimate history from before this session). If the
+// returned-to card has NO recorded action (never rated, or already
+// undone), Previous is exactly the old plain index decrement — no undo
+// work, no added latency.
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTheme } from '../../lib/theme';
@@ -138,6 +165,31 @@ export default function StudySession({ deck, userId, onExit }) {
   const sessionIdRef = useRef(null);
   const createdAtRef = useRef(null);
 
+  // Critical Bug Fix Batch 2 — undo history for Previous. Keyed by card id
+  // (not queue index: the frozen order makes them equivalent, but the id
+  // is what actually identifies "this card's most recent current-session
+  // rating," which is the thing being undone). Only ever holds an entry
+  // for a card that has an UNDO-ABLE rating outstanding — rate() adds one
+  // on success, goPrev() removes it once undone, and re-rating an already-
+  // undone card overwrites it fresh rather than stacking. Persisted as
+  // part of the session snapshot (below) — see this file's header comment
+  // on why: Previous has to keep working after a reload, same as the rest
+  // of session state does since Batch 1.
+  const [actions, setActions] = useState({}); // { [cardId]: { previousState, rating, ratedAtIso } }
+  // Live imported_review_log insert promises, keyed by card id —
+  // deliberately NOT persisted (promises aren't serializable, and by the
+  // time a session is ever resumed, real wall-clock time has passed and
+  // the original insert is guaranteed to have already settled either way,
+  // per unrateCard's own comment). Only matters for the same-mount case:
+  // rate a card, then hit Previous before the fire-and-forget insert from
+  // THAT rating has necessarily landed yet.
+  const logInsertsRef = useRef({});
+  // True while an undo (the async half of goPrev) is in flight — disables
+  // Previous and the rating buttons so a second action can't land on top
+  // of a restore that hasn't finished yet ("prevent the user from
+  // accidentally applying another rating on corrupted state").
+  const [restoring, setRestoring] = useState(false);
+
   // Load session — RESUME re-fetches current row data for the FROZEN set
   // of card ids a previous session already chose (never re-running
   // getSessionCards/getFavoriteCards, which is exactly what was producing
@@ -177,6 +229,7 @@ export default function StudySession({ deck, userId, onExit }) {
           }
           setIdx(restoredIdx);
           setPaused(!!pendingResume.paused);
+          setActions(pendingResume.actions || {});
         } else {
           sessionIdRef.current = newSessionId();
           createdAtRef.current = new Date().toISOString();
@@ -220,10 +273,11 @@ export default function StudySession({ deck, userId, onExit }) {
       paused,
       status: 'active',
       createdAt: createdAtRef.current || new Date().toISOString(),
+      actions, // Critical Bug Fix Batch 2 — undo history, see its own declaration above
     };
     sessionSnapshotRef.current = snapshot;
     saveSession(userId, deckKey, snapshot);
-  }, [userId, deckKey, deck.id, idx, queue, paused]);
+  }, [userId, deckKey, deck.id, idx, queue, paused, actions]);
 
   // Belt-and-suspenders flush for exactly the mobile lifecycle events this
   // batch is about — pagehide fires more reliably than visibilitychange on
@@ -312,16 +366,34 @@ export default function StudySession({ deck, userId, onExit }) {
   // know whether a future interruption will land mid-flight, only the
   // resume path can detect that after the fact.
   const rate = async (label) => {
-    if (!card || rating) return;
+    if (!card || rating || restoring) return;
     const ratedIdx = idx;
+    // Critical Bug Fix Batch 2 — snapshot exactly the fields a rating can
+    // change, from the card as it stands RIGHT NOW, before calling
+    // rateCard. This is the only place this snapshot can be taken: once
+    // rateCard's patch lands, the pre-rating values are gone from every
+    // copy of this card MedBook holds (the row itself, and the queue
+    // entry rate() is about to overwrite below) except this one.
+    const previousState = Object.fromEntries(api.SCHEDULING_FIELDS.map(f => [f, card[f]]));
     setRating(label);
     try {
-      const updated = await api.rateCard(card, label);
+      const { card: updated, logInsert } = await api.rateCard(card, label);
       // Same reason ReviewQueue.js keeps its cards array live after rating:
       // ← lets you step back to this card and rate it again, and a re-rating
       // has to act on the card's CURRENT (post-rating) scheduling state, not
       // the stale pre-rating snapshot still sitting in the queue array.
       setQueue(q => { const next = [...q]; next[ratedIdx] = updated; return next; });
+      // Record the undo entry AFTER the rating is confirmed saved — never
+      // on a failed rating, which correctly leaves nothing for Previous to
+      // undo (there's nothing to undo; the rating never happened).
+      // Overwrites any earlier entry for this same card outright — exactly
+      // right for "rate, Previous, rate again": the second rating's own
+      // previousState (captured above, from whatever the card looked like
+      // at THIS moment — i.e. already back at its pre-first-rating values,
+      // since Previous restores before this can run again) is what matters
+      // going forward, not the first rating's now-irrelevant history.
+      logInsertsRef.current[card.id] = logInsert;
+      setActions(a => ({ ...a, [card.id]: { previousState, rating: label, ratedAtIso: updated.last_reviewed_at } }));
       advance();
     } catch (e) {
       setErr(e.message || 'Could not save rating');
@@ -354,14 +426,44 @@ export default function StudySession({ deck, userId, onExit }) {
     }
   };
 
-  // Step back to the previous card — same behavior as ReviewQueue's ←
-  // (goPrev): plain navigation, not a scheduling revert. Deliberately
-  // doesn't touch anything a rating wrote; re-rating a revisited card works
-  // exactly like rating any other card (see the comment in rate() above).
-  const goPrev = () => {
-    if (idx === 0) return;
-    setIdx(p => p - 1);
-    setRevealed(false);
+  // Critical Bug Fix Batch 2 — Previous means "go back to the previous
+  // card AND undo the most recent CURRENT-SESSION rating on it," not just
+  // "decrement the index." If the card being returned to has no recorded
+  // action (never rated this session, or already undone and not re-rated
+  // — see rate()'s own comment), this degrades to exactly the old plain
+  // navigation: nothing to undo, so nothing async happens and it's just as
+  // instant as before.
+  //
+  // Deliberately NOT optimistic about the undo itself (unlike, say, the
+  // favorite-star toggle): this only navigates back and reveals the card
+  // once the restore has actually succeeded, so the user can never be
+  // looking at a "reverted" card whose underlying scheduling state wasn't
+  // really reverted. `restoring` disables Previous and the rating buttons
+  // for the (normally brief) time this takes, rather than letting a
+  // second action land on top of a restore still in flight.
+  const goPrev = async () => {
+    if (idx === 0 || restoring || rating) return;
+    const targetIdx = idx - 1;
+    const target = queue[targetIdx];
+    const action = target ? actions[target.id] : null;
+    if (!action) { setIdx(targetIdx); setRevealed(false); return; }
+    setRestoring(true);
+    setErr('');
+    try {
+      const restored = await api.unrateCard(target.id, target.deck_id, action.previousState, action.ratedAtIso, logInsertsRef.current[target.id]);
+      setQueue(q => { const next = [...q]; next[targetIdx] = restored; return next; });
+      setActions(a => { const next = { ...a }; delete next[target.id]; return next; });
+      delete logInsertsRef.current[target.id];
+      setIdx(targetIdx);
+      setRevealed(false);
+    } catch (e) {
+      // Restore failed — stay exactly where we are (still on the LATER
+      // card, action entry untouched) rather than navigating to a card
+      // whose data might now be in an inconsistent state. The user can
+      // press Previous again to retry.
+      setErr(e.message || 'Could not undo the last rating — still on the previous card, nothing changed. Try Previous again.');
+    }
+    setRestoring(false);
   };
 
   // Exiting mid-session is a deliberate "leave for now", not "abandon my
@@ -403,7 +505,7 @@ export default function StudySession({ deck, userId, onExit }) {
   // lightbox is open on top of it") — otherwise "a" while just looking at
   // an enlarged image would silently rate the card underneath it.
   const activeCard = queue && idx < queue.length ? queue[idx] : null;
-  useReviewKeyboard(!!activeCard && !paused && !lightboxSrc, {
+  useReviewKeyboard(!!activeCard && !paused && !lightboxSrc && !restoring, {
     flipped: revealed,
     onFlip: () => setRevealed(true),
     onAgain: () => rate('again'),
@@ -650,9 +752,9 @@ export default function StudySession({ deck, userId, onExit }) {
         ) : (
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <button className="mb-ss-iconbtn" onClick={goPrev} disabled={idx === 0}
+              <button className="mb-ss-iconbtn" onClick={goPrev} disabled={idx === 0 || restoring || !!rating}
                 title="Previous card" aria-label="Previous card"
-                style={iconBtnStyle({ opacity: idx === 0 ? 0.4 : 1, cursor: idx === 0 ? 'default' : 'pointer' })}>
+                style={iconBtnStyle({ opacity: (idx === 0 || restoring) ? 0.4 : 1, cursor: (idx === 0 || restoring) ? 'default' : 'pointer' })}>
                 <IconChevronLeft size={16} />
               </button>
               <button className="mb-ss-iconbtn" onClick={() => setPaused(true)}
@@ -780,7 +882,7 @@ export default function StudySession({ deck, userId, onExit }) {
           // information, per the brief.
           <div style={{ display: 'flex', borderRadius: 12, overflow: 'hidden', boxShadow: `0 1px 3px ${t.shadow}` }}>
             {RATINGS.map(([key, label, tokenKey], i) => (
-              <button key={key} className="mb-ss-ratebtn" onClick={() => rate(key)} disabled={!!rating}
+              <button key={key} className="mb-ss-ratebtn" onClick={() => rate(key)} disabled={!!rating || restoring}
                 style={{
                   flex: 1, minHeight: 54, padding: '10px 6px',
                   // A touch softer than the raw token — blended toward the
@@ -790,7 +892,7 @@ export default function StudySession({ deck, userId, onExit }) {
                   color: '#fff', border: 'none', cursor: 'pointer', fontFamily: 'Inter,sans-serif',
                   borderRight: i < RATINGS.length - 1 ? '1px solid rgba(255,255,255,0.22)' : 'none',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
-                  opacity: (rating && rating !== key) ? 0.5 : 1,
+                  opacity: ((rating && rating !== key) || restoring) ? 0.5 : 1,
                 }}>
                 <span style={{ fontSize: 13, fontWeight: 700 }}>{label}</span>
                 <span style={{ fontSize: 10.5, fontWeight: 500, opacity: 0.78 }}>{intervals?.[key]?.label}</span>
