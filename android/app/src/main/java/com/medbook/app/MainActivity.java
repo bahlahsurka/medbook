@@ -2,8 +2,6 @@ package com.medbook.app;
 
 import android.os.Bundle;
 import android.view.ActionMode;
-import android.view.Menu;
-import android.view.MenuItem;
 import android.view.View;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -22,43 +20,29 @@ public class MainActivity extends BridgeActivity {
     // but reads as flatly broken inside the native app, where nothing else
     // ever shows browser chrome.
     //
-    // Returning false from onCreateActionMode tells Android not to start
-    // the action mode at all, so the floating toolbar itself never appears
-    // — but text selection (drag handles included) is WebView-internal
-    // state independent of that toolbar UI, so it's untouched: long-press-
-    // and-drag to select still works exactly as before, and so does every
-    // bit of JS built on window.getSelection() (the highlight bar's own
-    // mechanism, and plain browser text selection elsewhere in the app).
+    // WebView has no public API of its own to opt out of this per earlier
+    // (incorrect) attempt — android.webkit.WebView does NOT expose
+    // setCustomSelectionActionModeCallback/setCustomInsertionActionModeCallback;
+    // that pair belongs to TextView/EditText, not WebView, and referencing
+    // them here failed to even compile ("cannot find symbol"). The real,
+    // correct hook is at the Activity level: WebView's internal text-
+    // selection machinery starts its floating toolbar by asking the
+    // Activity's Window to start an action mode, which routes through
+    // Activity.onWindowStartingActionMode(Callback, int) — override it here
+    // and return null to tell Android not to create that action mode's UI
+    // at all. The underlying text selection (drag handles included) is
+    // WebView-internal state independent of that toolbar UI, so it's
+    // untouched: long-press-and-drag to select still works exactly as
+    // before, and so does every bit of JS built on window.getSelection()
+    // (the highlight bar's own mechanism).
+    @Override
+    public ActionMode onWindowStartingActionMode(ActionMode.Callback callback, int type) {
+        return null;
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        ActionMode.Callback suppressSelectionToolbar = new ActionMode.Callback() {
-            @Override
-            public boolean onCreateActionMode(ActionMode mode, Menu menu) {
-                return false;
-            }
-
-            @Override
-            public boolean onPrepareActionMode(ActionMode mode, Menu menu) {
-                return false;
-            }
-
-            @Override
-            public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
-                return false;
-            }
-
-            @Override
-            public void onDestroyActionMode(ActionMode mode) {}
-        };
-
-        WebView webView = this.bridge.getWebView();
-        // Covers dragging over existing text (what the screenshot shows).
-        webView.setCustomSelectionActionModeCallback(suppressSelectionToolbar);
-        // Covers tapping an insertion point inside editable content (the
-        // notes textarea in edit mode) — same fix, same reasoning.
-        webView.setCustomInsertionActionModeCallback(suppressSelectionToolbar);
 
         // "server.url" mode (capacitor.config.ts) means the SAME production
         // JS/CSS bundle runs here as in a plain mobile browser tab — nothing
@@ -83,6 +67,7 @@ public class MainActivity extends BridgeActivity {
         //    a bare embedded WebView does not unless asked — a very
         //    plausible, well-targeted explanation for scrolling/animation
         //    specifically feeling less smooth here than in a browser tab.
+        WebView webView = this.bridge.getWebView();
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         WebSettings settings = webView.getSettings();
         settings.setOffscreenPreRaster(true);
