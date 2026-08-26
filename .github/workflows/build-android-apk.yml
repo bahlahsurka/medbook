@@ -38,7 +38,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # @capacitor/cli@8 requires Node >=22 ("npx cap sync" fatals
+          # otherwise) — this only ever showed up here, never in local
+          # testing, because the sandbox that authored this workflow
+          # happened to already be running Node 22.
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
