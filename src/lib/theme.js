@@ -1,22 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { StatusBar, Style } from '@capacitor/status-bar';
 
 const STORAGE_KEY = 'medbook_theme';
-
-// Only actually talks to the native layer inside the Capacitor shell — a
-// plain browser tab / PWA has no `window.Capacitor`, so this is a no-op
-// there (no bundle-size cost either way; @capacitor/status-bar's own web
-// implementation already resolves to a no-op, this just skips the call
-// entirely rather than relying on that). Matches the status bar's
-// background to `surface` — the same color the in-app header itself uses —
-// so it reads as one continuous bar rather than a mismatched strip at the
-// very top, and flips its icon/text style (dark-on-light vs light-on-dark)
-// with the same theme switch already driving everything else.
-function syncStatusBar(pal) {
-  if (typeof window === 'undefined' || !window.Capacitor?.isNativePlatform?.()) return;
-  StatusBar.setBackgroundColor({ color: pal.surface }).catch(() => {});
-  StatusBar.setStyle({ style: pal.name === 'dark' ? Style.Dark : Style.Light }).catch(() => {});
-}
 
 // Every colour the app's "chrome" uses is expressed as a token here.
 // System accent colours (per-system, difficulty) intentionally stay literal —
@@ -179,7 +163,6 @@ export function ThemeProvider({ children }) {
 
   useEffect(() => {
     applyBodyTheme(t);
-    syncStatusBar(t);
     try { localStorage.setItem(STORAGE_KEY, theme); } catch {}
   }, [theme, t]);
 
