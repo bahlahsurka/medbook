@@ -3,17 +3,9 @@ import { useTheme, SPACE, RADIUS, FONT, MOTION } from '../lib/theme';
 import { computeSystemStats } from '../lib/systemStats';
 import { timeAgo } from '../lib/timeAgo';
 import { IconPulse, IconSearch, IconRepeat, IconCards, IconChart, IconTrendUp, IconSun, IconMoon,
-  IconDownload, IconUpload, IconSettings, IconLogout, IconChevronDown, IconSmartphone } from '../lib/icons';
+  IconDownload, IconUpload, IconSettings, IconLogout, IconChevronDown } from '../lib/icons';
 
 const NAV_ICONS = { search: IconSearch, review: IconRepeat, cards: IconCards, stats: IconChart, insights: IconTrendUp };
-
-// A stable, permanent URL — `.github/workflows/build-android-apk.yml`
-// publishes to this exact tag+filename on every successful build (create-
-// or-update, not a new release each time), so this link never needs to
-// change as new builds ship. Public GitHub release assets on a public repo
-// need no authentication to download, unlike Actions build artifacts —
-// this is what actually makes "download from the website" possible at all.
-const ANDROID_APK_URL = 'https://github.com/bahlahsurka/medbook/releases/download/apk-latest/medbook.apk';
 
 export default function Sidebar({ open, width=240, entries, activeSystem, setActiveSystem,
   view, setView, onExport, onImportClick, onLogout, onManageSystems,
@@ -197,23 +189,6 @@ export default function Sidebar({ open, width=240, entries, activeSystem, setAct
 
       {/* Bottom actions */}
       <div style={{ padding:`${SPACE.md-2}px ${SPACE.md}px ${SPACE.lg-2}px`, borderTop:`1px solid ${t.border}`, flexShrink:0 }}>
-        {/* Only meaningful in a plain browser tab/PWA — someone already
-            using the native Android shell (window.Capacitor present) has
-            obviously already got the app, so this would just be a pointless
-            "install the app" prompt inside the app itself. A plain <a> (not
-            a button+navigate) so it's a real link: right-click/long-press
-            "copy link" or "share" works exactly as expected, same as any
-            other download link on the web — no JS needed to make it work. */}
-        {!(typeof window !== 'undefined' && window.Capacitor?.isNativePlatform?.()) && (
-          <a href={ANDROID_APK_URL} className="mb-actionbtn"
-            style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:6,
-              padding:'6px 12px', marginBottom:8, borderRadius:RADIUS.sm+1,
-              background:t.surface3, border:`1px solid ${t.border}`,
-              color:t.text2, fontSize:FONT.size.xs, fontWeight:FONT.weight.semibold,
-              textDecoration:'none', cursor:'pointer' }}>
-            <IconSmartphone size={13} /> Get the Android App
-          </a>
-        )}
         <div style={{ display:'flex', gap:6, marginBottom:6 }}>
           <Btn t={t} onClick={onExport} icon={<IconDownload size={13} />}>Export</Btn>
           <Btn t={t} onClick={onImportClick} icon={<IconUpload size={13} />}>Import</Btn>

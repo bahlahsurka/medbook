@@ -100,16 +100,6 @@ export function IconUpload({ size=14, style, className }) {
   </Svg>;
 }
 
-// Distinct from IconDownload — used specifically for the "Get the Android
-// app" link so it doesn't sit right next to Export's identical-looking
-// download glyph and read as a duplicate action.
-export function IconSmartphone({ size=14, style, className }) {
-  return <Svg size={size} style={style} className={className}>
-    <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
-    <line x1="12" y1="18" x2="12.01" y2="18" />
-  </Svg>;
-}
-
 export function IconSettings({ size=14, style, className }) {
   return <Svg size={size} style={style} className={className}>
     <circle cx="12" cy="12" r="3" />
