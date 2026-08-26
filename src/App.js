@@ -5,6 +5,7 @@ import { SYS_COLOR, DIFFICULTY, DIFF_COLOR } from './lib/constants';
 import { useScrollRestore } from './lib/useScrollRestore';
 import { useDebouncedValue } from './lib/useDebouncedValue';
 import { useStudySession } from './lib/useStudySession';
+import { useBackHandler } from './lib/useBackHandler';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation, BREAKPOINT } from './lib/theme';
 import { IconMenu, IconX, IconChevronLeft, IconRepeat, IconPlus, IconInbox, IconSearch } from './lib/icons';
 import Auth from './components/Auth';
@@ -232,6 +233,28 @@ export default function App() {
     setSB(false); // sidebar only ever opens via the hamburger button
   }, []);
 
+  // Android hardware/gesture back button (see useBackHandler's own comment
+  // for why this is needed at all — MedBook's navigation is plain React
+  // state, so without this a back press has nothing to step through and
+  // just exits the app immediately, from anywhere). 'stats' (Dashboard) is
+  // the landing screen, so it's the one place back is allowed to fall
+  // through to the native default (exit) instead of being caught here.
+  // The three-way branch below is deliberately just the SAME targets the
+  // in-app "← Back" button already uses for 'detail'/'add' (see that
+  // button's own onClick further down) — this makes the hardware button
+  // agree with the on-screen one instead of inventing separate rules.
+  useBackHandler(view !== 'stats', () => {
+    if (view === 'detail') backToList();
+    else if (view === 'add') setView('list');
+    else switchView('stats');
+  });
+  // The drawer is an overlay on top of whatever view is showing, so it must
+  // always win over the view-level handler above — which it does for free,
+  // since this only activates (and therefore only pushes its history entry)
+  // while sidebarOpen is true, always strictly after the view-level one.
+  // Desktop/tablet's permanently-docked sidebar (isMobile false) isn't a
+  // dismissable overlay, so it's deliberately excluded here.
+  useBackHandler(sidebarOpen && isMobile, () => setSB(false));
 
   // Entry handlers
   const onSaved = useCallback((saved) => {

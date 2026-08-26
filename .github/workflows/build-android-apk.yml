@@ -1,0 +1,77 @@
+name: Build Android APK
+
+# WHY THIS EXISTS: the Android APK is built here, on GitHub's own runners —
+# not locally, and not in the Claude Code sandbox that authored the
+# Capacitor setup this workflow builds. That sandbox's egress policy blocks
+# dl.google.com, which the Android SDK/build-tools download from, so a real
+# .apk could never be produced there. GitHub-hosted runners have normal
+# internet access, so this is the actual place the APK gets compiled.
+#
+# The app is configured in "remote URL" mode (see capacitor.config.ts) — the
+# installed APK loads the live Vercel deployment directly, it does not ship
+# a bundled copy of the web app. That means the `npm run build` step below
+# produces a build/ folder that Capacitor still wants to exist (so
+# `cap sync` has something to copy into the native project as an inert
+# local fallback) but that content is never actually what a user sees, so
+# the placeholder env values below are intentional, not a stand-in for real
+# secrets — no Supabase/Gemini keys need to be configured for this workflow
+# to work.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [master]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'android/**'
+      - 'capacitor.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/build-android-apk.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web assets (inert local fallback — see top-of-file comment)
+        run: npm run build
+        env:
+          REACT_APP_SUPABASE_URL: https://placeholder.supabase.co
+          REACT_APP_SUPABASE_ANON_KEY: placeholder-anon-key
+          REACT_APP_GEMINI_API_KEY: placeholder-gemini-key
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      # Debug-signed, not a Play Store release build — exactly what
+      # "downloadable, sideloadable APK" calls for here. Installing it
+      # requires enabling "install from unknown sources" for whichever app
+      # (browser, file manager) opens the download on the Android device.
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: medbook-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

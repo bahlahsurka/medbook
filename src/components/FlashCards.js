@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
+import { useBackHandler } from '../lib/useBackHandler';
 import { SYS_COLOR } from '../lib/constants';
 import { IconLayers, IconPlay, IconPlus, IconEdit, IconTrash, IconCheck, IconChevronLeft } from '../lib/icons';
 import DeckBrowser from './ImportedDecks/DeckBrowser';
@@ -357,6 +358,46 @@ export default function FlashCards({ userId, userSystems }) {
     .mb-fc-fade { animation: medbook-fade-in ${MOTION.normal} ${MOTION.ease}; }
   `;
 
+  // Hoisted above the area branches below (hooks can't follow a
+  // conditional `return`, and 'imported'/'favorites' each return early) so
+  // the back-button registrations further down can call them regardless of
+  // which area is active. Same exit logic either call site used inline
+  // before — onExit props further down now just reference these instead of
+  // redefining them.
+  const exitImportedStudy = () => { clearActiveStudy(userId); setImportedSub(null); setDeckRefreshSignal(s => s + 1); };
+  const exitFavoritesStudy = () => { clearActiveStudy(userId); setFavoritesStudyDeck(null); setFavoritesKey(k => k + 1); };
+
+  // Android hardware/gesture back button — see useBackHandler's own comment
+  // for the general mechanism. Three independent registrations, one per
+  // area, each only active while there's actually somewhere for back to
+  // go within that area; switching AREA_TABS itself is left un-tracked
+  // (lateral, not drill-down — same convention tab bars generally use).
+  //
+  // 'own': mirrors the exact targets the on-screen "← Back" buttons
+  // already use for each view (see e.g. the button using this same
+  // activeFolder/backTarget branching further down) — the hardware button
+  // should agree with the on-screen one, not invent separate rules.
+  useBackHandler(area === 'own' && view !== 'folders', () => {
+    if (view === 'study' || view === 'studyOne') {
+      if (activeFolder === null) backToFolders(); else { setView('list'); setDone(false); }
+    } else if (view === 'add') {
+      if (activeFolder) setView('list'); else backToFolders();
+    } else if (view === 'edit') {
+      setView('list');
+    } else {
+      backToFolders();
+    }
+  });
+  // 'imported': closes whichever sub-mode (Study/Browse/Stats) is open,
+  // back to the deck list — DeckBrowser itself never unmounts (Batch 5),
+  // so there's no deeper level to step through below that.
+  useBackHandler(area === 'imported' && !!importedSub, () => {
+    if (importedSub?.mode === 'study') exitImportedStudy();
+    else setImportedSub(null);
+  });
+  // 'favorites': same idea, one level (Study Favorites → the list).
+  useBackHandler(area === 'favorites' && !!favoritesStudyDeck, exitFavoritesStudy);
+
   // ── Imported Decks area ─────────────────────────────────────────────
   // A tab inside Flashcards, not a new Sidebar section. Everything below
   // this branch is the pre-existing "My Cards" feature, untouched.
@@ -394,18 +435,19 @@ export default function FlashCards({ userId, userSystems }) {
     // all, and any scroll position inside the tree survives a study trip
     // for free.
     const subOpen = !!importedSub;
-    // Exiting a STUDY session bumps deckRefreshSignal — studying is the one
-    // sub-mode that actually changes deck data (new_cards/due_cards, via
-    // rateCard's own count refresh) that the deck list itself displays.
-    // DeckBrowser stays mounted the whole time (Batch 5), which is exactly
-    // right for avoiding the forced-open bug, but means nothing re-fetches
-    // those counts on its own once studying changes them — bumping the
-    // signal is how it's told to, without forcing the full remount (and
-    // the loading flash / lost scroll position) that would undo that fix.
-    // Browse/Stats never change scheduling, so their own exits don't need
-    // this — only clearing the active-study pointer, which they never set
-    // in the first place, so that's a harmless no-op too.
-    const exitImportedStudy = () => { clearActiveStudy(userId); setImportedSub(null); setDeckRefreshSignal(s => s + 1); };
+    // exitImportedStudy is hoisted above (see its own comment) — reused
+    // here as the Study sub-mode's onExit. Exiting a STUDY session bumps
+    // deckRefreshSignal — studying is the one sub-mode that actually
+    // changes deck data (new_cards/due_cards, via rateCard's own count
+    // refresh) that the deck list itself displays. DeckBrowser stays
+    // mounted the whole time (Batch 5), which is exactly right for
+    // avoiding the forced-open bug, but means nothing re-fetches those
+    // counts on its own once studying changes them — bumping the signal is
+    // how it's told to, without forcing the full remount (and the loading
+    // flash / lost scroll position) that would undo that fix. Browse/Stats
+    // never change scheduling, so their own exits don't need this — only
+    // clearing the active-study pointer, which they never set in the first
+    // place, so that's a harmless no-op too.
     return (
       <>
         {importedSub?.mode === 'study' && (
@@ -456,8 +498,7 @@ export default function FlashCards({ userId, userSystems }) {
     return (
       <>
         {favoritesStudyDeck && (
-          <StudySession deck={favoritesStudyDeck} userId={userId}
-            onExit={() => { clearActiveStudy(userId); setFavoritesStudyDeck(null); setFavoritesKey(k => k + 1); }} />
+          <StudySession deck={favoritesStudyDeck} userId={userId} onExit={exitFavoritesStudy} />
         )}
         <div style={{ display: favoritesStudyDeck ? 'none' : 'block', maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
           <AreaTabs t={t} area={area} setArea={setArea} />

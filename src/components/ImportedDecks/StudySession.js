@@ -59,6 +59,7 @@ import * as api from '../../lib/importedDecks/api';
 import * as favoritesApi from '../../lib/importedDecks/favorites';
 import { scheduler } from '../../lib/srs/Scheduler';
 import { useReviewKeyboard } from '../../lib/useReviewKeyboard';
+import { useBackHandler } from '../../lib/useBackHandler';
 import { FLAGS, FLAG_COLORS, FLAG_NAMES } from '../../lib/importedDecks/flags';
 import { IconChevronLeft, IconPause, IconX, IconMaximize, IconMinimize, IconSearch, IconStar } from '../../lib/icons';
 import CardRenderer, { cardMediaFilenames, cardSideImages } from './CardRenderer';
@@ -539,6 +540,22 @@ export default function StudySession({ deck, userId, onExit }) {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [lightboxSrc, focusMode, flagPickerOpen]);
+
+  // Android hardware/gesture back button — same topmost-layer-first target
+  // and priority order as the Escape handler just above (lightbox > flag
+  // popover > Focus Mode), on the same reasoning: whichever of the three is
+  // actually on top is what "get me out" should close. One combined
+  // registration rather than three separate ones so it activates/
+  // deactivates exactly when this trio, as a group, has anything open —
+  // not once per sub-state. Exiting the session entirely on a back press
+  // when NONE of these are open is handled one level up, by FlashCards.js's
+  // own importedSub-level registration (see its own comment) — nothing
+  // extra needed here for that case.
+  useBackHandler(!!lightboxSrc || focusMode || flagPickerOpen, () => {
+    if (lightboxSrc) setLightboxSrc(null);
+    else if (flagPickerOpen) setFlagPickerOpen(false);
+    else setFocusMode(false);
+  });
 
   // Focus Mode hides the flag button entirely, so an open flag picker
   // would otherwise be stranded on screen with no way to see what opened it.
