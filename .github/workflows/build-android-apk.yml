@@ -30,6 +30,11 @@ on:
       - 'package-lock.json'
       - '.github/workflows/build-android-apk.yml'
 
+# Needed to create/update the GitHub Release below — the default
+# GITHUB_TOKEN is read-only otherwise and the release step would 403.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -73,9 +78,44 @@ jobs:
       # "downloadable, sideloadable APK" calls for here. Installing it
       # requires enabling "install from unknown sources" for whichever app
       # (browser, file manager) opens the download on the Android device.
-      - name: Upload APK
+      #
+      # Kept alongside the public Release below (not replaced by it): this
+      # artifact is scoped to signed-in-CI-collaborators and expires after a
+      # few months, useful for debugging a specific run; the Release is what
+      # actually makes an unauthenticated "download from the website" link
+      # possible at all, since Actions artifacts require a GitHub login to
+      # download even on a public repo.
+      - name: Upload APK (workflow-run artifact)
         uses: actions/upload-artifact@v4
         with:
           name: medbook-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      # A stable, public download link the website can hardcode (see
+      # ANDROID_APK_URL in src/components/Sidebar.js) — a friendlier
+      # filename than the Gradle-default app-debug.apk for whoever opens the
+      # downloaded file on their phone.
+      - name: Rename APK for the public download link
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk android/app/build/outputs/apk/debug/medbook.apk
+
+      # Public release assets need no authentication to download on a public
+      # repo — unlike the workflow-run artifact above, this is what the
+      # website's "Get the Android App" link actually points at.
+      # `apk-latest` is a fixed tag: this action updates that ONE release's
+      # asset in place on every run rather than creating a new release each
+      # time, so the download URL (.../releases/download/apk-latest/
+      # medbook.apk) never changes and the website link never needs editing
+      # for a new build to show up. `prerelease: true` because this is a
+      # debug-signed build, not a versioned store release.
+      - name: Publish to the rolling "apk-latest" GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          name: "MedBook Android (latest build)"
+          prerelease: true
+          body: |
+            Automatically rebuilt from ${{ github.sha }} (${{ github.event.head_commit.timestamp || 'manual run' }}).
+            This asset is replaced in place on every build — the download link
+            above never changes, so bookmark or share it directly.
+          files: android/app/build/outputs/apk/debug/medbook.apk
