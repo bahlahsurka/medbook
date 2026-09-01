@@ -141,35 +141,6 @@
         .mb-detail-side { margin-top: 0; position: sticky; top: 20px; }
       }
 
-      /* Compact sticky context bar (long entries) — appears once the header
-         has scrolled out of view. FIXED from the original absolute-over-
-         zero-height-anchor version, which covered whatever content followed
-         it (a zero-height anchor reserves no space, so the absolutely
-         positioned bar drew directly on top of Review Notes below it).
-         Now the anchor itself is the sticky element and genuinely reserves
-         space via a grid-rows collapse (the same 0fr<->1fr trick as
-         AISections.js's Collapse) — when it opens, the row's real height
-         pushes the content below down instead of covering it, animating
-         smoothly rather than jumping. The inner content stays permanently
-         mounted; only the row's height is ever toggled, so nothing about
-         the bar's own state resets when it opens/closes. */
-      .mb-detail-stickybar-anchor {
-        position: sticky; top: 0;
-        display: grid; grid-template-rows: 0fr;
-        transition: grid-template-rows 200ms ease;
-        margin: 0 -20px;
-      }
-      .mb-detail-stickybar-anchor.is-open { grid-template-rows: 1fr; }
-      .mb-detail-stickybar-inner { overflow: hidden; min-height: 0; }
-      .mb-detail-stickybar {
-        display: flex; align-items: center; gap: 10px;
-        padding: 8px 20px;
-      }
-      @media (min-width: 768px) {
-        .mb-detail-stickybar-anchor { margin: 0 -28px; }
-        .mb-detail-stickybar { padding: 8px 28px; }
-      }
-
       /* Image gallery inside the detail screen — a horizontal scroll strip
          on mobile (unchanged), a compact 2-up grid once it has room to
          breathe in the sidebar rail. */
