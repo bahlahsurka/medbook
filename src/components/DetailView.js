@@ -236,17 +236,15 @@ function GalleryThumb({ t, src, onClick }) {
   );
 }
 
-// The "Highlight" toggle — used both in the Review Notes section header and
-// (compact) in the sticky bar, so both read as the same control rather than
-// two independently-styled buttons.
-function HighlightToggle({ t, on, onClick, compact }) {
+// The "Highlight" toggle in the Review Notes section header.
+function HighlightToggle({ t, on, onClick }) {
   return (
     <button className="mb-detailbtn"
       onMouseDown={e=>e.preventDefault()} onTouchStart={e=>e.preventDefault()}
       onClick={onClick}
       style={{fontSize:FONT.size.xs,background:on?t.hlBtnBg:t.surface3,
         border:`1px solid ${on?t.hlBtnBorder:t.border}`,
-        borderRadius:RADIUS.sm-1,padding:compact?'5px 10px':'3px 10px',cursor:'pointer',
+        borderRadius:RADIUS.sm-1,padding:'3px 10px',cursor:'pointer',
         display:'flex',alignItems:'center',gap:5,flexShrink:0,
         color:on?t.hlBtnText:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
         transition:'background 150ms ease, border-color 150ms ease, color 150ms ease'}}>
@@ -314,24 +312,6 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const editTaRef = useRef();
   const editOverlayRef = useRef();
   const notesRef  = useRef();
-
-  // Compact sticky context bar (long-entry navigation) — appears once the
-  // header has scrolled out of view, so a long Review has a way back to
-  // System/Highlight without scrolling up. Driven by IntersectionObserver
-  // watching a 1px sentinel placed right after the header, NOT a scroll
-  // listener: the observer only fires on the one boundary crossing, so this
-  // stays cheap regardless of how long the entry is or how much the user
-  // scrolls — no per-pixel scroll math anywhere. See its render site for
-  // the zero-reflow trick used to mount it.
-  const [showStickyBar, setShowStickyBar] = useState(false);
-  const headerSentinelRef = useRef(null);
-  useEffect(() => {
-    const el = headerSentinelRef.current;
-    if (!el || typeof IntersectionObserver === 'undefined') return;
-    const io = new IntersectionObserver(([e]) => setShowStickyBar(!e.isIntersecting), { threshold: 0 });
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
 
   const syncEditOverlay = useCallback(() => {
     if (editOverlayRef.current && editTaRef.current) {
@@ -976,35 +956,6 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                     borderTop:`2px solid ${t.danger}`,borderRadius:RADIUS.circle,
                     animation:'medbook-spin .7s linear infinite'}} />
                 : <IconTrash size={14} />} />
-          </div>
-        </div>
-
-        {/* Sentinel for the sticky compact bar just below — its DOM position
-            right after the header (before Review Notes) is what makes
-            IntersectionObserver report "scrolled past the header" at the
-            right moment, with no scroll math involved. 1px tall, inert. */}
-        <div ref={headerSentinelRef} aria-hidden="true" style={{height:1}} />
-
-        {/* Sticky bar: a real (collapsing) row, not an overlay — see the CSS
-            comment on .mb-detail-stickybar-anchor for why. It genuinely
-            reserves space when open, so it pushes Review Notes down instead
-            of covering it. Content stays mounted at all times; only the
-            row's height animates. */}
-        <div className={`mb-detail-stickybar-anchor${showStickyBar ? ' is-open' : ''}`} style={{zIndex:Z.dropdown}}>
-          <div className="mb-detail-stickybar-inner">
-            <div className="mb-detail-stickybar" style={{background:t.surface,
-              borderBottom:`1px solid ${t.border}`,boxShadow:elevation(t,'sm')}}>
-              <button className="mb-detailbtn" onClick={onBack} title={`Back to ${entry.system}`}
-                aria-label={`Back to ${entry.system}`} style={{background:'none',border:'none',
-                color:t.text3,cursor:'pointer',display:'flex',alignItems:'center',padding:4,flexShrink:0}}>
-                <IconChevronLeft size={16} />
-              </button>
-              <div style={{flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
-                fontSize:FONT.size.sm,fontWeight:FONT.weight.semibold,color:t.text2}}>
-                {entry.title}
-              </div>
-              <HighlightToggle t={t} on={hlViewOn} onClick={()=>setHVOn(p=>!p)} compact />
-            </div>
           </div>
         </div>
 
