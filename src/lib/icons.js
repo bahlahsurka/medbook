@@ -300,3 +300,14 @@ export function IconStar({ size=14, style, className, filled=false }) {
     <polygon points={points} strokeLinejoin="round" />
   </Svg>;
 }
+
+export function IconListBullet({ size=14, style, className }) {
+  return <Svg size={size} style={style} className={className}>
+    <circle cx="4" cy="6" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="4" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="4" cy="18" r="1.4" fill="currentColor" stroke="none" />
+    <line x1="9" y1="6" x2="21" y2="6" />
+    <line x1="9" y1="12" x2="21" y2="12" />
+    <line x1="9" y1="18" x2="21" y2="18" />
+  </Svg>;
+}
