@@ -11,7 +11,7 @@ import HLPopover from './HLPopover';
 import AISections from './AISections';
 import AIService, { normalizeSections, isAllEmpty } from '../services/ai';
 import { limitsFor } from '../services/ai/PromptBuilder';
-import { handleBulletKeyDown, toggleBulletLines } from '../lib/bulletList';
+import { handleBulletKeyDown, toggleBulletLines, handleBulletPaste } from '../lib/bulletList';
 
 
 // --- helpers -------------------------------------------------------------
@@ -781,6 +781,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                 onSelect={editHl.onSelChange} onMouseUp={editHl.onSelChange}
                 onKeyUp={editHl.onSelChange} onTouchEnd={editHl.onSelChange}
                 onKeyDown={handleBulletKeyDown}
+                onPaste={handleBulletPaste}
                 onScroll={syncEditOverlay}
                 rows={8} style={{...inp,resize:'vertical',lineHeight:'1.7',
                   marginTop:0,
