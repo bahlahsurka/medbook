@@ -4,9 +4,10 @@ import { DIFFICULTY, DIFF_COLOR } from '../lib/constants';
 import { buildHighlightParts, resolveHL, adjustHighlights } from '../lib/highlights';
 import { useHighlight } from '../lib/useHighlight';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
-import { IconEdit, IconImages, IconUpload, IconX, IconCheck, IconSparkle } from '../lib/icons';
+import { IconEdit, IconImages, IconUpload, IconX, IconCheck, IconSparkle, IconListBullet } from '../lib/icons';
 import HLToolbar from './HLToolbar';
 import AIService from '../services/ai';
+import { handleBulletKeyDown, toggleBulletLines } from '../lib/bulletList';
 
 const DRAFT_KEY = 'medbook_draft_v2';
 const loadDraft = sys => { try { return JSON.parse(localStorage.getItem(DRAFT_KEY)||'{}')[sys]||null; } catch { return null; } };
@@ -283,6 +284,18 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
                   color:hlMode?t.hlBtnText:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
                   display:'flex',alignItems:'center',gap:5
                 }}><IconEdit size={11} /> {hlMode?'Highlighting on':'Highlight'}</button>
+              <button
+                className="mb-ae-btn"
+                onMouseDown={e=>e.preventDefault()}
+                onTouchStart={e=>e.preventDefault()}
+                onClick={()=>toggleBulletLines(taRef.current)}
+                title="Turn the current line (or selected lines) into bullet points"
+                style={{
+                  fontSize:FONT.size.xs,background:t.surface3,border:`1px solid ${t.border}`,
+                  borderRadius:RADIUS.sm-1,padding:'4px 10px',cursor:'pointer',
+                  color:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
+                  display:'flex',alignItems:'center',gap:5
+                }}><IconListBullet size={11} /> Bullets</button>
               {hl.highlights.length>0 && (
                 <span style={{fontSize:FONT.size.xs,color:t.text4}}>
                   {hl.highlights.length} highlight{hl.highlights.length!==1?'s':''}
@@ -311,6 +324,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
                 onMouseUp={hl.onSelChange}
                 onKeyUp={hl.onSelChange}
                 onTouchEnd={hl.onSelChange}
+                onKeyDown={handleBulletKeyDown}
                 onScroll={syncOverlayScroll}
                 placeholder="Key concepts, mnemonics, clinical pearls…"
                 rows={8}

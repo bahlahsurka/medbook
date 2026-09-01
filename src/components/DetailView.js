@@ -5,12 +5,13 @@ import { buildHighlightParts, resolveHL, adjustHighlights } from '../lib/highlig
 import { useHighlight, clearRange } from '../lib/useHighlight';
 import { useTheme, SPACE, RADIUS, FONT, Z, elevation } from '../lib/theme';
 import { IconChevronLeft, IconChevronRight, IconEdit, IconCheck, IconTrash, IconPin,
-  IconImages, IconSparkle, IconX, IconDownload, IconChart } from '../lib/icons';
+  IconImages, IconSparkle, IconX, IconDownload, IconChart, IconListBullet } from '../lib/icons';
 import HLToolbar from './HLToolbar';
 import HLPopover from './HLPopover';
 import AISections from './AISections';
 import AIService, { normalizeSections, isAllEmpty } from '../services/ai';
 import { limitsFor } from '../services/ai/PromptBuilder';
+import { handleBulletKeyDown, toggleBulletLines } from '../lib/bulletList';
 
 
 // --- helpers -------------------------------------------------------------
@@ -755,6 +756,16 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                   color:hlEditOn?t.hlBtnText:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif'}}>
                 <IconEdit size={11} /> {hlEditOn?'On':'Highlight'}
               </button>
+              <button className="mb-detailbtn"
+                onMouseDown={e=>e.preventDefault()} onTouchStart={e=>e.preventDefault()}
+                onClick={()=>toggleBulletLines(editTaRef.current)}
+                title="Turn the current line (or selected lines) into bullet points"
+                style={{fontSize:FONT.size.xs,background:t.surface3,border:`1px solid ${t.border}`,
+                  borderRadius:RADIUS.sm-1,padding:'4px 10px',cursor:'pointer',display:'flex',
+                  alignItems:'center',gap:5,
+                  color:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif'}}>
+                <IconListBullet size={11} /> Bullets
+              </button>
               {editHl.highlights.length>0 && <span style={{fontSize:FONT.size.xs,color:t.text4}}>{editHl.highlights.length} highlights</span>}
             </div>
             {hlEditOn && <HLToolbar onApply={editHl.applyHL} onRemove={editHl.removeHL} onClearAll={editHl.clearAllHL} hasSelection={editHl.hasSel} />}
@@ -769,6 +780,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                 onChange={e=>{ editHl.handleTextChange(editNotes,e.target.value); setEN(e.target.value); }}
                 onSelect={editHl.onSelChange} onMouseUp={editHl.onSelChange}
                 onKeyUp={editHl.onSelChange} onTouchEnd={editHl.onSelChange}
+                onKeyDown={handleBulletKeyDown}
                 onScroll={syncEditOverlay}
                 rows={8} style={{...inp,resize:'vertical',lineHeight:'1.7',
                   marginTop:0,
