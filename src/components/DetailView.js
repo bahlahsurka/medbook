@@ -692,6 +692,27 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     setNI([]); setErr(''); setHEOn(false);
   };
 
+  // All the edit-mode fields (including editHl's highlights) are seeded
+  // from `entry` only ONCE, at mount — useState ignores its initial-value
+  // argument on every render after the first. Highlighting in VIEW mode
+  // (applyViewHL/removeViewHL) updates `entry.highlights` via onUpdated
+  // WITHOUT remounting this component, so editHl's highlights silently
+  // went stale (still whatever they were at mount, often empty) the very
+  // first time someone opened Edit after highlighting. Saving from there
+  // then persisted that stale (often empty) set, wiping the highlight
+  // that was just added — the "highlights vanish after edit" bug. Re-sync
+  // every edit field from the current `entry` right before entering edit
+  // mode (same fields cancelEdit already resets on the way OUT) so edit
+  // mode always starts from what's actually saved, not what existed when
+  // this DetailView instance first mounted.
+  const openEdit = () => {
+    setET(entry.title); setEN(entry.notes||'');
+    setED(entry.difficulty||'Medium'); setEI(entry.images||[]);
+    editHl.setHighlights(entry.highlights||[]);
+    setNI([]); setErr(''); setHEOn(false);
+    setEditing(true);
+  };
+
   // ── EDIT MODE ──────────────────────────────────────────────────────────
   // A narrower cap than view mode even on desktop — a form of stacked
   // fields reads worse stretched to full width than a moderate column does.
@@ -944,7 +965,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             <ActionButton t={t} tone="ok" icon={<IconCheck size={14} />} label="Mark reviewed"
               onClick={markReviewed} pulse={reviewedFlash} />
             <ActionButton t={t} tone="accent" icon={<IconEdit size={14} />} label="Edit entry"
-              onClick={()=>setEditing(true)} />
+              onClick={openEdit} />
             <ActionButton t={t} tone={entry.pinned?'warn':'neutral'} icon={<IconPin size={14} />}
               label={entry.pinned?'Unpin entry':'Pin entry'} onClick={togglePin} />
             <ActionButton t={t} tone="neutral" icon={<IconDownload size={14} />} label="Export as PDF"
