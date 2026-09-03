@@ -8,7 +8,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useTheme } from '../../lib/theme';
 import * as api from '../../lib/importedDecks/api';
 import { uploadApkg, createImportJob, startProcessing } from '../../lib/importedDecks/upload';
-import { savePendingImport, loadPendingImport, clearPendingImport } from '../../lib/importedDecks/pendingImport';
+import { savePendingImport, loadPendingImport, clearPendingImport, warmPendingImportDB } from '../../lib/importedDecks/pendingImport';
 
 // job.status -> human label (Phase H4's required state names). 'uploading'
 // is a front-end-only step before any import_jobs row exists yet.
@@ -50,6 +50,11 @@ export default function ImportWizard({ userId, onClose, onImported }) {
   // to pick back up from the last file that was chosen instead of sending
   // the user through the exact same picker interaction that lost it.
   useEffect(() => {
+    // Open (and cache) the IndexedDB connection now, while the user is
+    // still looking at "choose a file" — so the save at pick time below is
+    // just a transaction + put, not also an open()/onupgradeneeded round
+    // trip. See pendingImport.js's TIMING note.
+    warmPendingImportDB();
     let cancelled = false;
     (async () => {
       try {
@@ -94,13 +99,19 @@ export default function ImportWizard({ userId, onClose, onImported }) {
   const pickFile = (f) => {
     if (!f) return;
     if (!/\.apkg$/i.test(f.name)) { setErr('Please choose a .apkg file exported from Anki.'); return; }
+    // Fired right here, synchronously in the SAME handler as the picker's
+    // change event — deliberately NOT deferred to a useEffect, which would
+    // only run after React commits and paints. That extra delay is exactly
+    // what isn't affordable: the discard has been observed happening
+    // "immediately" after the file comes back from the picker. See
+    // pendingImport.js's TIMING note.
+    savePendingImport(userId, { file: f, importMedia });
     setResumed(false); setFile(f); setErr(''); setStep('options');
   };
 
-  // Stash the picked file (and its options) the instant either changes —
-  // well before Start Import is tapped, since that's exactly where a
-  // discarded tab has been observed losing everything. Cheap and best-effort;
-  // see pendingImport.js.
+  // Re-stash whenever the chosen option changes on the Options screen —
+  // less time-critical than the initial pick (there's no picker round trip
+  // involved), so a plain effect is fine here.
   useEffect(() => {
     if (file) savePendingImport(userId, { file, importMedia });
   }, [file, importMedia, userId]);
