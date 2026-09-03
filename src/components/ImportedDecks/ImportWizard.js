@@ -8,6 +8,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useTheme } from '../../lib/theme';
 import * as api from '../../lib/importedDecks/api';
 import { uploadApkg, createImportJob, startProcessing } from '../../lib/importedDecks/upload';
+import { savePendingImport, loadPendingImport, clearPendingImport } from '../../lib/importedDecks/pendingImport';
 
 // job.status -> human label (Phase H4's required state names). 'uploading'
 // is a front-end-only step before any import_jobs row exists yet.
@@ -33,19 +34,42 @@ export default function ImportWizard({ userId, onClose, onImported }) {
   const [progressPct, setProgressPct] = useState(0);
   const [job, setJob] = useState(null);
   const [err, setErr] = useState('');
+  const [resumed, setResumed] = useState(false);
   const abortRef = useRef(null);
   const pollRef = useRef(null);
   const fileInputRef = useRef(null);
 
   // Phase H4: recover an active job on mount rather than resetting the UI —
-  // covers refresh/navigation during an active import.
+  // covers refresh/navigation during an active import. Extended here to
+  // also recover a picked-but-not-yet-uploaded file: on some Android
+  // tablets, the moment right around the OS file picker handing a file back
+  // is enough for the browser to silently discard the tab and reload it —
+  // no error, no warning, just a blank restart (see pendingImport.js). If
+  // that already happened once, a real import_jobs row takes priority (the
+  // upload made it through, the old stash is just stale); otherwise, offer
+  // to pick back up from the last file that was chosen instead of sending
+  // the user through the exact same picker interaction that lost it.
   useEffect(() => {
     let cancelled = false;
-    api.getActiveImportJob(userId).then(active => {
-      if (cancelled || !active) return;
-      setJob(active);
-      setStep(active.status === 'failed' ? 'failed' : 'processing');
-    }).catch(() => {});
+    (async () => {
+      try {
+        const active = await api.getActiveImportJob(userId);
+        if (cancelled) return;
+        if (active) {
+          setJob(active);
+          setStep(active.status === 'failed' ? 'failed' : 'processing');
+          clearPendingImport(userId);
+          return;
+        }
+      } catch { /* fall through to the pending-file check either way */ }
+
+      const pending = await loadPendingImport(userId);
+      if (cancelled || !pending) return;
+      setFile(pending.file);
+      setImportMedia(pending.importMedia ?? true);
+      setResumed(true);
+      setStep('options');
+    })();
     return () => { cancelled = true; };
   }, [userId]);
 
@@ -70,8 +94,16 @@ export default function ImportWizard({ userId, onClose, onImported }) {
   const pickFile = (f) => {
     if (!f) return;
     if (!/\.apkg$/i.test(f.name)) { setErr('Please choose a .apkg file exported from Anki.'); return; }
-    setFile(f); setErr(''); setStep('options');
+    setResumed(false); setFile(f); setErr(''); setStep('options');
   };
+
+  // Stash the picked file (and its options) the instant either changes —
+  // well before Start Import is tapped, since that's exactly where a
+  // discarded tab has been observed losing everything. Cheap and best-effort;
+  // see pendingImport.js.
+  useEffect(() => {
+    if (file) savePendingImport(userId, { file, importMedia });
+  }, [file, importMedia, userId]);
 
   const startUpload = async () => {
     setStep('uploading'); setErr(''); setProgressPct(0);
@@ -82,6 +114,7 @@ export default function ImportWizard({ userId, onClose, onImported }) {
         signal: abortRef.current.signal,
       });
       const created = await createImportJob({ userId, blobUrl: blob.url, importMedia });
+      clearPendingImport(userId); // it's a real import_jobs row now — the local stash has done its job
       setJob(created);
       setStep('processing');
       startProcessing(created.id);
@@ -90,6 +123,11 @@ export default function ImportWizard({ userId, onClose, onImported }) {
       setErr(e.message || 'Upload failed'); setStep('failed');
     }
   };
+
+  // Wrap every close path so walking away from a picked file also drops the
+  // stash — otherwise reopening Import later would offer to "resume" a file
+  // the user deliberately backed out of.
+  const closeAndClear = useCallback(() => { clearPendingImport(userId); onClose(); }, [userId, onClose]);
 
   const cancelUpload = () => abortRef.current?.abort();
 
@@ -106,29 +144,29 @@ export default function ImportWizard({ userId, onClose, onImported }) {
     padding: '12px 22px', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' });
 
   return (
-    <div onClick={step === 'pick' ? onClose : undefined} style={{ position: 'fixed', inset: 0,
+    <div onClick={step === 'pick' ? closeAndClear : undefined} style={{ position: 'fixed', inset: 0,
       background: t.overlay, zIndex: 300, display: 'flex', alignItems: 'center',
       justifyContent: 'center', padding: 16 }}>
       <div onClick={e => e.stopPropagation()} style={{ background: t.surface, borderRadius: 16,
         padding: 28, maxWidth: 460, width: '100%', boxShadow: `0 8px 32px ${t.shadowStrong}`,
         fontFamily: 'Inter,sans-serif', maxHeight: '90vh', overflowY: 'auto' }}>
 
-        {step === 'pick' && <PickStep t={t} B={B} err={err} onClose={onClose}
+        {step === 'pick' && <PickStep t={t} B={B} err={err} onClose={closeAndClear}
           fileInputRef={fileInputRef} onPick={pickFile} />}
 
-        {step === 'options' && <OptionsStep t={t} B={B} file={file}
+        {step === 'options' && <OptionsStep t={t} B={B} file={file} resumed={resumed}
           importMedia={importMedia} setImportMedia={setImportMedia}
           onBack={() => setStep('pick')} onStart={startUpload} />}
 
         {step === 'uploading' && <UploadingStep t={t} B={B} file={file}
           pct={progressPct} onCancel={cancelUpload} />}
 
-        {step === 'processing' && <ProcessingStep t={t} B={B} job={job} onClose={onClose} onNudge={retry} />}
+        {step === 'processing' && <ProcessingStep t={t} B={B} job={job} onClose={closeAndClear} onNudge={retry} />}
 
         {step === 'failed' && <FailedStep t={t} B={B} job={job} err={err}
-          onRetry={retry} onClose={onClose} />}
+          onRetry={retry} onClose={closeAndClear} />}
 
-        {step === 'complete' && <CompleteStep t={t} B={B} job={job} onClose={onClose} />}
+        {step === 'complete' && <CompleteStep t={t} B={B} job={job} onClose={closeAndClear} />}
       </div>
     </div>
   );
@@ -173,7 +211,7 @@ function PickStep({ t, B, err, onClose, fileInputRef, onPick }) {
 }
 
 /* ── Phase H3 — import options ───────────────────────────────────────── */
-function OptionsStep({ t, B, file, importMedia, setImportMedia, onBack, onStart }) {
+function OptionsStep({ t, B, file, resumed, importMedia, setImportMedia, onBack, onStart }) {
   const row = (label, checked, onChange, note, locked) => (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 0',
       borderBottom: `1px solid ${t.border}` }}>
@@ -199,10 +237,17 @@ function OptionsStep({ t, B, file, importMedia, setImportMedia, onBack, onStart 
   return (
     <>
       <div style={{ fontSize: 17, fontWeight: 700, color: t.text, marginBottom: 4 }}>Import Options</div>
-      <div style={{ fontSize: 12.5, color: t.text4, marginBottom: 16, overflow: 'hidden',
+      <div style={{ fontSize: 12.5, color: t.text4, marginBottom: resumed ? 8 : 16, overflow: 'hidden',
         textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {file?.name} · {file ? (file.size / 1024 / 1024).toFixed(1) : '0'} MB
       </div>
+
+      {resumed && (
+        <div style={{ background: t.navActiveBg, border: `1px solid ${t.navActiveBorder}`, borderRadius: 8,
+          padding: '9px 12px', fontSize: 12, color: t.navActiveText, marginBottom: 16, lineHeight: 1.5 }}>
+          Picked up where you left off — this file was still waiting after the last attempt was interrupted.
+        </div>
+      )}
 
       {row('Import media', importMedia, setImportMedia,
         'Images and audio referenced by cards. Turning this off imports notes/cards only, much faster for a quick preview.')}
