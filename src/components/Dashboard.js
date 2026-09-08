@@ -142,7 +142,7 @@ export default function Dashboard({ entries, userSystems, onOpenEntry, onNavigat
           Welcome to MedBook
         </div>
         <div style={{ fontSize:FONT.size.base, color:t.text3, marginBottom:24, lineHeight:FONT.leading.relaxed }}>
-          Your dashboard fills in once you start capturing what you're learning —
+          Your dashboard fills in once you start capturing what you're learning:
           due reviews, recent entries, and study progress will all show up here.
         </div>
         <button className="mb-dash-cta" onClick={onAddEntry} style={{ background:t.accent, color:'#fff',
@@ -309,7 +309,7 @@ export default function Dashboard({ entries, userSystems, onOpenEntry, onNavigat
           <div style={capLabel}>Recently Studied</div>
           {stats.recentlyStudied.length === 0 ? (
             <div style={{ fontSize:FONT.size.sm, color:t.text4, lineHeight:FONT.leading.relaxed }}>
-              Nothing studied yet — ratings from Review Queue will show up here.
+              Nothing studied yet. Ratings from Review Queue will show up here.
             </div>
           ) : (
             <div style={{ display:'flex', flexDirection:'column', gap:2 }}>

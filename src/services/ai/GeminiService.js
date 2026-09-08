@@ -140,7 +140,7 @@ async function attemptModel(model, userPrompt, signal) {
       const isPro = /pro/i.test(model);
       let waitAdvice;
       if (isDaily) {
-        waitAdvice = "This is the DAILY free-tier cap, not the per-minute one — waiting a minute will NOT help. " +
+        waitAdvice = "This is the DAILY free-tier cap, not the per-minute one. Waiting a minute will NOT help. " +
           "It only clears on Google's next quota-day rollover (Pacific time), so Analyze will keep failing until then.";
       } else if (retryDelay) {
         waitAdvice = `Google says to wait ${retryDelay}, then click Analyze once.`;
@@ -158,7 +158,7 @@ async function attemptModel(model, userPrompt, signal) {
         // for a higher limit — that alias is what silently rolled onto the
         // tightly-quota'd 3.7 Flash in the first place, so it's no longer
         // trustworthy advice. Nothing points back to it now.
-        (isPro ? ' If this keeps happening, a lighter-weight model may have a higher free limit — check REACT_APP_GEMINI_MODEL against Google AI Studio\'s current quotas.' : ''),
+        (isPro ? ' If this keeps happening, a lighter-weight model may have a higher free limit. Check REACT_APP_GEMINI_MODEL against Google AI Studio\'s current quotas.' : ''),
         isDaily ? 'quota_daily' : 'quota'
       );
     }
@@ -168,7 +168,7 @@ async function attemptModel(model, userPrompt, signal) {
     if (res.status === 401 || /ACCESS_TOKEN_TYPE_UNSUPPORTED/i.test(detail)) {
       throw new GeminiError(
         'Gemini rejected the credential (401). If your key starts with "AQ." this is a known ' +
-        'issue with Google\'s new Auth keys on some accounts — the key itself is usually fine. ' +
+        'issue with Google\'s new Auth keys on some accounts. The key itself is usually fine. ' +
         'Try creating a fresh key in AI Studio; if it persists it is a Google-side account issue, ' +
         'not your setup.',
         'auth'
@@ -296,7 +296,7 @@ export async function generate(userPrompt, { signal } = {}) {
 
   throw new GeminiError(
     `No working Gemini model found (tried: ${tried.join(', ')}). ` +
-    'Google may have changed its model lineup — check REACT_APP_GEMINI_MODEL.',
+    'Google may have changed its model lineup. Check REACT_APP_GEMINI_MODEL.',
     'api'
   );
 }

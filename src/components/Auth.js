@@ -43,7 +43,7 @@ export default function Auth() {
     setPwSaving(false);
     if (error) { setMsg({ ok:false, text:error.message }); return; }
     window.history.replaceState(null, '', window.location.pathname);
-    setMsg({ ok:true, text:'Password updated — you are signed in.' });
+    setMsg({ ok:true, text:'Password updated. You are signed in.' });
   };
 
   // App.js reads the recovery flag once at mount, so a full reload (with the

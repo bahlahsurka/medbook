@@ -221,7 +221,7 @@ export default function ImportedStats({ userId, onExit }) {
       {derived && !derived.hasAnyData && (
         <div style={{ ...card, textAlign: 'center', padding: '40px 20px' }}>
           <div style={{ fontSize: 32, marginBottom: 10 }}>📊</div>
-          <div style={{ fontSize: 14, color: t.text3 }}>No reviews logged yet — study a deck to see stats here.</div>
+          <div style={{ fontSize: 14, color: t.text3 }}>No reviews logged yet. Study a deck to see stats here.</div>
         </div>
       )}
 
@@ -245,7 +245,7 @@ export default function ImportedStats({ userId, onExit }) {
 
           {/* Reviews per day */}
           <div style={{ ...card, marginBottom: 16 }}>
-            <div style={{ ...capLabel, marginBottom: 10 }}>Reviews — last 7 days</div>
+            <div style={{ ...capLabel, marginBottom: 10 }}>Reviews: last 7 days</div>
             <TrendChart t={t} values={derived.countByDay}
               dayLabels={last7Days.map(d => d.toLocaleDateString('en-GB', { weekday: 'short' }))} />
             <div style={{ display: 'flex', marginTop: 8 }}>
@@ -281,9 +281,9 @@ export default function ImportedStats({ userId, onExit }) {
             )}
           </div>
 
-          {/* Rating breakdown — last 90 days, always text-labeled */}
+          {/* Rating breakdown: last 90 days, always text-labeled */}
           <div style={card}>
-            <div style={{ ...capLabel, marginBottom: 10 }}>Rating breakdown — last 90 days</div>
+            <div style={{ ...capLabel, marginBottom: 10 }}>Rating breakdown: last 90 days</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 8 }}>
               {Object.entries(RATING_META).map(([key, meta]) => (
                 <div key={key} style={{ background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 8,

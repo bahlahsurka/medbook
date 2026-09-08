@@ -36,10 +36,10 @@ import EntryCard from './EntryCard';
 function mockEntries() {
   const daysAgo = n => new Date(Date.now() - n * 86400000).toISOString();
   return [
-    { id:'p1', title:'Digoxin toxicity — ECG changes', system:'Cardiology',
+    { id:'p1', title:'Digoxin toxicity: ECG changes', system:'Cardiology',
       notes:'Scooped ST depression, PR prolongation, and coloured-vision complaints are the classic exam triad.',
       review_count:3, next_review:null, images:[], pinned:true, created_at:daysAgo(2) },
-    { id:'p2', title:'Cranial nerve exam — quick reference', system:'Neurology',
+    { id:'p2', title:'Cranial nerve exam: quick reference', system:'Neurology',
       notes:'CN III palsy: "down and out" eye with ptosis. CN VII: forehead-sparing means an upper motor neuron lesion.',
       review_count:0, next_review:daysAgo(1), images:[], pinned:false, created_at:daysAgo(5) },
     { id:'p3', title:'Beta-lactam mechanism of action', system:'Pharmacology',
@@ -288,7 +288,7 @@ function ProductNarrative({ t, reducedMotion }) {
             A better way to learn medicine.
           </h2>
           <p style={{ fontSize:FONT.size.md, color:t.text3, lineHeight:FONT.leading.relaxed, margin:0 }}>
-            One connected system for the whole study loop — what you learn, how you
+            One connected system for the whole study loop: what you learn, how you
             review it, and what you actually remember.
           </p>
         </div>
@@ -309,8 +309,8 @@ export default function LandingPage({ onGetStarted }) {
   const reducedMotion = useReducedMotion();
 
   useEffect(() => {
-    document.title = 'MedBook — A better way to learn medicine';
-    return () => { document.title = 'MedBook — Medical Notebook'; };
+    document.title = 'MedBook: A better way to learn medicine';
+    return () => { document.title = 'MedBook: Medical Notebook'; };
   }, []);
 
   return (

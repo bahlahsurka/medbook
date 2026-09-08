@@ -441,7 +441,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
         </div>
         {!done && (
           <div style={{ fontSize:FONT.size.xs, color:t.text4, marginBottom:26 }}>
-            {total - idx - 1} card{total-idx-1!==1?'s':''} remaining — they'll be here when you come back.
+            {total - idx - 1} card{total-idx-1!==1?'s':''} remaining. They'll be here when you come back.
           </div>
         )}
         {done && <div style={{ fontSize:FONT.size.xs, color:t.text4, marginBottom:26 }}>All cards reviewed!</div>}

@@ -101,13 +101,13 @@ export default function AISections({
                         outline:'none', boxSizing:'border-box', resize:'vertical',
                         fontFamily:'Inter,sans-serif' }} />
                     <div style={{ fontSize:10.5, color:t.text4, marginTop:4 }}>
-                      One point per line. These are yours to edit — Gemini won't overwrite
+                      One point per line. These are yours to edit; Gemini won't overwrite
                       them unless you Re-analyze.
                     </div>
                   </>
                 ) : list.length === 0 ? (
                   <div style={{ fontSize:12, color:t.text4, fontStyle:'italic' }}>
-                    Nothing here — your Review didn't support this section.
+                    Nothing here. Your Review didn't support this section.
                   </div>
                 ) : (
                   <ul style={{ margin:0, paddingLeft:18 }}>
@@ -238,7 +238,7 @@ function FlashcardSection({ cards, onChange, onAddToDeck, onAddAllToDeck, deckAd
           {cards.length > 0 && (
             <div style={{ fontSize:10.5, color:t.text4 }}>
               "Add to my deck" copies a card into your permanent Flashcards.
-              Copies are yours — Re-analyze never touches them.
+              Copies are yours; Re-analyze never touches them.
             </div>
           )}
         </div>

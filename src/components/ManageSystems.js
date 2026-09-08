@@ -125,7 +125,7 @@ export default function ManageSystems({ systems, onSave, onClose, userId }) {
                   {sys._oldName && sys._oldName !== sys.name && (
                     <span style={{ fontSize:10, color:t.warn, marginLeft:6,
                       background:t.warnBg, borderRadius:4, padding:'1px 6px',
-                      border:`1px solid ${t.warnBorder}` }}>renamed — will update entries</span>
+                      border:`1px solid ${t.warnBorder}` }}>renamed, will update entries</span>
                   )}
                   {sys.custom && !sys._oldName && (
                     <span style={{ fontSize:10, color:t.text4, marginLeft:6,

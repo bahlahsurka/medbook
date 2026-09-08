@@ -8,7 +8,7 @@
 // (new_cards, due_cards, total_cards) — this component NEVER scans
 // imported_cards itself. See lib/importedDecks/api.js for the due_cards
 // schema-gap note: a deck with due_cards === null means the live column
-// doesn't exist yet, not that nothing is due — rendered as "—", not "0".
+// doesn't exist yet, not that nothing is due — rendered as "-", not "0".
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTheme } from '../../lib/theme';
@@ -396,7 +396,7 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick, 
           not aggregated across the whole subtree — see getSessionCards in
           lib/importedDecks/api.js. */}
       {optionsTarget && (
-        <Modal t={t} onClose={() => setOptionsTarget(null)} title={`Deck Options — "${optionsTarget.display_name}"`}>
+        <Modal t={t} onClose={() => setOptionsTarget(null)} title={`Deck Options: "${optionsTarget.display_name}"`}>
           <div style={{ fontSize: 13, color: t.text3, lineHeight: 1.6, marginBottom: 18 }}>
             Limits apply per calendar day, to a study session started from this deck. Leave a field
             blank for no limit.
@@ -503,7 +503,7 @@ function DeckNode({ deck, depth, expanded, childrenMap, onToggleExpand, onStudy,
           <div style={{ fontSize: 11.5, color: t.text4, marginTop: 3 }}>
             {(deck.new_cards ?? 0).toLocaleString()} new · <span style={{
               color: hasDue ? t.accent : t.text4, fontWeight: hasDue ? 700 : 400 }}>
-              {deck.due_cards == null ? '—' : deck.due_cards.toLocaleString()} due
+              {deck.due_cards == null ? '-' : deck.due_cards.toLocaleString()} due
             </span> · {(deck.total_cards ?? 0).toLocaleString()} total
           </div>
         </div>
