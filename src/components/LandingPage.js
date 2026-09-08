@@ -421,7 +421,7 @@ function FlowDiagram({ t }) {
 
 function ProductNarrative({ t, reducedMotion }) {
   return (
-    <section id="mb-land-narrative" style={{ padding:`${SPACE.xl4}px ${SPACE.lg}px`, background:t.surface2,
+    <section id="mb-land-narrative" style={{ padding:`${SPACE.xl4}px ${SPACE.lg}px`,
       borderTop:`1px solid ${t.border}` }}>
       <div style={{ maxWidth:1100, margin:'0 auto' }}>
         <div style={{ textAlign:'center', maxWidth:560, margin:`0 auto ${SPACE.xl3}px` }}>
@@ -954,7 +954,7 @@ function VisualVarietyStrip({ t }) {
 function VisualLearning({ t, reducedMotion }) {
   return (
     <section id="mb-land-visual" style={{ padding:`${SPACE.xl4}px ${SPACE.lg}px`,
-      background:t.surface2, borderTop:`1px solid ${t.border}` }}>
+      borderTop:`1px solid ${t.border}` }}>
       <div style={{ maxWidth:1100, margin:'0 auto' }}>
         <div style={{ textAlign:'center', maxWidth:620, margin:`0 auto ${SPACE.xl3}px` }}>
           <h2 style={{ fontSize:'clamp(24px, 3.2vw, 32px)', fontWeight:FONT.weight.bold,
@@ -1001,8 +1001,29 @@ export default function LandingPage({ onGetStarted }) {
     return () => { document.title = 'MedBook: Medical Notebook'; };
   }, []);
 
+  // A soft, continuous ambient gradient behind the WHOLE page (not a
+  // per-section fill) — three large, very low-opacity accent-tinted glows
+  // positioned at different depths down the page, sitting over the flat
+  // base colour. Percentage positions are relative to the full scrollable
+  // height of .mb-landing, not the viewport, so the glows stay distributed
+  // as more sections get added in later batches rather than being pinned
+  // to today's page length. Individual sections no longer paint their own
+  // flat surface2 band over this — cards keep their own solid surface
+  // background, but the space around them now shares one gradient canvas.
+  // Alpha is a plain hex suffix on t.accent (same idiom EntryCard's Tag
+  // already uses for tinted backgrounds), tuned separately per theme since
+  // a glow that reads as "premium, barely-there" in light mode disappears
+  // entirely against dark's near-black surface at the same alpha.
+  const glow = isDark ? { a:'33', b:'26', c:'2b' } : { a:'26', b:'19', c:'20' };
+  const landingBg = [
+    `radial-gradient(1000px 620px at 18% 0%, ${t.accent}${glow.a}, transparent 55%)`,
+    `radial-gradient(900px 700px at 88% 40%, ${t.accent}${glow.b}, transparent 55%)`,
+    `radial-gradient(1000px 650px at 12% 82%, ${t.accent}${glow.c}, transparent 55%)`,
+    t.appBg,
+  ].join(', ');
+
   return (
-    <div className="mb-landing" style={{ background:t.appBg, minHeight:'100vh', fontFamily:'Inter,sans-serif' }}>
+    <div className="mb-landing" style={{ background:landingBg, minHeight:'100vh', fontFamily:'Inter,sans-serif' }}>
       <style>{`
         .mb-landing h1, .mb-landing h2, .mb-landing h3 { font-family: Inter, sans-serif; }
         .mb-land-btn { transition: filter ${MOTION.fast} ${MOTION.ease}, transform ${MOTION.fast} ${MOTION.ease}; }
