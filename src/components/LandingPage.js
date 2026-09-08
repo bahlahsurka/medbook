@@ -1,11 +1,22 @@
 // components/LandingPage.js
 //
 // Public marketing page — rendered at "/" for a signed-out visitor (see the
-// render gate in App.js). Batch 1 only: sticky nav, hero (+CTAs+creator
-// line), a real-MedBook-UI product preview, and the initial "A better way
-// to learn medicine." / Learn → Review → Remember composition. Everything
-// past that (deep flashcard story, AI section, About/Creator section, final
-// CTA, footer) is intentionally NOT here yet — later batches.
+// render gate in App.js).
+//
+// Batch 1: sticky nav, hero (+CTAs+creator line), a real-MedBook-UI product
+// preview, and a first pass at the "A better way to learn medicine." /
+// Learn → Review → Remember composition.
+//
+// Batch 2 (this pass): replaces that first-pass LRR with the fuller
+// composition — a single shared panel (not three floating cards) that opens
+// with a compact real-UI "loop" strip proving the product supports the
+// whole cycle (Entry → System → Review Queue → Flashcard → back into
+// Review), then the three Learn/Review/Remember stages beneath it as one
+// divided row rather than three repeated feature cards, closing on the
+// "Your medical knowledge, built to stay with you." transition line.
+//
+// Everything past that (deep flashcard story, AI section, About/Creator
+// section, final CTA, footer) is intentionally NOT here yet — later batches.
 //
 // THEME: deliberately just useTheme(), the same hook every authenticated
 // screen uses — no separate CSS-variable/media-query system. theme.js's
@@ -240,25 +251,90 @@ function Hero({ t, onGetStarted, reducedMotion }) {
 }
 
 // ── Learn → Review → Remember ─────────────────────────────────────────────
-const LRR_COLUMNS = [
-  { key:'learn', title:'Learn', icon:IconEdit, items:['Review Entries','Systems','Notes','Images','Highlights'] },
-  { key:'review', title:'Review', icon:IconSearch, items:['Review Queue','Search','Organized medical knowledge'] },
-  { key:'remember', title:'Remember', icon:IconCards, items:['Flashcards','Spaced repetition','Imported decks','Favorites'] },
+// One shared panel, not three feature cards: a compact real-UI "loop" strip
+// proves the product supports the whole cycle, then the three stages sit
+// underneath as a single divided row (dividers + a connector badge between
+// them, not three separately-bordered boxes repeating the same layout).
+const STAGES = [
+  { key:'learn', num:'01', title:'Learn', icon:IconEdit,
+    items:['Review Entries', 'Systems', 'Notes', 'Images', 'Highlights'] },
+  { key:'review', num:'02', title:'Review', icon:IconSearch,
+    items:['Review Queue', 'Search', 'Organized knowledge'] },
+  { key:'remember', num:'03', title:'Remember', icon:IconCards,
+    items:['Flashcards', 'Spaced repetition', 'Favorites', 'Imported decks'] },
 ];
 
-function LRRColumn({ t, col, isLast }) {
+// Compact previews built from the app's own real colour/shape language
+// (EntryCard's left-bar + pill, the dashboard's stat tiles, a flashcard's
+// stacked-card silhouette) rather than screenshots or fabricated icons —
+// what distinguishes each stage beyond just an icon and a list.
+function StagePreview({ t, stageKey }) {
+  if (stageKey === 'learn') {
+    const c = SYS_COLOR.Cardiology;
+    return (
+      <div style={{ background:t.surface, border:`1px solid ${t.border}`, borderLeft:`3px solid ${c}`,
+        borderRadius:RADIUS.sm, padding:'8px 10px', display:'flex', flexDirection:'column', gap:5 }}>
+        <span style={{ fontSize:FONT.size.xs, fontWeight:FONT.weight.semibold, color:t.text }}>
+          Digoxin toxicity
+        </span>
+        <span style={{ fontSize:9, fontWeight:FONT.weight.medium, color:c, background:`${c}12`,
+          border:`1px solid ${c}25`, borderRadius:RADIUS.sm-2, padding:'1px 6px', alignSelf:'flex-start' }}>
+          Cardiology
+        </span>
+      </div>
+    );
+  }
+  if (stageKey === 'review') {
+    return (
+      <div style={{ background:t.surface, border:`1px solid ${t.border}`, borderRadius:RADIUS.sm,
+        padding:'8px 10px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:8 }}>
+        <div>
+          <div style={{ fontSize:9, color:t.text4, letterSpacing:.5, fontWeight:FONT.weight.semibold,
+            textTransform:'uppercase' }}>Due today</div>
+          <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.bold, color:t.accent }}>12</div>
+        </div>
+        <div style={{ width:26, height:26, borderRadius:RADIUS.circle, background:t.navActiveBg,
+          color:t.accent, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+          <IconRepeat size={13} />
+        </div>
+      </div>
+    );
+  }
+  // remember — a short stack of cards, echoing the app's own flashcard UI
   return (
-    <div className="mb-land-lrr-col" style={{ display:'flex', alignItems:'stretch', gap:0 }}>
-      <div style={{ flex:1, minWidth:0, background:t.surface, border:`1px solid ${t.border}`,
-        borderRadius:RADIUS.lg, padding:SPACE.lg, boxShadow:elevation(t,'sm') }}>
-        <div style={{ width:36, height:36, borderRadius:RADIUS.md, background:t.navActiveBg,
-          display:'flex', alignItems:'center', justifyContent:'center', color:t.accent, marginBottom:SPACE.md }}>
-          <col.icon size={17} />
+    <div style={{ position:'relative', padding:'2px 6px 0 0' }}>
+      <div style={{ position:'absolute', inset:'6px -6px 0 6px', background:t.surface3,
+        border:`1px solid ${t.border}`, borderRadius:RADIUS.sm }} aria-hidden="true" />
+      <div style={{ position:'relative', background:t.surface, border:`1px solid ${t.border}`,
+        borderRadius:RADIUS.sm, padding:'8px 10px', display:'flex', alignItems:'center', gap:7,
+        boxShadow:elevation(t,'sm') }}>
+        <IconCards size={13} style={{ color:t.accent, flexShrink:0 }} />
+        <span style={{ fontSize:FONT.size.xs, fontWeight:FONT.weight.medium, color:t.text2 }}>
+          Beta-lactam MOA
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function StageBlock({ t, stage }) {
+  return (
+    <div className="mb-land-stage">
+      <div className="mb-land-stage-inner">
+        <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between',
+          marginBottom:SPACE.md }}>
+          <div style={{ width:32, height:32, borderRadius:RADIUS.md, background:t.navActiveBg,
+            display:'flex', alignItems:'center', justifyContent:'center', color:t.accent }}>
+            <stage.icon size={15} />
+          </div>
+          <span aria-hidden="true" style={{ fontSize:FONT.size.xl2, fontWeight:FONT.weight.bold,
+            color:t.text4, opacity:.5, lineHeight:1 }}>{stage.num}</span>
         </div>
         <h3 style={{ fontSize:FONT.size.xs, letterSpacing:.8, textTransform:'uppercase',
-          fontWeight:FONT.weight.bold, color:t.text, margin:`0 0 ${SPACE.sm+2}px` }}>{col.title}</h3>
-        <ul style={{ listStyle:'none', margin:0, padding:0, display:'flex', flexDirection:'column', gap:7 }}>
-          {col.items.map(item => (
+          fontWeight:FONT.weight.bold, color:t.text, margin:`0 0 ${SPACE.sm+2}px` }}>{stage.title}</h3>
+        <ul style={{ listStyle:'none', margin:`0 0 ${SPACE.md}px`, padding:0, display:'flex',
+          flexDirection:'column', gap:6 }}>
+          {stage.items.map(item => (
             <li key={item} style={{ display:'flex', alignItems:'center', gap:7,
               fontSize:FONT.size.sm, color:t.text2 }}>
               <IconCheck size={11} style={{ color:t.ok, flexShrink:0 }} />
@@ -266,13 +342,56 @@ function LRRColumn({ t, col, isLast }) {
             </li>
           ))}
         </ul>
+        <StagePreview t={t} stageKey={stage.key} />
       </div>
-      {!isLast && (
-        <div className="mb-land-lrr-arrow" aria-hidden="true" style={{ color:t.text4,
-          alignItems:'center', flexShrink:0, padding:`0 ${SPACE.sm}px`, alignSelf:'center' }}>
-          <IconChevronRight size={18} />
-        </div>
-      )}
+    </div>
+  );
+}
+
+// The compact "proof" strip — real MedBook pieces chained together to show
+// the whole loop at a glance before the stage-by-stage breakdown below.
+function FlowChip({ t, children }) {
+  return (
+    <div style={{ background:t.surface2, border:`1px solid ${t.border}`, borderRadius:RADIUS.md,
+      padding:'8px 12px', display:'flex', alignItems:'center', gap:7, flexShrink:0 }}>
+      {children}
+    </div>
+  );
+}
+
+function FlowArrow({ t }) {
+  return <IconChevronRight size={13} style={{ color:t.text4, flexShrink:0 }} aria-hidden="true" />;
+}
+
+function FlowDiagram({ t }) {
+  const c = SYS_COLOR.Cardiology;
+  return (
+    <div className="mb-land-flow-diagram" role="img"
+      aria-label="Review Entry leads to System, then Review Queue, then Flashcard, then back into Review Queue">
+      <FlowChip t={t}>
+        <span style={{ width:8, height:8, borderRadius:2, background:c, flexShrink:0 }} aria-hidden="true" />
+        <span style={{ fontSize:FONT.size.xs, fontWeight:FONT.weight.semibold, color:t.text }}>Entry</span>
+      </FlowChip>
+      <FlowArrow t={t} />
+      <FlowChip t={t}>
+        <span style={{ fontSize:FONT.size.xs, fontWeight:FONT.weight.medium, color:c }}>System</span>
+      </FlowChip>
+      <FlowArrow t={t} />
+      <FlowChip t={t}>
+        <IconRepeat size={12} style={{ color:t.accent, flexShrink:0 }} />
+        <span style={{ fontSize:FONT.size.xs, fontWeight:FONT.weight.semibold, color:t.text }}>Review Queue</span>
+      </FlowChip>
+      <FlowArrow t={t} />
+      <FlowChip t={t}>
+        <IconCards size={12} style={{ color:t.accent, flexShrink:0 }} />
+        <span style={{ fontSize:FONT.size.xs, fontWeight:FONT.weight.semibold, color:t.text }}>Flashcard</span>
+      </FlowChip>
+      <FlowArrow t={t} />
+      <div style={{ background:'transparent', border:`1px dashed ${t.borderStrong}`, borderRadius:RADIUS.md,
+        padding:'8px 12px', display:'flex', alignItems:'center', gap:6, flexShrink:0, color:t.accent }}>
+        <IconRepeat size={12} />
+        <span style={{ fontSize:FONT.size.xs, fontWeight:FONT.weight.semibold }}>Review again</span>
+      </div>
     </div>
   );
 }
@@ -282,22 +401,32 @@ function ProductNarrative({ t, reducedMotion }) {
     <section id="mb-land-narrative" style={{ padding:`${SPACE.xl4}px ${SPACE.lg}px`, background:t.surface2,
       borderTop:`1px solid ${t.border}` }}>
       <div style={{ maxWidth:1100, margin:'0 auto' }}>
-        <div style={{ textAlign:'center', maxWidth:640, margin:`0 auto ${SPACE.xl3}px` }}>
+        <div style={{ textAlign:'center', maxWidth:560, margin:`0 auto ${SPACE.xl3}px` }}>
           <h2 style={{ fontSize:'clamp(24px, 3.2vw, 32px)', fontWeight:FONT.weight.bold,
-            color:t.text, lineHeight:1.2, margin:`0 0 ${SPACE.md}px` }}>
+            color:t.text, lineHeight:1.2, margin:`0 0 ${SPACE.sm+2}px` }}>
             A better way to learn medicine.
           </h2>
           <p style={{ fontSize:FONT.size.md, color:t.text3, lineHeight:FONT.leading.relaxed, margin:0 }}>
-            One connected system for the whole study loop: what you learn, how you
-            review it, and what you actually remember.
+            MedBook connects learning, review and memory into one study workflow.
           </p>
         </div>
 
-        <div className="mb-land-lrr-grid">
-          {LRR_COLUMNS.map((col, i) => (
-            <LRRColumn key={col.key} t={t} col={col} isLast={i === LRR_COLUMNS.length - 1} />
-          ))}
+        <div className="mb-land-flow-panel" style={{ background:t.surface, border:`1px solid ${t.border}`,
+          borderRadius:RADIUS.xl2, boxShadow:elevation(t,'md'), overflow:'hidden' }}>
+          <div className="mb-land-flow-diagram-wrap" style={{ borderBottom:`1px solid ${t.border}` }}>
+            <FlowDiagram t={t} />
+          </div>
+          <div className="mb-land-stage-row">
+            {STAGES.map(stage => <StageBlock key={stage.key} t={t} stage={stage} />)}
+          </div>
         </div>
+      </div>
+
+      <div style={{ maxWidth:560, margin:`${SPACE.xl4}px auto 0`, textAlign:'center' }}>
+        <p style={{ fontSize:'clamp(17px, 2vw, 20px)', fontWeight:FONT.weight.semibold,
+          color:t.text2, lineHeight:1.4, margin:0 }}>
+          Your medical knowledge, built to stay with you.
+        </p>
       </div>
     </section>
   );
@@ -323,17 +452,38 @@ export default function LandingPage({ onGetStarted }) {
         .mb-land-btn:active { transform: scale(0.97); }
         .mb-land-btn:focus-visible { outline: 2px solid ${t.accent}; outline-offset: 2px; }
 
-        .mb-land-lrr-grid { display:flex; flex-direction:column; gap:${SPACE.lg}px; }
-        /* The → connector between columns only makes sense in the horizontal
-           desktop layout below — stacked vertically on mobile, the cards'
-           own order already reads as a sequence, so the arrow is just
-           hidden rather than repurposed as a downward chevron. */
-        .mb-land-lrr-arrow { display:none; }
+        /* The proof strip: chips + arrows wrap freely on narrow screens
+           rather than trying to force one unbroken line — each chip is
+           sized to its own content, so wrapping still reads as one
+           continuous chain, just folded onto more lines. */
+        .mb-land-flow-diagram { display:flex; flex-wrap:wrap; align-items:center;
+          justify-content:center; gap:${SPACE.sm}px; padding:${SPACE.lg}px; }
+        .mb-land-flow-diagram-wrap { background:${t.surface2}; }
+
+        /* One shared panel for all three stages — a divided row, not three
+           separately-bordered cards. Mobile stacks them in the SAME panel
+           (bottom borders) rather than turning each into its own box;
+           desktop lays them side by side (right borders). Either way a
+           small circular connector sits on the divider between stages,
+           rotating from pointing down (stacked) to pointing right (row). */
+        .mb-land-stage-row { display:flex; flex-direction:column; }
+        .mb-land-stage { position:relative; flex:1; min-width:0; }
+        .mb-land-stage-inner { padding:${SPACE.lg}px; }
+        .mb-land-stage:not(:last-child) { border-bottom:1px solid ${t.border}; }
+        .mb-land-stage:not(:last-child)::after {
+          content:'›'; position:absolute; left:50%; bottom:0; z-index:1;
+          transform:translate(-50%, 50%) rotate(90deg);
+          width:24px; height:24px; border-radius:${RADIUS.circle};
+          background:${t.surface}; border:1px solid ${t.border}; color:${t.text4};
+          display:flex; align-items:center; justify-content:center;
+          font-size:15px; line-height:1;
+        }
         @media (min-width: ${BREAKPOINT.mobile}px) {
-          .mb-land-lrr-grid { flex-direction:row; align-items:stretch; }
-          .mb-land-lrr-col { display:flex; }
-          .mb-land-lrr-col > div:first-child { display:flex; flex-direction:column; width:100%; height:100%; }
-          .mb-land-lrr-arrow { display:flex; }
+          .mb-land-stage-row { flex-direction:row; align-items:stretch; }
+          .mb-land-stage:not(:last-child) { border-bottom:none; border-right:1px solid ${t.border}; }
+          .mb-land-stage:not(:last-child)::after {
+            left:100%; bottom:50%; transform:translate(-50%, 50%) rotate(0deg);
+          }
         }
 
         .mb-land-h1-line { display:block; font-size:clamp(30px, 6.4vw, 54px); }
