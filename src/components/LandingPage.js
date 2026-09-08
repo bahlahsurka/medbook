@@ -94,7 +94,7 @@ import { useEffect, useState } from 'react';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, BREAKPOINT, elevation } from '../lib/theme';
 import { IconPulse, IconSearch, IconRepeat, IconCards, IconChart, IconEdit,
   IconCheck, IconChevronRight, IconLayers, IconPin, IconImages, IconSparkle,
-  IconMenu, IconX, IconDownload } from '../lib/icons';
+  IconMenu, IconX, IconDownload, IconUpload, IconPlus } from '../lib/icons';
 import { SYS_COLOR } from '../lib/constants';
 import { HL_COLORS, resolveHL } from '../lib/highlights';
 import { LANDING_IMAGES } from '../lib/landingImages';
@@ -1295,10 +1295,68 @@ const INSTALL_PLATFORMS = [
   ] },
 ];
 
+// A compact phone mockup for the iOS card — built from MedBook's own design
+// tokens (BrandMark, real icons, real radii/colours), not the reference
+// tutorial image itself: that image was a generic support-doc-style
+// graphic (device chrome, drawn-on circles) that doesn't match anything
+// else on the page, so this condenses its same three beats — MedBook open
+// in Safari, the Share sheet's "Add to Home Screen", the resulting icon —
+// into one small illustration in the site's own visual language.
+function IOSInstallMockup({ t }) {
+  return (
+    <div aria-hidden="true" style={{ width:150, margin:`0 auto ${SPACE.md}px`, background:'#374151',
+      borderRadius:22, padding:5, boxShadow:elevation(t,'md') }}>
+      <div style={{ background:t.surface, borderRadius:17, overflow:'hidden' }}>
+        {/* Notch — a fixed dark bezel colour on purpose: a physical device's
+            casing doesn't flip to a pale colour just because the OS theme
+            is dark, the way t.text2 (a text colour, meant to invert) would. */}
+        <div style={{ display:'flex', justifyContent:'center', paddingTop:5 }}>
+          <div style={{ width:38, height:10, background:'#374151', borderRadius:6 }} />
+        </div>
+        {/* Safari-style address bar showing MedBook */}
+        <div style={{ padding:'6px 8px 4px' }}>
+          <div style={{ background:t.surface2, border:`1px solid ${t.border}`, borderRadius:7,
+            padding:'4px 6px', display:'flex', alignItems:'center', gap:4 }}>
+            <BrandMark t={t} size={11} iconSize={6} />
+            <span style={{ fontSize:7, color:t.text3, fontWeight:FONT.weight.medium }}>medbook.app</span>
+          </div>
+        </div>
+        {/* A sliver of the real hero, so it reads as "MedBook", not a
+            generic browser window */}
+        <div style={{ padding:'2px 10px 8px', textAlign:'center' }}>
+          <div style={{ fontSize:7.5, fontWeight:FONT.weight.bold, color:t.text, lineHeight:1.3 }}>
+            Learn medicine.
+          </div>
+        </div>
+        {/* The Share sheet's "Add to Home Screen" row — the actual step
+            being illustrated */}
+        <div style={{ borderTop:`1px solid ${t.border}`, background:t.surface2, padding:'8px 8px 10px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:5, marginBottom:6, color:t.text4 }}>
+            <IconUpload size={9} />
+            <span style={{ fontSize:7, fontWeight:FONT.weight.semibold, textTransform:'uppercase',
+              letterSpacing:.4 }}>Share</span>
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:6, background:t.navActiveBg,
+            border:`1px solid ${t.accent}40`, borderRadius:7, padding:'5px 7px' }}>
+            <span style={{ width:14, height:14, borderRadius:4, background:t.accent, color:'#fff',
+              display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+              <IconPlus size={9} />
+            </span>
+            <span style={{ fontSize:7.5, fontWeight:FONT.weight.semibold, color:t.accent }}>
+              Add to Home Screen
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function InstallCard({ t, platform }) {
   return (
     <div className="mb-land-showcase-panel" style={{ background:t.surface, border:`1px solid ${t.border}`,
       borderRadius:RADIUS.xl, boxShadow:elevation(t,'sm'), padding:SPACE.lg }}>
+      {platform.key === 'ios' && <IOSInstallMockup t={t} />}
       <div style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.bold, color:t.text,
         marginBottom:SPACE.md }}>
         {platform.label}
@@ -1619,8 +1677,12 @@ export default function LandingPage({ onGetStarted }) {
 
         /* Install: one column on mobile, three across once there's room —
            each card stays a comfortable reading width rather than
-           squeezing three into a phone-width row. */
-        .mb-land-install-grid { display:grid; grid-template-columns:1fr; gap:${SPACE.md}px; }
+           squeezing three into a phone-width row. align-items:start keeps
+           each card its own natural height (the iOS card is taller, with
+           its phone mockup) instead of Grid's default stretch forcing
+           Android/Desktop to match it with empty space at the bottom. */
+        .mb-land-install-grid { display:grid; grid-template-columns:1fr; gap:${SPACE.md}px;
+          align-items:start; }
         @media (min-width: ${BREAKPOINT.mobile}px) {
           .mb-land-install-grid { grid-template-columns:repeat(3, minmax(0,1fr)); }
         }
