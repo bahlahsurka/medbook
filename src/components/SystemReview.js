@@ -177,7 +177,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
         <div style={{fontSize:40,marginBottom:12}}>✅</div>
         <div style={{fontSize:16,fontWeight:700,color:t.text,marginBottom:8}}>All caught up in {system}</div>
         <div style={{fontSize:14,color:t.text3,marginBottom:6}}>
-          Nothing due right now — {upcoming.length} card{upcoming.length!==1?'s':''} scheduled for later.
+          Nothing due right now. {upcoming.length} card{upcoming.length!==1?'s':''} scheduled for later.
         </div>
         {nextDue && (
           <div style={{fontSize:12,color:t.text4,marginBottom:20}}>
@@ -233,7 +233,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
           display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
           <div>
             <div style={{fontSize:14,fontWeight:700,color:t.text}}>
-              Reviewing — <span style={{color}}>{system}</span>
+              Reviewing: <span style={{color}}>{system}</span>
             </div>
             <div style={{fontSize:11,color:t.text4,marginTop:2}}>
               {idx+1} / {total} · {reviewed} reviewed · {progress}% done

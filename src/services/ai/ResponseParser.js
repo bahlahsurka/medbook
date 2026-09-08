@@ -88,7 +88,7 @@ export function parseAnalysis(rawText) {
   try {
     obj = JSON.parse(jsonText);
   } catch {
-    throw new ParseError('Gemini returned malformed JSON. Nothing was saved — try Analyze again.');
+    throw new ParseError('Gemini returned malformed JSON. Nothing was saved, try Analyze again.');
   }
 
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {

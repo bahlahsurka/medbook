@@ -156,7 +156,7 @@ const clozeNote2 = makeNote({
 const ioNote1 = makeNote({
   deckId: 'deck-neuro', modelId: 'model-io', tags: ['neuroanatomy', 'image_occlusion'],
   fields: [
-    '1', 'Circle of Willis — identify the labeled structures',
+    '1', 'Circle of Willis: identify the labeled structures',
     '<img src="circle_of_willis.jpg">',
     '<img src="circle_of_willis.jpg" class="io-question">',
     '<img src="circle_of_willis.jpg" class="io-answer">',

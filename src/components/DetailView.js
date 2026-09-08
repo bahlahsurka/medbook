@@ -599,7 +599,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
 
   const exportPDF = () => {
     const win = window.open('','_blank');
-    if (!win) { setErr('Pop-up blocked — allow pop-ups to export a PDF.'); return; }
+    if (!win) { setErr('Pop-up blocked. Allow pop-ups to export a PDF.'); return; }
     win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(entry.title)}</title>
     <style>body{font-family:sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#1f2937}
     h1{font-size:20px;margin-bottom:8px}.meta{font-size:12px;color:#6b7280;margin-bottom:16px}
@@ -721,7 +721,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:SPACE.lg+2}}>
         <IconEdit size={15} style={{color:t.text3,flexShrink:0}} />
         <div style={{fontSize:FONT.size.md,fontWeight:FONT.weight.bold,color:t.text}}>
-          Editing — <span style={{color}}>{entry.system}</span>
+          Editing: <span style={{color}}>{entry.system}</span>
         </div>
       </div>
 
@@ -1002,7 +1002,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                   hasSelection={viewHasSel}
                 />
                 <div style={{fontSize:FONT.size.xs,color:t.text4,marginBottom:SPACE.sm}}>
-                  Select text, then tap a colour here — or use the bar that pops up above your selection.
+                  Select text, then tap a colour here, or use the bar that pops up above your selection.
                 </div>
               </>
             )}
@@ -1127,7 +1127,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             boxShadow:elevation(t,'sm')}}>
             <div style={{display:'flex',alignItems:'center',gap:6,fontSize:FONT.size.micro,color:t.text4,
               letterSpacing:.8,fontWeight:FONT.weight.semibold,textTransform:'uppercase',marginBottom:SPACE.lg}}>
-              <IconImages size={11} style={{flexShrink:0}} /> Images ({entry.images.length}) — tap to expand
+              <IconImages size={11} style={{flexShrink:0}} /> Images ({entry.images.length}) - tap to expand
             </div>
             <div className="mb-detail-images">
               {entry.images.map((url,i)=>(

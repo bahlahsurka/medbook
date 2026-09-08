@@ -143,6 +143,17 @@ function readInitial() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved === 'dark' || saved === 'light') return saved;
   } catch {}
+  // No explicit choice saved yet (first visit, or storage unavailable) —
+  // follow the OS/browser preference rather than hard-defaulting to light.
+  // This matters beyond just politeness: it's what makes the public landing
+  // page (which reads colours from this same useTheme() hook, same as every
+  // authenticated screen) actually follow prefers-color-scheme for a
+  // first-time visitor — nobody reaches that page having ever set an
+  // in-app preference, so without this fallback it would always render
+  // light regardless of the visitor's OS setting.
+  try {
+    if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) return 'dark';
+  } catch {}
   return 'light';
 }
 
@@ -163,10 +174,50 @@ export function ThemeProvider({ children }) {
 
   useEffect(() => {
     applyBodyTheme(t);
-    try { localStorage.setItem(STORAGE_KEY, theme); } catch {}
-  }, [theme, t]);
+  }, [t]);
 
-  const toggle = useCallback(() => setTheme(p => p === 'dark' ? 'light' : 'dark'), []);
+  // Live-follow the OS/browser preference while the tab stays open, for a
+  // visitor who's never made an explicit in-app choice. Without this, a
+  // visitor who flips their system theme mid-session sees nothing change
+  // until their next full page load — readInitial() only runs once, at
+  // mount. This listener re-checks localStorage each time the OS setting
+  // fires (rather than trusting a captured "has an explicit choice" flag),
+  // so it correctly goes quiet the moment toggle() below writes one.
+  useEffect(() => {
+    let mql;
+    try { mql = window.matchMedia?.('(prefers-color-scheme: dark)'); } catch { return; }
+    if (!mql) return;
+    const onChange = e => {
+      let saved = null;
+      try { saved = localStorage.getItem(STORAGE_KEY); } catch {}
+      if (saved === 'dark' || saved === 'light') return; // explicit choice wins
+      setTheme(e.matches ? 'dark' : 'light');
+    };
+    try { mql.addEventListener('change', onChange); } catch { mql.addListener?.(onChange); }
+    return () => {
+      try { mql.removeEventListener('change', onChange); } catch { mql.removeListener?.(onChange); }
+    };
+  }, []);
+
+  // Only an EXPLICIT toggle gets written to storage — not the initial
+  // render's value. readInitial()'s prefers-color-scheme fallback used to
+  // get persisted here unconditionally on every mount, which silently
+  // baked a visitor's system theme in as if they'd chosen it by hand: the
+  // very first time anyone loaded the site under a dark OS, this effect
+  // wrote 'dark' to localStorage, and every load after that short-circuited
+  // straight to the saved value — so switching the OS/browser back to
+  // light later did nothing, because readInitial() never got to its
+  // matchMedia check again. Persisting only real toggles means a visitor
+  // who's never explicitly chosen a theme keeps following the OS on every
+  // fresh load, and an explicit choice (this toggle) is the only thing
+  // that ever overrides that going forward.
+  const toggle = useCallback(() => {
+    setTheme(p => {
+      const next = p === 'dark' ? 'light' : 'dark';
+      try { localStorage.setItem(STORAGE_KEY, next); } catch {}
+      return next;
+    });
+  }, []);
 
   return (
     <ThemeContext.Provider value={{ t, theme, toggle, isDark: theme === 'dark' }}>

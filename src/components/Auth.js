@@ -43,7 +43,7 @@ export default function Auth() {
     setPwSaving(false);
     if (error) { setMsg({ ok:false, text:error.message }); return; }
     window.history.replaceState(null, '', window.location.pathname);
-    setMsg({ ok:true, text:'Password updated — you are signed in.' });
+    setMsg({ ok:true, text:'Password updated. You are signed in.' });
   };
 
   // App.js reads the recovery flag once at mount, so a full reload (with the
@@ -99,7 +99,16 @@ export default function Auth() {
   const shell = (children) => (
     <div style={{ minHeight:'100vh', background:t.appBg, display:'flex',
       alignItems:'center', justifyContent:'center', padding:20, fontFamily:'Inter,sans-serif' }}>
-      <div style={{ width:'100%', maxWidth:400 }}>
+      {/* Fades/lifts in on mount — arriving here from a landing-page Get
+          Started/Log in click (see App.js's own matching fade-out) reads as
+          one continuous motion instead of the page just snapping in.
+          prefers-reduced-motion visitors get no animation at all. */}
+      <style>{`
+        @keyframes mb-auth-fade-in { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+        .mb-auth-card { animation: mb-auth-fade-in 260ms cubic-bezier(0.4,0,0.2,1) both; }
+        @media (prefers-reduced-motion: reduce) { .mb-auth-card { animation: none; } }
+      `}</style>
+      <div className="mb-auth-card" style={{ width:'100%', maxWidth:400 }}>
         <div style={{ textAlign:'center', marginBottom:32 }}>
           <div style={{ display:'inline-flex', alignItems:'center', justifyContent:'center',
             width:48, height:48, borderRadius:12, background:t.accent,

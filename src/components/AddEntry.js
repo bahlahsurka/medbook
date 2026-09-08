@@ -212,7 +212,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
 
           <F label="TITLE *">
             <input value={title} onChange={e=>setTitle(e.target.value)}
-              placeholder="e.g. Digoxin toxicity — ECG changes"
+              placeholder="e.g. Digoxin toxicity: ECG changes"
               style={inp} autoFocus disabled={saving} />
           </F>
 

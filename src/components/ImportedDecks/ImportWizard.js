@@ -256,21 +256,21 @@ function OptionsStep({ t, B, file, resumed, importMedia, setImportMedia, onBack,
       {resumed && (
         <div style={{ background: t.navActiveBg, border: `1px solid ${t.navActiveBorder}`, borderRadius: 8,
           padding: '9px 12px', fontSize: 12, color: t.navActiveText, marginBottom: 16, lineHeight: 1.5 }}>
-          Picked up where you left off — this file was still waiting after the last attempt was interrupted.
+          Picked up where you left off. This file was still waiting after the last attempt was interrupted.
         </div>
       )}
 
       {row('Import media', importMedia, setImportMedia,
         'Images and audio referenced by cards. Turning this off imports notes/cards only, much faster for a quick preview.')}
       {row('Preserve hierarchy', true, null,
-        'Always on — the importer preserves your Anki deck structure.', true)}
+        'Always on. The importer preserves your Anki deck structure.', true)}
       {row('Preserve tags', true, null,
-        'Always on — every note keeps its original Anki tags.', true)}
+        'Always on. Every note keeps its original Anki tags.', true)}
       {row('Import scheduling history', false, null,
-        'Not supported — a shared/imported deck always starts fresh rather than inheriting someone else’s review intervals.', true)}
+        'Not supported. A shared/imported deck always starts fresh rather than inheriting someone else’s review intervals.', true)}
 
       <div style={{ fontSize: 12, color: t.text4, lineHeight: 1.6, margin: '16px 0' }}>
-        The original .apkg is temporary — it's automatically deleted once the import is verified.
+        The original .apkg is temporary. It's automatically deleted once the import is verified.
         If the import fails, it's kept so you don't have to re-upload.
       </div>
 
@@ -341,14 +341,14 @@ function ProcessingStep({ t, B, job, onClose, onNudge }) {
       )}
       {!['importing_cards', 'importing_media'].includes(job?.status) && (
         <div style={{ fontSize: 12.5, color: t.text4, marginBottom: 16 }}>
-          Working — this can take a few minutes for a large deck.
+          Working. This can take a few minutes for a large deck.
         </div>
       )}
 
       {looksStalled && (
         <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: 8,
           padding: '10px 14px', fontSize: 12.5, color: t.danger, marginBottom: 14, lineHeight: 1.6 }}>
-          No progress in a couple of minutes — the background hand-off may have dropped.
+          No progress in a couple of minutes. The background hand-off may have dropped.
           Tap Resume below; whatever's already imported is safe either way.
         </div>
       )}
@@ -356,7 +356,7 @@ function ProcessingStep({ t, B, job, onClose, onNudge }) {
         padding: '10px 14px', fontSize: 12.5, color: t.danger, marginBottom: 14 }}>{nudgeErr}</div>}
 
       <div style={{ fontSize: 11.5, color: t.text4, lineHeight: 1.6, marginBottom: 18 }}>
-        You can safely close this and come back — the import keeps running, and reopening
+        You can safely close this and come back. The import keeps running, and reopening
         Import will pick up right where it left off.
       </div>
 

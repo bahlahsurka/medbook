@@ -21,7 +21,7 @@ const MOCK_RETENTION_WOW_PCT = 4;
 // Deterministic (not random) per-system placeholder — seeded off the system
 // name so it's at least stable across renders. Only used when review_log
 // isn't available at all; once it exists, a system simply not reviewed in
-// the window shows "—" rather than a mixed-in fake number (see Needs
+// the window shows "-" rather than a mixed-in fake number (see Needs
 // Attention below) — real and placeholder data are never blended silently
 // in the same list.
 function mockSystemRetention(name) {
@@ -99,7 +99,7 @@ function formatHourRange(hour) {
     const h12 = h % 12 === 0 ? 12 : h % 12;
     return `${h12}${period}`;
   };
-  return `${fmt(hour)}–${fmt((hour + 1) % 24)}`;
+  return `${fmt(hour)}-${fmt((hour + 1) % 24)}`;
 }
 
 // ============================================================================
@@ -398,14 +398,14 @@ export default function Insights({ entries, userSystems, userId, onNavigateSyste
         <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between',
           flexWrap:'wrap', gap:8, marginBottom:SPACE.lg }}>
           <div style={{ fontSize:FONT.size.xl3, fontWeight:FONT.weight.bold, color:t.text, lineHeight:1.1 }}>
-            {studyTime.real && !studyTime.hasAnyData ? '—' : `${studyHours}h ${studyMins}m`}
+            {studyTime.real && !studyTime.hasAnyData ? '-' : `${studyHours}h ${studyMins}m`}
           </div>
           {trendLabel(studyTime.wowPct, 'vs last week')}
         </div>
 
         {studyTime.real && !studyTime.hasAnyData ? (
           <div style={{ fontSize:FONT.size.sm, color:t.text4, padding:'20px 0' }}>
-            No study sessions logged yet — this fills in as you use Review Queue, Flashcards, and entries.
+            No study sessions logged yet. This fills in as you use Review Queue, Flashcards, and entries.
           </div>
         ) : (
           <>
@@ -438,7 +438,7 @@ export default function Insights({ entries, userSystems, userId, onNavigateSyste
           </div>
           {retention.real && !retention.hasAnyData ? (
             <div style={{ fontSize:FONT.size.sm, color:t.text4, padding:'8px 0 20px' }}>
-              Not enough reviews yet this week — rate a few cards in Review Queue to see this fill in.
+              Not enough reviews yet this week. Rate a few cards in Review Queue to see this fill in.
             </div>
           ) : (
             <div style={{ display:'flex', alignItems:'center', gap:SPACE.lg }}>
@@ -448,7 +448,7 @@ export default function Insights({ entries, userSystems, userId, onNavigateSyste
                   <span style={{ fontSize:FONT.size.xs, color:t.text4 }}>Not enough history for a trend yet</span>
                 )}
                 <div style={{ fontSize:FONT.size.xs, color:t.text4, marginTop:4, maxWidth:150, lineHeight:FONT.leading.normal }}>
-                  How well you're recalling what you've reviewed — the share of ratings that were Good or Easy.
+                  How well you're recalling what you've reviewed: the share of ratings that were Good or Easy.
                 </div>
               </div>
             </div>
@@ -500,7 +500,7 @@ export default function Insights({ entries, userSystems, userId, onNavigateSyste
 
         {attention.length === 0 ? (
           <div style={{ ...card, color:t.text4, fontSize:FONT.size.sm }}>
-            Nothing due right now — you're caught up.
+            Nothing due right now. You're caught up.
           </div>
         ) : (
           <div style={{ ...card, padding:SPACE.sm }}>
@@ -529,7 +529,7 @@ export default function Insights({ entries, userSystems, userId, onNavigateSyste
                     </div>
                   </div>
                   <div style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, color:t.text3, flexShrink:0 }}>
-                    {showPct != null ? `${showPct}%` : '—'}
+                    {showPct != null ? `${showPct}%` : '-'}
                   </div>
                 </div>
               );

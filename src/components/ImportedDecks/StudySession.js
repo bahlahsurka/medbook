@@ -461,7 +461,7 @@ export default function StudySession({ deck, userId, onExit }) {
       // card, action entry untouched) rather than navigating to a card
       // whose data might now be in an inconsistent state. The user can
       // press Previous again to retry.
-      setErr(e.message || 'Could not undo the last rating — still on the previous card, nothing changed. Try Previous again.');
+      setErr(e.message || 'Could not undo the last rating. Still on the previous card, nothing changed. Try Previous again.');
     }
     setRestoring(false);
   };
@@ -587,7 +587,7 @@ export default function StudySession({ deck, userId, onExit }) {
       <div style={{ fontSize: 34, marginBottom: 14 }}>↩️</div>
       <div style={{ fontSize: 16, fontWeight: 700, color: t.text, marginBottom: 6 }}>Resume Study?</div>
       <div style={{ fontSize: 13, color: t.text3, marginBottom: 22 }}>
-        {deck.display_name} — card {pendingResume.idx + 1} of {pendingResume.cardIds.length}
+        {deck.display_name}: card {pendingResume.idx + 1} of {pendingResume.cardIds.length}
       </div>
       <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
         <button onClick={() => setResumeChoice('resume')} style={B(t.accent)}>▶ Resume</button>
@@ -609,7 +609,7 @@ export default function StudySession({ deck, userId, onExit }) {
       <div style={{ fontSize: 34, marginBottom: 14 }}>⏸</div>
       <div style={{ fontSize: 16, fontWeight: 700, color: t.text, marginBottom: 6 }}>Session Paused</div>
       <div style={{ fontSize: 13, color: t.text3, marginBottom: 22 }}>
-        Card {idx + 1} of {queue.length} — your place is saved.
+        Card {idx + 1} of {queue.length}. Your place is saved.
       </div>
       <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
         <button onClick={() => setPaused(false)} style={B(t.accent)}>▶ Resume</button>
