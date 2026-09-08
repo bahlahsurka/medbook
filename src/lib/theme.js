@@ -143,6 +143,17 @@ function readInitial() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved === 'dark' || saved === 'light') return saved;
   } catch {}
+  // No explicit choice saved yet (first visit, or storage unavailable) —
+  // follow the OS/browser preference rather than hard-defaulting to light.
+  // This matters beyond just politeness: it's what makes the public landing
+  // page (which reads colours from this same useTheme() hook, same as every
+  // authenticated screen) actually follow prefers-color-scheme for a
+  // first-time visitor — nobody reaches that page having ever set an
+  // in-app preference, so without this fallback it would always render
+  // light regardless of the visitor's OS setting.
+  try {
+    if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) return 'dark';
+  } catch {}
   return 'light';
 }
 

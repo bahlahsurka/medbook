@@ -8,6 +8,7 @@ import { useStudySession } from './lib/useStudySession';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation, BREAKPOINT } from './lib/theme';
 import { IconMenu, IconX, IconChevronLeft, IconRepeat, IconPlus, IconInbox, IconSearch } from './lib/icons';
 import Auth from './components/Auth';
+import LandingPage from './components/LandingPage';
 import Sidebar from './components/Sidebar';
 import EntryCard from './components/EntryCard';
 import AddEntry from './components/AddEntry';
@@ -44,6 +45,27 @@ export default function App() {
   const [isRecovery] = useState(() =>
     typeof window !== 'undefined' && window.location.hash.includes('type=recovery')
   );
+  // Public landing page (marketing) lives at "/" for a signed-out visitor;
+  // everything else (including "/" once signed in) is the existing app/Auth
+  // behaviour, completely unchanged — see the render gate near the bottom
+  // of this file. No router library: this is the one fork the whole app
+  // needs, and a real URL (not just app-internal state) is what makes "/"
+  // actually shareable/bookmarkable/crawlable as the marketing page.
+  const [pathname, setPathname] = useState(() =>
+    typeof window !== 'undefined' ? window.location.pathname : '/'
+  );
+  useEffect(() => {
+    const onPop = () => setPathname(window.location.pathname);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+  // Landing page CTAs ("Get Started", nav "Sign In") go through this rather
+  // than a plain full navigation — keeps the SPA's already-loaded JS/session
+  // state intact instead of forcing a fresh page load just to reach Auth.
+  const goToApp = useCallback(() => {
+    window.history.pushState(null, '', '/app');
+    setPathname('/app');
+  }, []);
   const [authLoading, setAL]          = useState(true);
   const [entries, setEntries]         = useState({});
   const [fetching, setFetching]       = useState(false);
@@ -464,7 +486,10 @@ export default function App() {
     </div>
   );
 
-  if (!session) return <Auth />;
+  if (!session) {
+    if (pathname === '/') return <LandingPage onGetStarted={goToApp} />;
+    return <Auth />;
+  }
 
   return (
     <div onClick={e => {

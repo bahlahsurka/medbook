@@ -3,5 +3,8 @@
     "api/import-process.mjs": {
       "maxDuration": 300
     }
-  }
+  },
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
 }
