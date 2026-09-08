@@ -62,9 +62,21 @@ export default function App() {
   // Landing page CTAs ("Get Started", nav "Sign In") go through this rather
   // than a plain full navigation — keeps the SPA's already-loaded JS/session
   // state intact instead of forcing a fresh page load just to reach Auth.
+  // True for the brief moment between a landing-page CTA click and the
+  // actual navigation — lets the landing page fade/lift out instead of
+  // being yanked away the instant Auth mounts underneath it.
+  const [leavingLanding, setLeavingLanding] = useState(false);
   const goToApp = useCallback(() => {
-    window.history.pushState(null, '', '/app');
-    setPathname('/app');
+    const swap = () => {
+      window.history.pushState(null, '', '/app');
+      setPathname('/app');
+      setLeavingLanding(false);
+    };
+    let reduced = false;
+    try { reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches; } catch {}
+    if (reduced) { swap(); return; }
+    setLeavingLanding(true);
+    setTimeout(swap, 220); // matches the exit transition duration below
   }, []);
   const [authLoading, setAL]          = useState(true);
   const [entries, setEntries]         = useState({});
@@ -181,6 +193,22 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, s) => setSession(s));
     return () => subscription.unsubscribe();
   }, []);
+
+  // A signed-in visitor should never be sitting on "/" — the render check
+  // below already guarantees an active session skips the public landing
+  // page regardless of pathname, but the PWA's start_url is "/" (see
+  // public/manifest.json), so every relaunch of an installed/bookmarked
+  // MedBook briefly arrives there. Swap the URL itself over to "/app" once
+  // we know who's signed in, so the address bar (and browser back-button
+  // history) match what's actually on screen instead of quietly diverging
+  // from it — a repeated visitor is never one accidental Back tap away
+  // from landing back on the marketing page.
+  useEffect(() => {
+    if (!authLoading && session && pathname === '/') {
+      window.history.replaceState(null, '', '/app');
+      setPathname('/app');
+    }
+  }, [authLoading, session, pathname]);
 
   // Load systems from Supabase
   useEffect(() => {
@@ -487,7 +515,19 @@ export default function App() {
   );
 
   if (!session) {
-    if (pathname === '/') return <LandingPage onGetStarted={goToApp} />;
+    // Fades/lifts out on the way to Auth (see goToApp) instead of the
+    // instant cut a plain conditional swap would give — Auth's own shell
+    // then fades/lifts in on mount (see its own <style> block), so a Get
+    // Started/Log in click reads as one continuous motion rather than two
+    // unrelated screens snapping past each other. Reduced-motion visitors
+    // skip the delay entirely (see goToApp) and never see this opacity dip.
+    if (pathname === '/') return (
+      <div style={{ opacity: leavingLanding ? 0 : 1,
+        transform: leavingLanding ? 'translateY(-10px)' : 'translateY(0)',
+        transition: `opacity 220ms ${MOTION.ease}, transform 220ms ${MOTION.ease}` }}>
+        <LandingPage onGetStarted={goToApp} />
+      </div>
+    );
     return <Auth />;
   }
 
