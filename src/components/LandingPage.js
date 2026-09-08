@@ -24,20 +24,35 @@
 // browse list and a Dashboard/Review Queue stat strip — asymmetrically
 // gridded rather than alternating text/screenshot blocks.
 //
-// Batch 4 (this pass): "Medicine is visual" — real, supplied medical
-// diagrams (see lib/landingImages.js) walked through a SEE -> KEEP ->
-// REVIEW -> REMEMBER narrative: a genuine diagram at full size, the SAME
-// image shown living inside a real MedBook Review Entry, a brief resurface
-// beat, then two HONEST recall paths — turning the entry's own facts into a
-// text flashcard (real, for any entry), and Image Occlusion (real, but only
-// for cards inside an IMPORTED Anki deck — labeled as such, never implied
-// as something you can do to an arbitrary uploaded image, since MedBook
-// has no UI for drawing your own occlusion regions). A restrained strip of
+// Batch 4: "Medicine is visual" — real, supplied medical diagrams (see
+// lib/landingImages.js) walked through a SEE -> KEEP -> REVIEW -> REMEMBER
+// narrative: a genuine diagram at full size, the SAME image shown living
+// inside a real MedBook Review Entry, a brief resurface beat, then two
+// HONEST recall paths — turning the entry's own facts into a text
+// flashcard (real, for any entry), and Image Occlusion (real, but only for
+// cards inside an IMPORTED Anki deck — labeled as such, never implied as
+// something you can do to an arbitrary uploaded image, since MedBook has
+// no UI for drawing your own occlusion regions). A restrained strip of
 // four more real diagrams proves the breadth (pharmacology, dermatology,
 // oncology, pathophysiology) without becoming an image gallery.
 //
-// Everything past that (Flashcards, AI section, About/Creator section,
-// final CTA, footer) is intentionally NOT here yet — later batches.
+// A whole-page ambient gradient (three soft accent-tinted radial glows,
+// positioned as percentages of the full scrollable height) replaced the
+// old alternating flat section fills after Batch 4 — sections no longer
+// paint their own background band; cards keep their own solid surface.
+//
+// Batch 5 (this pass): "When you need another layer of understanding" —
+// AI as a supporting feature, not MedBook's identity, so this section is
+// deliberately the shortest and smallest on the page so far: one compact
+// real-UI panel showing the actual relationship (a Review Entry's own
+// notes -> the real "Analyze" action -> the app's real AI Analysis
+// sections, per AISections.js/DetailView.js), no chatbot UI, no grid of AI
+// feature cards, no neural-network imagery. Placed after Knowledge/Visual
+// Learning, keeping the hierarchy the spec asks for: medical learning,
+// knowledge, review, flashcards, THEN AI assistance last.
+//
+// Everything past that (About/Creator section, Install, FAQ, footer, final
+// CTA) is intentionally NOT here yet — later batches.
 //
 // THEME: deliberately just useTheme(), the same hook every authenticated
 // screen uses — no separate CSS-variable/media-query system. theme.js's
@@ -57,7 +72,7 @@
 import { useEffect, useState } from 'react';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, BREAKPOINT, elevation } from '../lib/theme';
 import { IconPulse, IconSearch, IconRepeat, IconCards, IconChart, IconEdit,
-  IconCheck, IconChevronRight, IconLayers, IconPin, IconImages } from '../lib/icons';
+  IconCheck, IconChevronRight, IconLayers, IconPin, IconImages, IconSparkle } from '../lib/icons';
 import { SYS_COLOR } from '../lib/constants';
 import { HL_COLORS, resolveHL } from '../lib/highlights';
 import { LANDING_IMAGES } from '../lib/landingImages';
@@ -991,6 +1006,141 @@ function VisualLearning({ t, reducedMotion }) {
   );
 }
 
+// ── AI assistance ("When you need another layer of understanding.") ──────
+// Deliberately the shortest, smallest section on the page: AI is a
+// supporting feature here, not MedBook's identity. One compact, real-UI
+// panel — reusing DetailView.js/AISections.js's actual section icons,
+// colours and copy — shows the real relationship (a Review Entry's own
+// notes go into the real "Analyze" action and come back as the app's own
+// AI Analysis sections), rather than a grid of AI feature cards, a chatbot
+// UI, or any neural-network/glow imagery.
+const AI_SECTION_PREVIEW = [
+  { key:'keyLearningPoints', label:'Key Learning Points', icon:'🎯', accent:'#2563eb',
+    items:[
+      'Scooped ("reverse tick") ST depression is the classic digoxin effect on ECG.',
+      'Coloured vision disturbances suggest toxicity, not just a therapeutic level.',
+    ] },
+  { key:'highYield', label:'High Yield', icon:'⭐', accent:'#d97706', count:3 },
+  { key:'clinicalPearls', label:'Clinical Pearls', icon:'💡', accent:'#0891b2', count:2 },
+  { key:'redFlags', label:'Red Flags', icon:'🚩', accent:'#dc2626', count:1 },
+];
+
+function AIFlowCard({ t }) {
+  const c = SYS_COLOR.Cardiology;
+  return (
+    <div className="mb-land-window" aria-hidden="true" style={{ background:t.surface,
+      border:`1px solid ${t.border}`, borderRadius:RADIUS.xl2, boxShadow:elevation(t,'lg'),
+      overflow:'hidden' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:7, padding:'12px 16px',
+        borderBottom:`1px solid ${t.border}`, background:t.surface2 }}>
+        <span style={{ width:10, height:10, borderRadius:RADIUS.circle, background:'#ff5f57' }} />
+        <span style={{ width:10, height:10, borderRadius:RADIUS.circle, background:'#febc2e' }} />
+        <span style={{ width:10, height:10, borderRadius:RADIUS.circle, background:'#28c840' }} />
+      </div>
+
+      <div className="mb-land-showcase-body" style={{ padding:SPACE.xl }}>
+        {/* The input — real Review Notes, unchanged. This is the visitor's
+            own writing, not the AI's. */}
+        <span style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, color:c }}>Cardiology</span>
+        <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.bold, color:t.text,
+          margin:'4px 0 10px' }}>
+          Digoxin toxicity: ECG changes
+        </div>
+        <div style={{ fontSize:FONT.size.micro, color:t.text4, letterSpacing:.8,
+          fontWeight:FONT.weight.semibold, textTransform:'uppercase', marginBottom:6 }}>
+          Review Notes
+        </div>
+        <p style={{ fontSize:FONT.size.sm, color:t.text2, lineHeight:1.7,
+          margin:`0 0 ${SPACE.lg}px` }}>
+          Scooped ST depression, PR prolongation, and coloured-vision complaints are the
+          classic exam triad.
+        </p>
+
+        {/* The connector — the real button's own label and icon, not a
+            glowing brain or a chat bubble. */}
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8,
+          margin:`0 0 ${SPACE.lg}px` }}>
+          <div style={{ height:1, flex:1, background:t.border }} />
+          <span style={{ display:'inline-flex', alignItems:'center', gap:6,
+            background:t.navActiveBg, color:t.accent, borderRadius:RADIUS.pill,
+            padding:'5px 12px', fontSize:FONT.size.xs, fontWeight:FONT.weight.semibold }}>
+            <IconSparkle size={11} /> Analyze
+          </span>
+          <div style={{ height:1, flex:1, background:t.border }} />
+        </div>
+
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+          gap:8, marginBottom:SPACE.md, flexWrap:'wrap' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:FONT.size.micro,
+            color:t.text4, letterSpacing:.8, fontWeight:FONT.weight.semibold,
+            textTransform:'uppercase' }}>
+            <IconSparkle size={11} /> AI Analysis
+          </div>
+          <span style={{ fontSize:FONT.size.micro, color:t.text4 }}>
+            Generated 06 Sept · gemini-3.6-flash
+          </span>
+        </div>
+
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          {AI_SECTION_PREVIEW.map(sec => (
+            <div key={sec.key} style={{ background:t.surface, border:`1px solid ${t.border}`,
+              borderLeft:`3px solid ${sec.accent}`, borderRadius:RADIUS.md, padding:'10px 12px' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <span style={{ fontSize:13 }} aria-hidden="true">{sec.icon}</span>
+                <span style={{ fontSize:FONT.size.xs, fontWeight:FONT.weight.bold, color:t.text,
+                  flex:1 }}>
+                  {sec.label}
+                </span>
+                <span style={{ fontSize:FONT.size.micro, color:t.text4, background:t.surface3,
+                  borderRadius:RADIUS.pill, padding:'1px 7px', fontWeight:FONT.weight.semibold }}>
+                  {sec.items ? sec.items.length : sec.count}
+                </span>
+              </div>
+              {sec.items && (
+                <ul style={{ margin:'8px 0 0', padding:'0 0 0 20px' }}>
+                  {sec.items.map(item => (
+                    <li key={item} style={{ fontSize:FONT.size.xs, color:t.text2, lineHeight:1.6,
+                      marginBottom:3 }}>{item}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AIAssistance({ t }) {
+  return (
+    <section id="mb-land-ai" style={{ padding:`${SPACE.xl3}px ${SPACE.lg}px`,
+      borderTop:`1px solid ${t.border}` }}>
+      <div style={{ maxWidth:760, margin:'0 auto' }}>
+        <div style={{ textAlign:'center', maxWidth:560, margin:`0 auto ${SPACE.xl2}px` }}>
+          <h2 style={{ fontSize:'clamp(22px, 3vw, 30px)', fontWeight:FONT.weight.bold,
+            color:t.text, lineHeight:1.2, margin:`0 0 ${SPACE.sm+2}px` }}>
+            When you need another layer of understanding.
+          </h2>
+          <p style={{ fontSize:FONT.size.md, color:t.text3, lineHeight:FONT.leading.relaxed, margin:0 }}>
+            MedBook's AI Analysis reads your own Review Notes and organizes them into Key
+            Learning Points, High Yield facts, Clinical Pearls and more, another way to look
+            at material you've already written.
+          </p>
+        </div>
+
+        <AIFlowCard t={t} />
+
+        <p style={{ fontSize:FONT.size.xs, color:t.text4, textAlign:'center', maxWidth:460,
+          margin:`${SPACE.lg}px auto 0`, lineHeight:FONT.leading.relaxed }}>
+          It only reorganizes what you've already written. Your notes, and your judgment,
+          stay yours.
+        </p>
+      </div>
+    </section>
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────
 export default function LandingPage({ onGetStarted }) {
   const { t, isDark } = useTheme();
@@ -1134,6 +1284,7 @@ export default function LandingPage({ onGetStarted }) {
         <ProductNarrative t={t} reducedMotion={reducedMotion} />
         <KnowledgeWorkspace t={t} isDark={isDark} />
         <VisualLearning t={t} reducedMotion={reducedMotion} />
+        <AIAssistance t={t} />
       </main>
     </div>
   );
