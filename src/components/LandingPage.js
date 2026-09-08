@@ -62,8 +62,18 @@
 // supplies — no invented university, hospital, specialty, career history,
 // awards, or testimonials.
 //
-// Everything past that (Install, FAQ, footer, final CTA) is intentionally
-// NOT here yet — later batches.
+// Batch 7 (this pass): the final conversion layer — Nav gains real working
+// links (Product/How it works/About/Install, anchored to the sections
+// those batches actually built, plus a reintroduced hamburger/drawer now
+// that there's real content for it to hold), a compact Install section
+// (MedBook is a PWA — real "Add to Home Screen" steps per platform, never
+// implying a native App/Play Store app), a restrained Final CTA that
+// returns to the plain brand mark rather than a giant gradient banner, and
+// a compact Footer. No legal-page links: none exist in this project, so
+// none are listed.
+//
+// Everything past that (FAQ, if ever) is intentionally NOT here — this was
+// the last planned batch.
 //
 // THEME: deliberately just useTheme(), the same hook every authenticated
 // screen uses — no separate CSS-variable/media-query system. theme.js's
@@ -83,7 +93,8 @@
 import { useEffect, useState } from 'react';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, BREAKPOINT, elevation } from '../lib/theme';
 import { IconPulse, IconSearch, IconRepeat, IconCards, IconChart, IconEdit,
-  IconCheck, IconChevronRight, IconLayers, IconPin, IconImages, IconSparkle } from '../lib/icons';
+  IconCheck, IconChevronRight, IconLayers, IconPin, IconImages, IconSparkle,
+  IconMenu, IconX, IconDownload } from '../lib/icons';
 import { SYS_COLOR } from '../lib/constants';
 import { HL_COLORS, resolveHL } from '../lib/highlights';
 import { LANDING_IMAGES } from '../lib/landingImages';
@@ -139,7 +150,22 @@ function BrandMark({ t, size = 30, iconSize = 16 }) {
   );
 }
 
+// Real section destinations only — each id is an existing section from an
+// earlier batch, so none of these are dead links. "Product" points at the
+// Knowledge Workspace showcase (the biggest real-UI product demonstration
+// on the page); "How it works" reuses the exact same target the Hero's own
+// "See how it works" button has always scrolled to.
+const NAV_LINKS = [
+  { id:'mb-land-knowledge', label:'Product' },
+  { id:'mb-land-narrative', label:'How it works' },
+  { id:'mb-land-creator',   label:'About' },
+  { id:'mb-land-install',   label:'Install' },
+];
+
 function Nav({ t, onGetStarted }) {
+  const [open, setOpen] = useState(false);
+  const goTo = (id) => { setOpen(false); scrollToId(id); };
+
   return (
     <header className="mb-land-nav" style={{ position:'sticky', top:0, zIndex:100,
       background:t.surface, borderBottom:`1px solid ${t.border}` }}>
@@ -151,20 +177,67 @@ function Nav({ t, onGetStarted }) {
           <span style={{ fontSize:FONT.size.md, fontWeight:FONT.weight.bold, color:t.text }}>MedBook</span>
         </div>
 
-        {/* No hamburger/drawer — there are no other nav destinations yet in
-            Batch 1. Below ~420px "Sign In" drops (Get Started alone covers
-            both intents), rather than a menu with nothing else in it. */}
-        <nav className="mb-land-nav-actions" style={{ display:'flex', alignItems:'center', gap:SPACE.lg }}
-          aria-label="Primary">
+        {/* Section links — only shown inline once there's room (see the
+            media query below); collapse into the drawer under it otherwise. */}
+        {/* No inline `display` here on purpose — an inline display:flex would
+            always beat the CSS class's display:none below regardless of the
+            media query (the exact bug already fixed once in Batch 1's own
+            history), showing all 6 items inline even on a phone and forcing
+            a horizontal scrollbar. CSS classes alone control visibility. */}
+        <nav className="mb-land-nav-links" aria-label="Sections" style={{
+          alignItems:'center', gap:SPACE.xl }}>
+          {NAV_LINKS.map(l => (
+            <a key={l.id} href={`#${l.id}`} onClick={e=>{ e.preventDefault(); goTo(l.id); }}
+              style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.medium, color:t.text2,
+                textDecoration:'none', cursor:'pointer', whiteSpace:'nowrap' }}>
+              {l.label}
+            </a>
+          ))}
+        </nav>
+
+        <div className="mb-land-nav-actions" style={{ display:'flex', alignItems:'center', gap:SPACE.lg }}>
           <a href="/app" onClick={e=>{e.preventDefault(); onGetStarted();}}
             style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, color:t.text2,
-              textDecoration:'none', cursor:'pointer' }}>Sign In</a>
+              textDecoration:'none', cursor:'pointer' }}>Log in</a>
           <button className="mb-land-btn mb-land-btn-primary" onClick={onGetStarted} style={{
             background:t.accent, color:'#fff', border:'none', borderRadius:RADIUS.sm+1,
             padding:'9px 18px', fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold,
             cursor:'pointer', fontFamily:'Inter,sans-serif' }}>Get Started</button>
-        </nav>
+
+          {/* Hamburger toggle — hidden once .mb-land-nav-links has room to
+              show inline (see media query), so it never sits there unused. */}
+          <button className="mb-land-nav-toggle" onClick={()=>setOpen(o=>!o)}
+            aria-label={open ? 'Close menu' : 'Open menu'} aria-expanded={open}
+            style={{ position:'relative', width:32, height:32, background:t.surface2,
+              border:`1px solid ${t.border}`, borderRadius:RADIUS.sm+1, cursor:'pointer',
+              flexShrink:0 }}>
+            <IconMenu size={16} style={{ position:'absolute', top:7, left:7,
+              opacity:open?0:1, transition:`opacity ${MOTION.fast} ${MOTION.ease}`, color:t.text2 }} />
+            <IconX size={16} style={{ position:'absolute', top:7, left:7,
+              opacity:open?1:0, transition:`opacity ${MOTION.fast} ${MOTION.ease}`, color:t.text2 }} />
+          </button>
+        </div>
       </div>
+
+      {/* Drawer — section links plus the same Log in / Get Started actions,
+          so the menu alone is a complete way to get anywhere on the page. */}
+      {open && (
+        <div className="mb-land-nav-drawer" style={{ borderTop:`1px solid ${t.border}`,
+          background:t.surface, padding:`${SPACE.sm}px ${SPACE.lg}px ${SPACE.lg}px` }}>
+          {NAV_LINKS.map(l => (
+            <a key={l.id} href={`#${l.id}`} onClick={e=>{ e.preventDefault(); goTo(l.id); }}
+              style={{ display:'block', padding:'10px 2px', fontSize:FONT.size.base,
+                fontWeight:FONT.weight.medium, color:t.text2, textDecoration:'none' }}>
+              {l.label}
+            </a>
+          ))}
+          <a href="/app" onClick={e=>{ e.preventDefault(); setOpen(false); onGetStarted(); }}
+            style={{ display:'block', padding:'10px 2px', fontSize:FONT.size.base,
+              fontWeight:FONT.weight.medium, color:t.text2, textDecoration:'none' }}>
+            Log in
+          </a>
+        </div>
+      )}
     </header>
   );
 }
@@ -1198,6 +1271,205 @@ function CreatorSection({ t }) {
   );
 }
 
+// ── Install ("Use MedBook wherever you study.") ───────────────────────────
+// MedBook is a PWA (see public/manifest.json + the apple-mobile-web-app
+// meta tags in public/index.html) — no native App/Play Store listing
+// exists, so every step below is the real "Add to Home Screen"/install
+// flow those actually support, never implied as a native app. Kept
+// compact and textual (three short numbered lists) rather than an
+// illustrated multi-panel tutorial.
+const INSTALL_PLATFORMS = [
+  { key:'ios', label:'iPhone & iPad', steps:[
+    'Open MedBook in Safari.',
+    'Tap Share.',
+    'Tap "Add to Home Screen".',
+  ] },
+  { key:'android', label:'Android', steps:[
+    'Open MedBook in Chrome.',
+    'Open the menu.',
+    'Tap "Install app" (or "Add to Home Screen").',
+  ] },
+  { key:'desktop', label:'Desktop', steps:[
+    'Open MedBook in Chrome or Edge.',
+    'Click the install icon in the address bar, when available.',
+  ] },
+];
+
+function InstallCard({ t, platform }) {
+  return (
+    <div className="mb-land-showcase-panel" style={{ background:t.surface, border:`1px solid ${t.border}`,
+      borderRadius:RADIUS.xl, boxShadow:elevation(t,'sm'), padding:SPACE.lg }}>
+      <div style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.bold, color:t.text,
+        marginBottom:SPACE.md }}>
+        {platform.label}
+      </div>
+      <ol style={{ margin:0, padding:0, listStyle:'none', display:'flex',
+        flexDirection:'column', gap:8 }}>
+        {platform.steps.map((step, i) => (
+          <li key={i} style={{ display:'flex', gap:8, alignItems:'flex-start' }}>
+            <span style={{ flexShrink:0, width:18, height:18, borderRadius:RADIUS.circle,
+              background:t.navActiveBg, color:t.accent, fontSize:10, fontWeight:FONT.weight.bold,
+              display:'flex', alignItems:'center', justifyContent:'center', marginTop:1 }}>
+              {i + 1}
+            </span>
+            <span style={{ fontSize:FONT.size.sm, color:t.text2, lineHeight:1.5 }}>{step}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function InstallSection({ t }) {
+  return (
+    <section id="mb-land-install" style={{ padding:`${SPACE.xl4}px ${SPACE.lg}px`,
+      borderTop:`1px solid ${t.border}` }}>
+      <div style={{ maxWidth:900, margin:'0 auto' }}>
+        <div style={{ textAlign:'center', maxWidth:520, margin:`0 auto ${SPACE.xl2}px` }}>
+          <div style={{ display:'inline-flex', alignItems:'center', justifyContent:'center',
+            width:36, height:36, borderRadius:RADIUS.md, background:t.navActiveBg, color:t.accent,
+            marginBottom:SPACE.md }} aria-hidden="true">
+            <IconDownload size={16} />
+          </div>
+          <h2 style={{ fontSize:'clamp(22px, 3vw, 30px)', fontWeight:FONT.weight.bold,
+            color:t.text, lineHeight:1.2, margin:`0 0 ${SPACE.sm+2}px` }}>
+            Use MedBook wherever you study.
+          </h2>
+          <p style={{ fontSize:FONT.size.md, color:t.text3, lineHeight:FONT.leading.relaxed, margin:0 }}>
+            MedBook installs straight from your browser, no app store required.
+          </p>
+        </div>
+
+        <div className="mb-land-install-grid">
+          {INSTALL_PLATFORMS.map(p => <InstallCard key={p.key} t={t} platform={p} />)}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ── Final CTA ──────────────────────────────────────────────────────────────
+// Deliberately plain: the brand mark and the same button styles the Hero
+// already uses, on the page's existing ambient gradient — not a new,
+// separate gradient banner.
+function FinalCTA({ t, onGetStarted }) {
+  return (
+    <section style={{ padding:`${SPACE.xl4}px ${SPACE.lg}px`, borderTop:`1px solid ${t.border}`,
+      textAlign:'center' }}>
+      {/* text-align:center on the section only centers inline content —
+          BrandMark is a block div, so it needs its own centering here
+          rather than inheriting it. */}
+      <div style={{ display:'flex', justifyContent:'center' }}>
+        <BrandMark t={t} size={40} iconSize={20} />
+      </div>
+      <h2 style={{ fontSize:'clamp(24px, 3.4vw, 34px)', fontWeight:FONT.weight.bold, color:t.text,
+        lineHeight:1.2, margin:`${SPACE.lg}px 0 ${SPACE.sm+2}px` }}>
+        Your next study session starts here.
+      </h2>
+      <p style={{ fontSize:FONT.size.md, color:t.text3, lineHeight:FONT.leading.relaxed,
+        maxWidth:440, margin:`0 auto ${SPACE.xl2}px` }}>
+        Bring your notes, images, and flashcards into one place built for how you actually study.
+      </p>
+      <div style={{ display:'flex', gap:SPACE.md, justifyContent:'center', flexWrap:'wrap' }}>
+        <button className="mb-land-btn mb-land-btn-primary mb-land-btn-lg" onClick={onGetStarted} style={{
+          background:t.accent, color:'#fff', border:'none', borderRadius:RADIUS.md,
+          padding:'13px 28px', fontSize:FONT.size.base, fontWeight:FONT.weight.semibold,
+          cursor:'pointer', fontFamily:'Inter,sans-serif', display:'inline-flex',
+          alignItems:'center', gap:7 }}>
+          Get Started <IconChevronRight size={14} />
+        </button>
+        <button className="mb-land-btn mb-land-btn-ghost mb-land-btn-lg" onClick={onGetStarted}
+          style={{ background:'transparent', color:t.text2, border:`1px solid ${t.borderStrong}`,
+          borderRadius:RADIUS.md, padding:'13px 24px', fontSize:FONT.size.base,
+          fontWeight:FONT.weight.semibold, cursor:'pointer', fontFamily:'Inter,sans-serif' }}>
+          Log in
+        </button>
+      </div>
+    </section>
+  );
+}
+
+// ── Footer ─────────────────────────────────────────────────────────────────
+// Compact by design — a brand column plus four short link columns, all
+// anchored to sections that actually exist. No legal links: no privacy or
+// terms page exists anywhere in this project, so none is listed rather
+// than invented.
+const FOOTER_COLUMNS = [
+  { title:'Product', links:[
+    { label:'Features / Product', id:'mb-land-knowledge' },
+    { label:'Flashcards', id:'mb-land-visual' },
+    { label:'How it works', id:'mb-land-narrative' },
+  ] },
+  { title:'Company', links:[
+    { label:'About', id:'mb-land-creator' },
+    { label:'Creator', id:'mb-land-creator' },
+  ] },
+  { title:'Install', links:[
+    { label:'Install MedBook', id:'mb-land-install' },
+  ] },
+];
+
+function Footer({ t, onGetStarted }) {
+  const year = new Date().getFullYear();
+  return (
+    <footer style={{ borderTop:`1px solid ${t.border}`, padding:`${SPACE.xl3}px ${SPACE.lg}px ${SPACE.lg}px` }}>
+      <div style={{ maxWidth:1100, margin:'0 auto' }}>
+        <div className="mb-land-footer-grid">
+          <div style={{ maxWidth:260 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:SPACE.sm, marginBottom:SPACE.sm }}>
+              <BrandMark t={t} size={26} iconSize={13} />
+              <span style={{ fontSize:FONT.size.md, fontWeight:FONT.weight.bold, color:t.text }}>MedBook</span>
+            </div>
+            <p style={{ fontSize:FONT.size.sm, color:t.text4, lineHeight:1.6, margin:0 }}>
+              A connected place for medical notes, review, flashcards, and the images that go
+              with them.
+            </p>
+          </div>
+
+          {FOOTER_COLUMNS.map(col => (
+            <div key={col.title}>
+              <div style={{ fontSize:FONT.size.micro, color:t.text4, letterSpacing:.8,
+                fontWeight:FONT.weight.semibold, textTransform:'uppercase', marginBottom:SPACE.md }}>
+                {col.title}
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                {col.links.map(l => (
+                  <a key={l.label} href={`#${l.id}`} onClick={e=>{ e.preventDefault(); scrollToId(l.id); }}
+                    style={{ fontSize:FONT.size.sm, color:t.text3, textDecoration:'none', cursor:'pointer' }}>
+                    {l.label}
+                  </a>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          <div>
+            <div style={{ fontSize:FONT.size.micro, color:t.text4, letterSpacing:.8,
+              fontWeight:FONT.weight.semibold, textTransform:'uppercase', marginBottom:SPACE.md }}>
+              Account
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              <a href="/app" onClick={e=>{ e.preventDefault(); onGetStarted(); }}
+                style={{ fontSize:FONT.size.sm, color:t.text3, textDecoration:'none', cursor:'pointer' }}>
+                Log in
+              </a>
+              <a href="/app" onClick={e=>{ e.preventDefault(); onGetStarted(); }}
+                style={{ fontSize:FONT.size.sm, color:t.text3, textDecoration:'none', cursor:'pointer' }}>
+                Get Started
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ borderTop:`1px solid ${t.border}`, marginTop:SPACE.xl2, paddingTop:SPACE.lg,
+          fontSize:FONT.size.xs, color:t.text4, textAlign:'center' }}>
+          © {year} MedBook.
+        </div>
+      </div>
+    </footer>
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────
 export default function LandingPage({ onGetStarted }) {
   const { t, isDark } = useTheme();
@@ -1275,6 +1547,17 @@ export default function LandingPage({ onGetStarted }) {
 
         .mb-land-h1-line { display:block; font-size:clamp(30px, 6.4vw, 54px); }
 
+        /* Nav: section links + hamburger only trade places once there's
+           room for the links to sit inline without crowding Log in/Get
+           Started — below that the hamburger is the only way to reach
+           them, so it stays visible whenever the links are hidden. */
+        .mb-land-nav-links { display:none; }
+        .mb-land-nav-toggle { display:flex; align-items:center; justify-content:center; }
+        @media (min-width: 900px) {
+          .mb-land-nav-links { display:flex; }
+          .mb-land-nav-toggle { display:none; }
+          .mb-land-nav-drawer { display:none !important; }
+        }
         @media (max-width: 420px) {
           .mb-land-nav-actions a { display: none; }
         }
@@ -1333,6 +1616,21 @@ export default function LandingPage({ onGetStarted }) {
            on a narrow screen — 2x2 on phones, one row from tablet up. */
         .mb-land-variety-strip { display:flex; flex-wrap:wrap; gap:${SPACE.md}px; justify-content:center; }
         .mb-land-variety-item { flex:1 1 200px; max-width:240px; }
+
+        /* Install: one column on mobile, three across once there's room —
+           each card stays a comfortable reading width rather than
+           squeezing three into a phone-width row. */
+        .mb-land-install-grid { display:grid; grid-template-columns:1fr; gap:${SPACE.md}px; }
+        @media (min-width: ${BREAKPOINT.mobile}px) {
+          .mb-land-install-grid { grid-template-columns:repeat(3, minmax(0,1fr)); }
+        }
+
+        /* Footer: brand column full-width on mobile, link columns wrap
+           into a 2-column grid; from tablet up everything sits in one row. */
+        .mb-land-footer-grid { display:grid; grid-template-columns:1fr; gap:${SPACE.xl2}px ${SPACE.lg}px; }
+        @media (min-width: 560px) {
+          .mb-land-footer-grid { grid-template-columns:1.4fr repeat(4, 1fr); }
+        }
       `}</style>
 
       <Nav t={t} onGetStarted={onGetStarted} />
@@ -1343,7 +1641,10 @@ export default function LandingPage({ onGetStarted }) {
         <VisualLearning t={t} reducedMotion={reducedMotion} />
         <AIAssistance t={t} />
         <CreatorSection t={t} />
+        <InstallSection t={t} />
+        <FinalCTA t={t} onGetStarted={onGetStarted} />
       </main>
+      <Footer t={t} onGetStarted={onGetStarted} />
     </div>
   );
 }
