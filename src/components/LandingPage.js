@@ -15,17 +15,29 @@
 // than three repeated feature cards, closing on the "Your medical
 // knowledge, built to stay with you." transition line.
 //
-// Batch 3 (this pass): the knowledge-workspace narrative ("Your knowledge,
-// connected.") — one asymmetric real-UI showcase rather than five separate
-// Review Entries/Systems/Search/Review Queue/Dashboard chapters. A large
-// primary panel recreates the actual entry reading pane (system + title +
+// Batch 3: the knowledge-workspace narrative ("Your knowledge, connected.")
+// — one asymmetric real-UI showcase rather than five separate Review
+// Entries/Systems/Search/Review Queue/Dashboard chapters. A large primary
+// panel recreates the actual entry reading pane (system + title +
 // highlighted Review Notes, with the real app's own toolbar/search chrome
 // above it), with two smaller supporting panels beside it — a Systems
 // browse list and a Dashboard/Review Queue stat strip — asymmetrically
 // gridded rather than alternating text/screenshot blocks.
 //
-// Everything past that (deep flashcard story, AI section, About/Creator
-// section, final CTA, footer) is intentionally NOT here yet — later batches.
+// Batch 4 (this pass): "Medicine is visual" — real, supplied medical
+// diagrams (see lib/landingImages.js) walked through a SEE -> KEEP ->
+// REVIEW -> REMEMBER narrative: a genuine diagram at full size, the SAME
+// image shown living inside a real MedBook Review Entry, a brief resurface
+// beat, then two HONEST recall paths — turning the entry's own facts into a
+// text flashcard (real, for any entry), and Image Occlusion (real, but only
+// for cards inside an IMPORTED Anki deck — labeled as such, never implied
+// as something you can do to an arbitrary uploaded image, since MedBook
+// has no UI for drawing your own occlusion regions). A restrained strip of
+// four more real diagrams proves the breadth (pharmacology, dermatology,
+// oncology, pathophysiology) without becoming an image gallery.
+//
+// Everything past that (Flashcards, AI section, About/Creator section,
+// final CTA, footer) is intentionally NOT here yet — later batches.
 //
 // THEME: deliberately just useTheme(), the same hook every authenticated
 // screen uses — no separate CSS-variable/media-query system. theme.js's
@@ -45,9 +57,10 @@
 import { useEffect, useState } from 'react';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, BREAKPOINT, elevation } from '../lib/theme';
 import { IconPulse, IconSearch, IconRepeat, IconCards, IconChart, IconEdit,
-  IconCheck, IconChevronRight, IconLayers, IconPin } from '../lib/icons';
+  IconCheck, IconChevronRight, IconLayers, IconPin, IconImages } from '../lib/icons';
 import { SYS_COLOR } from '../lib/constants';
 import { HL_COLORS, resolveHL } from '../lib/highlights';
+import { LANDING_IMAGES } from '../lib/landingImages';
 import EntryCard from './EntryCard';
 
 // Realistic, generic textbook-style study content — same voice as the
@@ -659,6 +672,325 @@ function KnowledgeWorkspace({ t, isDark }) {
   );
 }
 
+// ── Visual learning ("Medicine is visual. MedBook remembers that.") ──────
+// Real supplied medical diagrams (lib/landingImages.js) walked through
+// SEE -> KEEP -> REVIEW -> REMEMBER, as one flowing vertical narrative
+// rather than a grid — that composition is already mobile-friendly by
+// nature, so every width gets the same story, just full-width.
+
+// A small centered eyebrow tag marking each narrative beat.
+function FlowLabel({ t, children }) {
+  return (
+    <div style={{ fontSize:FONT.size.micro, color:t.accent, letterSpacing:1.2,
+      fontWeight:FONT.weight.bold, textTransform:'uppercase', textAlign:'center',
+      marginBottom:SPACE.sm }}>
+      {children}
+    </div>
+  );
+}
+
+// A short vertical connector between beats. `caption` isn't decorative —
+// it's real information for anyone who can't see the connecting line
+// itself, not just a visual flourish.
+function NarrativeArrow({ t, caption }) {
+  return (
+    <div aria-hidden="true" style={{ display:'flex', flexDirection:'column', alignItems:'center',
+      gap:4, padding:`${SPACE.md}px 0` }}>
+      <div style={{ width:1, height:22, background:t.borderStrong }} />
+      <IconChevronRight size={14} style={{ color:t.text4, transform:'rotate(90deg)' }} />
+      {caption && (
+        <span style={{ fontSize:FONT.size.xs, color:t.text4, fontWeight:FONT.weight.medium }}>
+          {caption}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// A real supplied diagram, framed consistently. No forced aspect ratio —
+// width scales, height follows naturally — so nothing is ever misleadingly
+// cropped. Lazy-loaded: this whole section sits well below the fold.
+function RealImageFrame({ t, image, maxWidth = 760 }) {
+  return (
+    <figure style={{ margin:0, maxWidth, width:'100%', marginLeft:'auto', marginRight:'auto' }}>
+      <div style={{ background:t.surface, border:`1px solid ${t.border}`, borderRadius:RADIUS.xl,
+        boxShadow:elevation(t,'lg'), padding:SPACE.md }}>
+        <img src={image.src} alt={image.alt} loading="lazy" decoding="async"
+          style={{ display:'block', width:'100%', height:'auto', borderRadius:RADIUS.md }} />
+      </div>
+      <figcaption style={{ fontSize:FONT.size.xs, color:t.text4, textAlign:'center',
+        marginTop:SPACE.sm, fontWeight:FONT.weight.medium }}>
+        {image.caption}
+      </figcaption>
+    </figure>
+  );
+}
+
+function SeeStep({ t }) {
+  return (
+    <div>
+      <FlowLabel t={t}>See</FlowLabel>
+      <RealImageFrame t={t} image={LANDING_IMAGES.heartFailurePathway} />
+    </div>
+  );
+}
+
+// The SAME diagram, now shown living inside a real MedBook Review Entry —
+// system tag, title, a short real note, and the app's own "Images (n) -
+// tap to expand" panel (DetailView.js's actual pattern) holding it as a
+// thumbnail. This is the whole point of the section: the diagram isn't
+// just attached, it sits right next to the knowledge it explains.
+function KeepStep({ t }) {
+  const c = SYS_COLOR.Cardiology;
+  const img = LANDING_IMAGES.heartFailurePathway;
+  return (
+    <div>
+      <FlowLabel t={t}>Keep</FlowLabel>
+      <div style={{ maxWidth:480, margin:'0 auto' }}>
+        <div className="mb-land-window" aria-hidden="true" style={{ background:t.surface,
+          border:`1px solid ${t.border}`, borderRadius:RADIUS.xl2, boxShadow:elevation(t,'lg'),
+          overflow:'hidden' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:7, padding:'12px 16px',
+            borderBottom:`1px solid ${t.border}`, background:t.surface2 }}>
+            <span style={{ width:10, height:10, borderRadius:RADIUS.circle, background:'#ff5f57' }} />
+            <span style={{ width:10, height:10, borderRadius:RADIUS.circle, background:'#febc2e' }} />
+            <span style={{ width:10, height:10, borderRadius:RADIUS.circle, background:'#28c840' }} />
+          </div>
+          <div className="mb-land-showcase-body" style={{ padding:SPACE.xl }}>
+            <span style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, color:c }}>Cardiology</span>
+            <div style={{ fontSize:FONT.size.xl, fontWeight:FONT.weight.bold, color:t.text,
+              lineHeight:FONT.leading.tight, margin:'4px 0 10px' }}>
+              Heart failure: pathogenesis
+            </div>
+            <p style={{ fontSize:FONT.size.sm, color:t.text2, lineHeight:1.7,
+              margin:`0 0 ${SPACE.lg}px` }}>
+              Compensatory neurohormonal activation keeps blood pressure up short-term, but it's
+              also what drives the remodeling that worsens long-term function.
+            </p>
+            <div style={{ background:t.surface2, border:`1px solid ${t.border}`, borderRadius:RADIUS.md,
+              padding:SPACE.md }}>
+              <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:FONT.size.micro,
+                color:t.text4, letterSpacing:.8, fontWeight:FONT.weight.semibold,
+                textTransform:'uppercase', marginBottom:SPACE.sm }}>
+                <IconImages size={11} style={{ flexShrink:0 }} /> Images (1) · tap to expand
+              </div>
+              <img src={img.src} alt={img.alt} loading="lazy" decoding="async"
+                style={{ width:'100%', maxWidth:220, height:'auto', borderRadius:RADIUS.sm,
+                  border:`1px solid ${t.border}`, display:'block', background:t.surface2 }} />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReviewBeat({ t }) {
+  return (
+    <div style={{ textAlign:'center', maxWidth:460, margin:'0 auto' }}>
+      <FlowLabel t={t}>Review</FlowLabel>
+      <p style={{ fontSize:FONT.size.md, color:t.text3, lineHeight:FONT.leading.relaxed,
+        margin:`0 0 ${SPACE.sm}px` }}>
+        This entry resurfaces in Review Queue like any other: the diagram comes back with it,
+        not as a separate file to go dig up.
+      </p>
+      <span style={{ display:'inline-flex', alignItems:'center', gap:6, fontSize:FONT.size.xs,
+        fontWeight:FONT.weight.semibold, color:t.accent, background:t.navActiveBg,
+        borderRadius:RADIUS.pill, padding:'4px 12px' }}>
+        <IconRepeat size={11} /> Due in Review Queue
+      </span>
+    </div>
+  );
+}
+
+// Front/back flashcard drawn from the same diagram's own facts — real,
+// ordinary MedBook flashcards (plain text front/back), available for any
+// Review Entry, not something special-cased for this one.
+function FlashcardRecall({ t }) {
+  return (
+    <div className="mb-land-showcase-panel" style={{ background:t.surface, border:`1px solid ${t.border}`,
+      borderRadius:RADIUS.xl, boxShadow:elevation(t,'md'), padding:SPACE.lg, height:'100%',
+      display:'flex', flexDirection:'column' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:SPACE.md }}>
+        <IconCards size={12} style={{ color:t.text4 }} />
+        <span style={{ fontSize:FONT.size.micro, color:t.text4, letterSpacing:.8,
+          fontWeight:FONT.weight.semibold, textTransform:'uppercase' }}>
+          Flashcard
+        </span>
+      </div>
+      <div style={{ flex:1, display:'flex', flexDirection:'column', gap:8 }}>
+        <div style={{ background:t.surface2, border:`1px solid ${t.border}`, borderRadius:RADIUS.md,
+          padding:'12px 14px' }}>
+          <div style={{ fontSize:9, color:t.text4, letterSpacing:.5, fontWeight:FONT.weight.semibold,
+            textTransform:'uppercase', marginBottom:4 }}>Front</div>
+          <div style={{ fontSize:FONT.size.sm, color:t.text, fontWeight:FONT.weight.medium }}>
+            What drives deleterious remodeling in decompensated heart failure?
+          </div>
+        </div>
+        <div style={{ background:t.surface2, border:`1px solid ${t.border}`, borderRadius:RADIUS.md,
+          padding:'12px 14px' }}>
+          <div style={{ fontSize:9, color:t.text4, letterSpacing:.5, fontWeight:FONT.weight.semibold,
+            textTransform:'uppercase', marginBottom:4 }}>Back</div>
+          <div style={{ fontSize:FONT.size.sm, color:t.text2 }}>
+            Long-term neurohormonal activation: sympathetic, renin-angiotensin, and ADH.
+          </div>
+        </div>
+      </div>
+      <div style={{ fontSize:FONT.size.xs, color:t.text4, marginTop:SPACE.md }}>
+        Pulled straight from the entry. Works for any Review Entry.
+      </div>
+    </div>
+  );
+}
+
+// Image Occlusion — real, but only for cards inside an IMPORTED Anki deck.
+// Labeled as such throughout: MedBook has no UI for drawing your own
+// occlusion regions on an uploaded image, so this never implies you can do
+// that to any photo you take. What's shown — full diagram, structures
+// masked, click to recall then reveal — is exactly how an imported Image
+// Occlusion card actually studies inside MedBook today (see
+// ImportedDecks/CardRenderer.js). The mask positions below are an
+// illustrative approximation for this mockup, not derived from real
+// per-card occlusion data.
+const IO_MASKS = [
+  { top:11, left:19, width:22, height:8.5 },
+  { top:23, left:19, width:22, height:9 },
+  { top:42, left:19, width:22, height:9 },
+];
+
+function ImageOcclusionDemo({ t, reducedMotion }) {
+  const [revealed, setRevealed] = useState(false);
+  const img = LANDING_IMAGES.circleOfWillis;
+  return (
+    <div className="mb-land-showcase-panel" style={{ background:t.surface, border:`1px solid ${t.border}`,
+      borderRadius:RADIUS.xl, boxShadow:elevation(t,'md'), padding:SPACE.lg }}>
+      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:SPACE.sm }}>
+        <IconLayers size={12} style={{ color:t.text4 }} />
+        <span style={{ fontSize:FONT.size.micro, color:t.text4, letterSpacing:.8,
+          fontWeight:FONT.weight.semibold, textTransform:'uppercase' }}>
+          Image Occlusion · Imported Decks
+        </span>
+      </div>
+      <button type="button" onClick={()=>setRevealed(r=>!r)}
+        aria-pressed={revealed} aria-label={revealed ? 'Hide labels again' : 'Reveal hidden labels'}
+        style={{ position:'relative', display:'block', width:'100%', padding:0,
+          border:`1px solid ${t.border}`, borderRadius:RADIUS.md, overflow:'hidden',
+          cursor:'pointer', background:'none' }}>
+        <img src={img.src} alt={img.alt} loading="lazy" decoding="async"
+          style={{ display:'block', width:'100%', height:'auto' }} />
+        {IO_MASKS.map((m,i) => (
+          <span key={i} aria-hidden="true" style={{ position:'absolute',
+            top:`${m.top}%`, left:`${m.left}%`, width:`${m.width}%`, height:`${m.height}%`,
+            background:t.accent, borderRadius:3, display:'flex', alignItems:'center',
+            justifyContent:'center', color:'#fff', fontSize:12, fontWeight:FONT.weight.bold,
+            opacity:revealed ? 0 : 1,
+            transition: reducedMotion ? 'none' : `opacity ${MOTION.normal} ${MOTION.ease}` }}>
+            ?
+          </span>
+        ))}
+      </button>
+      <div style={{ fontSize:FONT.size.xs, color:t.text4, marginTop:SPACE.sm, textAlign:'center' }}>
+        {revealed ? 'Revealed. Tap to hide again.' : 'Structures hidden. Recall them, then tap to reveal.'}
+      </div>
+    </div>
+  );
+}
+
+function RememberStep({ t, reducedMotion }) {
+  return (
+    <div>
+      <FlowLabel t={t}>Remember</FlowLabel>
+      <p style={{ fontSize:FONT.size.sm, color:t.text3, textAlign:'center', maxWidth:520,
+        lineHeight:FONT.leading.relaxed, margin:`0 auto ${SPACE.lg}px` }}>
+        Two real ways this becomes active recall, not just something you looked at once.
+      </p>
+      <div className="mb-land-remember-grid">
+        <FlashcardRecall t={t} />
+        <ImageOcclusionDemo t={t} reducedMotion={reducedMotion} />
+      </div>
+    </div>
+  );
+}
+
+// A restrained strip proving breadth (pharmacology, dermatology, oncology,
+// pathophysiology) — object-fit:contain in a fixed-height frame, never
+// object-fit:cover: one of these is a tall multi-stage pathway diagram, and
+// cropping it to a short landscape thumbnail would cut off real content.
+const VARIETY_IMAGES = [
+  LANDING_IMAGES.hivAntiviral,
+  LANDING_IMAGES.skinImmunology,
+  LANDING_IMAGES.cancerImmunology,
+  LANDING_IMAGES.postCardiacInjury,
+];
+
+function VisualVarietyStrip({ t }) {
+  return (
+    <div>
+      <div style={{ textAlign:'center', maxWidth:520, margin:`0 auto ${SPACE.lg}px` }}>
+        <p style={{ fontSize:FONT.size.sm, color:t.text3, lineHeight:FONT.leading.relaxed, margin:0 }}>
+          Anatomy, pathways, pharmacology, pathology: whatever the source, it stays with the
+          knowledge it belongs to.
+        </p>
+      </div>
+      <div className="mb-land-variety-strip">
+        {VARIETY_IMAGES.map(img => (
+          <figure key={img.src} className="mb-land-variety-item" style={{ margin:0 }}>
+            <div style={{ background:t.surface2, border:`1px solid ${t.border}`, borderRadius:RADIUS.lg,
+              height:170, display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
+              <img src={img.src} alt={img.alt} loading="lazy" decoding="async"
+                style={{ display:'block', maxWidth:'100%', maxHeight:'100%', width:'auto', height:'auto' }} />
+            </div>
+            <figcaption style={{ fontSize:FONT.size.micro, color:t.text4, textAlign:'center',
+              marginTop:6, fontWeight:FONT.weight.medium }}>
+              {img.caption}
+            </figcaption>
+          </figure>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function VisualLearning({ t, reducedMotion }) {
+  return (
+    <section id="mb-land-visual" style={{ padding:`${SPACE.xl4}px ${SPACE.lg}px`,
+      background:t.surface2, borderTop:`1px solid ${t.border}` }}>
+      <div style={{ maxWidth:1100, margin:'0 auto' }}>
+        <div style={{ textAlign:'center', maxWidth:620, margin:`0 auto ${SPACE.xl3}px` }}>
+          <h2 style={{ fontSize:'clamp(24px, 3.2vw, 32px)', fontWeight:FONT.weight.bold,
+            color:t.text, lineHeight:1.2, margin:`0 0 ${SPACE.sm+2}px` }}>
+            Medicine is visual. MedBook remembers that.
+          </h2>
+          <p style={{ fontSize:FONT.size.md, color:t.text3, lineHeight:FONT.leading.relaxed, margin:0 }}>
+            Diagrams, algorithms, flowcharts, clinical pathways and images are part of how
+            medicine is learned. Keep them alongside your knowledge instead of leaving them
+            scattered across screenshots, files and folders.
+          </p>
+        </div>
+
+        <SeeStep t={t} />
+        <NarrativeArrow t={t} caption="Upload · Keep" />
+        <KeepStep t={t} />
+        <NarrativeArrow t={t} />
+        <ReviewBeat t={t} />
+        <NarrativeArrow t={t} />
+        <RememberStep t={t} reducedMotion={reducedMotion} />
+
+        <div style={{ height:1, background:t.border, margin:`${SPACE.xl3}px 0` }} />
+
+        <VisualVarietyStrip t={t} />
+      </div>
+
+      <div style={{ maxWidth:560, margin:`${SPACE.xl4}px auto 0`, textAlign:'center' }}>
+        <p style={{ fontSize:'clamp(17px, 2vw, 20px)', fontWeight:FONT.weight.semibold,
+          color:t.text2, lineHeight:1.4, margin:0 }}>
+          Some things shouldn't just be looked at. They should be remembered.
+        </p>
+      </div>
+    </section>
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────
 export default function LandingPage({ onGetStarted }) {
   const { t, isDark } = useTheme();
@@ -758,6 +1090,21 @@ export default function LandingPage({ onGetStarted }) {
         @media (max-width: 480px) {
           .mb-land-showcase-body { padding: ${SPACE.md}px !important; }
         }
+
+        /* Visual learning: the two REMEMBER paths (flashcard / image
+           occlusion) stack full-width on mobile — each stays completely
+           legible rather than shrinking side by side — and sit side by
+           side only once there's room for both without cramping. */
+        .mb-land-remember-grid { display:grid; grid-template-columns:1fr; gap:${SPACE.lg}px;
+          max-width:640px; margin:0 auto; }
+        @media (min-width: ${BREAKPOINT.mobile}px) {
+          .mb-land-remember-grid { grid-template-columns:1fr 1fr; max-width:none; }
+        }
+
+        /* The variety strip wraps naturally rather than forcing four across
+           on a narrow screen — 2x2 on phones, one row from tablet up. */
+        .mb-land-variety-strip { display:flex; flex-wrap:wrap; gap:${SPACE.md}px; justify-content:center; }
+        .mb-land-variety-item { flex:1 1 200px; max-width:240px; }
       `}</style>
 
       <Nav t={t} onGetStarted={onGetStarted} />
@@ -765,6 +1112,7 @@ export default function LandingPage({ onGetStarted }) {
         <Hero t={t} onGetStarted={onGetStarted} reducedMotion={reducedMotion} />
         <ProductNarrative t={t} reducedMotion={reducedMotion} />
         <KnowledgeWorkspace t={t} isDark={isDark} />
+        <VisualLearning t={t} reducedMotion={reducedMotion} />
       </main>
     </div>
   );
