@@ -41,8 +41,8 @@
 // old alternating flat section fills after Batch 4 — sections no longer
 // paint their own background band; cards keep their own solid surface.
 //
-// Batch 5 (this pass): "When you need another layer of understanding" —
-// AI as a supporting feature, not MedBook's identity, so this section is
+// Batch 5: "When you need another layer of understanding" — AI as a
+// supporting feature, not MedBook's identity, so this section is
 // deliberately the shortest and smallest on the page so far: one compact
 // real-UI panel showing the actual relationship (a Review Entry's own
 // notes -> the real "Analyze" action -> the app's real AI Analysis
@@ -51,8 +51,19 @@
 // Learning, keeping the hierarchy the spec asks for: medical learning,
 // knowledge, review, flashcards, THEN AI assistance last.
 //
-// Everything past that (About/Creator section, Install, FAQ, footer, final
-// CTA) is intentionally NOT here yet — later batches.
+// Batch 6 (this pass): the creator/mission narrative ("Built by a
+// doctor."). No project asset is an actual photo of Dr. Bahlah Surka, and
+// the spec is explicit that stock photography is worse than none — so
+// this is pure typography, deliberately the only section on the page with
+// no window-chrome/product-UI recreation at all, reading as a quiet pause
+// in the product story rather than a corporate "About Us" block. Copy is
+// restricted to what's actually established (the name and "doctor" already
+// used in the Batch 1 hero line) plus the purpose framing the spec itself
+// supplies — no invented university, hospital, specialty, career history,
+// awards, or testimonials.
+//
+// Everything past that (Install, FAQ, footer, final CTA) is intentionally
+// NOT here yet — later batches.
 //
 // THEME: deliberately just useTheme(), the same hook every authenticated
 // screen uses — no separate CSS-variable/media-query system. theme.js's
@@ -1141,6 +1152,52 @@ function AIAssistance({ t }) {
   );
 }
 
+// ── Creator / mission ("Built by a doctor.") ──────────────────────────────
+// Pure typography, on purpose — no window-chrome card, no product UI, the
+// only section on the page without one. No project asset is an actual
+// photo of Dr. Bahlah Surka, and stock photography would be worse than
+// none, so this reads as a quiet pause in the product story rather than a
+// corporate "About Us" block. Every fact here is either the name/title
+// already used in the Batch 1 hero line, or the purpose framing the spec
+// itself supplies — nothing about a university, hospital, specialty,
+// career history, awards or testimonials, none of which exist to draw on.
+function CreatorSection({ t }) {
+  return (
+    <section id="mb-land-creator" style={{ padding:`${SPACE.xl5}px ${SPACE.lg}px`,
+      borderTop:`1px solid ${t.border}` }}>
+      <div style={{ maxWidth:600, margin:'0 auto', textAlign:'center' }}>
+        <div style={{ width:36, height:36, borderRadius:RADIUS.md, background:t.accent,
+          display:'flex', alignItems:'center', justifyContent:'center', color:'#fff',
+          margin:`0 auto ${SPACE.xl2}px` }} aria-hidden="true">
+          <IconPulse size={18} />
+        </div>
+
+        <h2 style={{ fontSize:'clamp(26px, 3.6vw, 36px)', fontWeight:FONT.weight.bold,
+          color:t.text, lineHeight:1.2, margin:`0 0 ${SPACE.md}px` }}>
+          Built by a doctor.
+        </h2>
+
+        <div style={{ fontSize:FONT.size.xl, fontWeight:FONT.weight.semibold, color:t.accent,
+          margin:`0 0 6px` }}>
+          Dr. Bahlah Surka
+        </div>
+        <div style={{ fontSize:FONT.size.md, color:t.text3, fontWeight:FONT.weight.medium,
+          margin:`0 0 ${SPACE.xl2}px` }}>
+          An app for medical students, made by a doctor.
+        </div>
+
+        <p style={{ fontSize:FONT.size.md, color:t.text2, lineHeight:FONT.leading.relaxed,
+          margin:0 }}>
+          Medical study is demanding, fragmented, and deeply personal: dense material spread
+          across notes, slides, images, and flashcards that rarely talk to each other. MedBook
+          was built by a doctor who wanted one place to actually learn and retain it, not just
+          store it.
+        </p>
+      </div>
+    </section>
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────
 export default function LandingPage({ onGetStarted }) {
   const { t, isDark } = useTheme();
@@ -1285,6 +1342,7 @@ export default function LandingPage({ onGetStarted }) {
         <KnowledgeWorkspace t={t} isDark={isDark} />
         <VisualLearning t={t} reducedMotion={reducedMotion} />
         <AIAssistance t={t} />
+        <CreatorSection t={t} />
       </main>
     </div>
   );
