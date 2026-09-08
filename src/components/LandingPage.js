@@ -75,6 +75,19 @@
 // Everything past that (FAQ, if ever) is intentionally NOT here — this was
 // the last planned batch.
 //
+// Batch 8: final QA/refinement pass. No new sections, no rewrite — a
+// structural/visual/accessibility/performance review of everything above
+// turned up one real, fixable issue: the real diagram <img> tags (Visual
+// Learning's four render call sites) had loading="lazy" but no width/height
+// attributes, so the browser couldn't reserve their aspect ratio ahead of
+// the lazy download finishing (a real, if minor, layout-shift risk on a
+// slow connection). Fixed by adding the real file dimensions to
+// lib/landingImages.js and passing them through as width/height on every
+// <img>. Everything else reviewed — structure, spacing/typography scale,
+// nav/theme/reduced-motion behaviour, alt text, heading hierarchy, the five
+// required brand lines, mobile overflow at 320-1400px — held up against the
+// spec with nothing else warranting a change.
+//
 // THEME: deliberately just useTheme(), the same hook every authenticated
 // screen uses — no separate CSS-variable/media-query system. theme.js's
 // readInitial() now falls back to prefers-color-scheme when no explicit
@@ -814,7 +827,8 @@ function RealImageFrame({ t, image, maxWidth = 760 }) {
     <figure style={{ margin:0, maxWidth, width:'100%', marginLeft:'auto', marginRight:'auto' }}>
       <div style={{ background:t.surface, border:`1px solid ${t.border}`, borderRadius:RADIUS.xl,
         boxShadow:elevation(t,'lg'), padding:SPACE.md }}>
-        <img src={image.src} alt={image.alt} loading="lazy" decoding="async"
+        <img src={image.src} alt={image.alt} width={image.width} height={image.height}
+          loading="lazy" decoding="async"
           style={{ display:'block', width:'100%', height:'auto', borderRadius:RADIUS.md }} />
       </div>
       <figcaption style={{ fontSize:FONT.size.xs, color:t.text4, textAlign:'center',
@@ -873,7 +887,8 @@ function KeepStep({ t }) {
                 textTransform:'uppercase', marginBottom:SPACE.sm }}>
                 <IconImages size={11} style={{ flexShrink:0 }} /> Images (1) · tap to expand
               </div>
-              <img src={img.src} alt={img.alt} loading="lazy" decoding="async"
+              <img src={img.src} alt={img.alt} width={img.width} height={img.height}
+                loading="lazy" decoding="async"
                 style={{ width:'100%', maxWidth:220, height:'auto', borderRadius:RADIUS.sm,
                   border:`1px solid ${t.border}`, display:'block', background:t.surface2 }} />
             </div>
@@ -975,7 +990,8 @@ function ImageOcclusionDemo({ t, reducedMotion }) {
         style={{ position:'relative', display:'block', width:'100%', padding:0,
           border:`1px solid ${t.border}`, borderRadius:RADIUS.md, overflow:'hidden',
           cursor:'pointer', background:'none' }}>
-        <img src={img.src} alt={img.alt} loading="lazy" decoding="async"
+        <img src={img.src} alt={img.alt} width={img.width} height={img.height}
+          loading="lazy" decoding="async"
           style={{ display:'block', width:'100%', height:'auto' }} />
         {IO_MASKS.map((m,i) => (
           <span key={i} aria-hidden="true" style={{ position:'absolute',
@@ -1036,7 +1052,8 @@ function VisualVarietyStrip({ t }) {
           <figure key={img.src} className="mb-land-variety-item" style={{ margin:0 }}>
             <div style={{ background:t.surface2, border:`1px solid ${t.border}`, borderRadius:RADIUS.lg,
               height:170, display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
-              <img src={img.src} alt={img.alt} loading="lazy" decoding="async"
+              <img src={img.src} alt={img.alt} width={img.width} height={img.height}
+                loading="lazy" decoding="async"
                 style={{ display:'block', maxWidth:'100%', maxHeight:'100%', width:'auto', height:'auto' }} />
             </div>
             <figcaption style={{ fontSize:FONT.size.micro, color:t.text4, textAlign:'center',
