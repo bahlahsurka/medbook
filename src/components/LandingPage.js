@@ -7,13 +7,22 @@
 // preview, and a first pass at the "A better way to learn medicine." /
 // Learn → Review → Remember composition.
 //
-// Batch 2 (this pass): replaces that first-pass LRR with the fuller
-// composition — a single shared panel (not three floating cards) that opens
-// with a compact real-UI "loop" strip proving the product supports the
-// whole cycle (Entry → System → Review Queue → Flashcard → back into
-// Review), then the three Learn/Review/Remember stages beneath it as one
-// divided row rather than three repeated feature cards, closing on the
-// "Your medical knowledge, built to stay with you." transition line.
+// Batch 2: replaces that first-pass LRR with the fuller composition — a
+// single shared panel (not three floating cards) that opens with a compact
+// real-UI "loop" strip proving the product supports the whole cycle
+// (Entry → System → Review Queue → Flashcard → back into Review), then the
+// three Learn/Review/Remember stages beneath it as one divided row rather
+// than three repeated feature cards, closing on the "Your medical
+// knowledge, built to stay with you." transition line.
+//
+// Batch 3 (this pass): the knowledge-workspace narrative ("Your knowledge,
+// connected.") — one asymmetric real-UI showcase rather than five separate
+// Review Entries/Systems/Search/Review Queue/Dashboard chapters. A large
+// primary panel recreates the actual entry reading pane (system + title +
+// highlighted Review Notes, with the real app's own toolbar/search chrome
+// above it), with two smaller supporting panels beside it — a Systems
+// browse list and a Dashboard/Review Queue stat strip — asymmetrically
+// gridded rather than alternating text/screenshot blocks.
 //
 // Everything past that (deep flashcard story, AI section, About/Creator
 // section, final CTA, footer) is intentionally NOT here yet — later batches.
@@ -36,8 +45,9 @@
 import { useEffect, useState } from 'react';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, BREAKPOINT, elevation } from '../lib/theme';
 import { IconPulse, IconSearch, IconRepeat, IconCards, IconChart, IconEdit,
-  IconCheck, IconChevronRight, IconLayers } from '../lib/icons';
+  IconCheck, IconChevronRight, IconLayers, IconPin } from '../lib/icons';
 import { SYS_COLOR } from '../lib/constants';
+import { HL_COLORS, resolveHL } from '../lib/highlights';
 import EntryCard from './EntryCard';
 
 // Realistic, generic textbook-style study content — same voice as the
@@ -432,9 +442,226 @@ function ProductNarrative({ t, reducedMotion }) {
   );
 }
 
+// ── Knowledge workspace ("Your knowledge, connected.") ────────────────────
+// One asymmetric real-UI showcase, not five separate Review Entries/Systems/
+// Search/Review Queue/Dashboard chapters: a large primary panel recreates
+// the actual entry reading pane (with the real app's own toolbar/search
+// chrome above it, and real highlighted Review Notes), and two smaller
+// panels beside it — a Systems browse list, and a Dashboard/Review Queue
+// stat strip — cover the rest without turning the page into a screenshot
+// collage.
+const CAPABILITIES = ['Review Entries', 'Systems', 'Search', 'Review Queue', 'Dashboard'];
+
+function CapabilityPills({ t }) {
+  return (
+    <div style={{ display:'flex', flexWrap:'wrap', gap:8, justifyContent:'center' }}>
+      {CAPABILITIES.map(label => (
+        <span key={label} style={{ fontSize:FONT.size.xs, fontWeight:FONT.weight.medium, color:t.text3,
+          background:t.surface, border:`1px solid ${t.border}`, borderRadius:RADIUS.pill,
+          padding:'5px 12px' }}>
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// The primary showcase: the real app's own toolbar chrome (system breadcrumb
+// + global search, exactly as App.js renders it for the 'list'/'detail'
+// views) sitting above a faithful recreation of DetailView's reading pane —
+// system tag, title, meta + action icons, a divider, and Review Notes
+// rendered with real highlight colours (lib/highlights.js's own palette,
+// resolved the same isDark-aware way DetailView itself does).
+function EntryReadingPane({ t, isDark }) {
+  const c = SYS_COLOR.Cardiology;
+  const yellow = resolveHL(HL_COLORS[0], isDark);
+  const green = resolveHL(HL_COLORS[1], isDark);
+
+  return (
+    <div className="mb-land-window mb-land-showcase-primary" aria-hidden="true" style={{ background:t.surface,
+      border:`1px solid ${t.border}`, borderRadius:RADIUS.xl2, boxShadow:elevation(t,'xl'), overflow:'hidden' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:7, padding:'12px 16px',
+        borderBottom:`1px solid ${t.border}`, background:t.surface2 }}>
+        <span style={{ width:10, height:10, borderRadius:RADIUS.circle, background:'#ff5f57' }} />
+        <span style={{ width:10, height:10, borderRadius:RADIUS.circle, background:'#febc2e' }} />
+        <span style={{ width:10, height:10, borderRadius:RADIUS.circle, background:'#28c840' }} />
+      </div>
+
+      {/* The app's own toolbar row — system breadcrumb on the left, Global
+          Search on the right — recreated from App.js's real header exactly.
+          flexWrap means a narrow viewport wraps the search chip onto its
+          own line instead of forcing an overflow. */}
+      <div style={{ display:'flex', alignItems:'center', flexWrap:'wrap', rowGap:6, gap:SPACE.sm,
+        padding:'10px 18px', borderBottom:`1px solid ${t.border}`, background:t.surface }}>
+        <span style={{ width:7, height:7, borderRadius:RADIUS.circle, background:c, flexShrink:0 }} />
+        <span style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.bold, color:t.text }}>Cardiology</span>
+        <div style={{ flex:1 }} />
+        <span className="mb-land-showcase-search" style={{ background:t.surface2, border:`1px solid ${t.border}`,
+          borderRadius:RADIUS.sm+1, color:t.text4, padding:'6px 12px', fontSize:FONT.size.xs }}>
+          Search notes…
+        </span>
+      </div>
+
+      <div className="mb-land-showcase-body" style={{ padding:SPACE.xl }}>
+        <span style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, color:c }}>Cardiology</span>
+        <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:SPACE.md,
+          margin:`4px 0 ${SPACE.md}px` }}>
+          <div style={{ flex:1, minWidth:0, fontSize:'clamp(19px, 2.2vw, 24px)', fontWeight:FONT.weight.bold,
+            color:t.text, lineHeight:FONT.leading.tight }}>
+            Digoxin toxicity: ECG changes
+            <IconPin size={14} style={{ marginLeft:8, color:t.warn, verticalAlign:2 }} />
+          </div>
+          <div className="mb-land-showcase-actions" style={{ display:'flex', gap:6, flexShrink:0 }}>
+            {[IconCheck, IconEdit, IconPin].map((Ic, i) => (
+              <span key={i} style={{ width:26, height:26, borderRadius:RADIUS.sm+1, background:t.surface2,
+                border:`1px solid ${t.border}`, color:t.text3, display:'flex', alignItems:'center',
+                justifyContent:'center' }}>
+                <Ic size={12} />
+              </span>
+            ))}
+          </div>
+        </div>
+        <div style={{ fontSize:FONT.size.xs, color:t.text4, marginBottom:SPACE.lg }}>
+          06 Sept <span style={{ color:t.ok, fontWeight:FONT.weight.semibold }}> · Reviewed 3×</span>
+        </div>
+
+        <div style={{ height:1, background:t.border, marginBottom:SPACE.lg }} />
+
+        <div style={{ fontSize:FONT.size.micro, color:t.text4, letterSpacing:.8, fontWeight:FONT.weight.semibold,
+          textTransform:'uppercase', marginBottom:SPACE.md }}>
+          Review Notes
+        </div>
+        <p style={{ fontSize:FONT.size.md, color:t.text2, lineHeight:1.9, margin:0 }}>
+          <mark style={{ background:yellow.bg, color:yellow.text, borderRadius:2, padding:'0 2px' }}>
+            Scooped ST depression
+          </mark>, PR prolongation, and{' '}
+          <mark style={{ background:green.bg, color:green.text, borderRadius:2, padding:'0 2px' }}>
+            coloured-vision complaints
+          </mark>{' '}are the classic exam triad.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// Secondary panel A — Systems, recreated from Sidebar.js's own SystemRow
+// (coloured left border, due/count pills, progress bar) at browsing scale.
+const MINI_SYSTEMS = [
+  { name:'Cardiology', color:SYS_COLOR.Cardiology, due:3, count:28, pct:82 },
+  { name:'Neurology', color:SYS_COLOR.Neurology, due:1, count:19, pct:58 },
+  { name:'Pharmacology', color:SYS_COLOR.Pharmacology, due:0, count:34, pct:91 },
+];
+
+function SystemsPanel({ t }) {
+  return (
+    <div className="mb-land-showcase-panel" style={{ background:t.surface, border:`1px solid ${t.border}`,
+      borderRadius:RADIUS.xl, boxShadow:elevation(t,'md'), padding:SPACE.lg }}>
+      <div style={{ fontSize:FONT.size.micro, color:t.text4, letterSpacing:.8, fontWeight:FONT.weight.semibold,
+        textTransform:'uppercase', marginBottom:SPACE.md }}>
+        Systems
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', gap:SPACE.sm+2 }}>
+        {MINI_SYSTEMS.map(sys => (
+          <div key={sys.name} style={{ paddingLeft:10, borderLeft:`3px solid ${sys.color}` }}>
+            <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+              <span style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.medium, color:t.text2, flex:1 }}>
+                {sys.name}
+              </span>
+              {sys.due > 0 && (
+                <span style={{ fontSize:FONT.size.micro, fontWeight:FONT.weight.semibold, color:t.accent,
+                  background:t.navActiveBg, borderRadius:RADIUS.pill, padding:'1px 6px', flexShrink:0 }}>
+                  {sys.due} due
+                </span>
+              )}
+              <span style={{ fontSize:FONT.size.micro, background:t.surface3, color:t.text4,
+                borderRadius:RADIUS.pill, padding:'1px 7px', fontWeight:FONT.weight.semibold, flexShrink:0 }}>
+                {sys.count}
+              </span>
+            </div>
+            <div style={{ height:3, background:t.surface3, borderRadius:RADIUS.sm, marginTop:5, overflow:'hidden' }}>
+              <div style={{ height:'100%', borderRadius:RADIUS.sm, background:sys.color, width:`${sys.pct}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Secondary panel B — Dashboard + Review Queue, sharing one compact stat
+// strip (same numbers as the hero's own preview, kept consistent site-wide)
+// rather than a fourth separate box.
+function SurfacePanel({ t }) {
+  const stats = [
+    { label:'Due Today', value:'12', accent:true },
+    { label:'Reviewed', value:'76%' },
+    { label:'Systems', value:'9' },
+  ];
+  return (
+    <div className="mb-land-showcase-panel" style={{ background:t.surface, border:`1px solid ${t.border}`,
+      borderRadius:RADIUS.xl, boxShadow:elevation(t,'md'), padding:SPACE.lg }}>
+      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:SPACE.md }}>
+        <IconChart size={12} style={{ color:t.text4 }} />
+        <span style={{ fontSize:FONT.size.micro, color:t.text4, letterSpacing:.8, fontWeight:FONT.weight.semibold,
+          textTransform:'uppercase' }}>
+          Dashboard
+        </span>
+      </div>
+      <div className="mb-land-showcase-stats" style={{ display:'flex', gap:8 }}>
+        {stats.map(s => (
+          <div key={s.label} style={{ flex:1, minWidth:0, background:t.surface2, border:`1px solid ${t.border}`,
+            borderRadius:RADIUS.md, borderTop: s.accent ? `2px solid ${t.accent}` : `1px solid ${t.border}`,
+            padding:'9px 10px' }}>
+            <div style={{ fontSize:9, color:t.text4, letterSpacing:.5, fontWeight:FONT.weight.semibold,
+              textTransform:'uppercase', marginBottom:3, whiteSpace:'nowrap', overflow:'hidden',
+              textOverflow:'ellipsis' }}>
+              {s.label}
+            </div>
+            <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.bold,
+              color: s.accent ? t.accent : t.text }}>
+              {s.value}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:SPACE.md, color:t.text3 }}>
+        <IconRepeat size={12} style={{ flexShrink:0 }} />
+        <span style={{ fontSize:FONT.size.xs }}>Review Queue resurfaces what's due, automatically.</span>
+      </div>
+    </div>
+  );
+}
+
+function KnowledgeWorkspace({ t, isDark }) {
+  return (
+    <section id="mb-land-knowledge" style={{ padding:`${SPACE.xl4}px ${SPACE.lg}px`,
+      borderTop:`1px solid ${t.border}` }}>
+      <div style={{ maxWidth:1100, margin:'0 auto' }}>
+        <div style={{ textAlign:'center', maxWidth:560, margin:`0 auto ${SPACE.xl2}px` }}>
+          <h2 style={{ fontSize:'clamp(24px, 3.2vw, 32px)', fontWeight:FONT.weight.bold,
+            color:t.text, lineHeight:1.2, margin:`0 0 ${SPACE.sm+2}px` }}>
+            Your knowledge, connected.
+          </h2>
+          <p style={{ fontSize:FONT.size.md, color:t.text3, lineHeight:FONT.leading.relaxed,
+            margin:`0 0 ${SPACE.lg}px` }}>
+            Capture what you learn. Organize it by system. Return to it when it matters.
+          </p>
+          <CapabilityPills t={t} />
+        </div>
+
+        <div className="mb-land-showcase-grid">
+          <EntryReadingPane t={t} isDark={isDark} />
+          <SystemsPanel t={t} />
+          <SurfacePanel t={t} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────
 export default function LandingPage({ onGetStarted }) {
-  const { t } = useTheme();
+  const { t, isDark } = useTheme();
   const reducedMotion = useReducedMotion();
 
   useEffect(() => {
@@ -511,12 +738,33 @@ export default function LandingPage({ onGetStarted }) {
         @media (max-width: 480px) {
           .mb-land-window-main { padding: ${SPACE.md}px !important; }
         }
+
+        /* Knowledge workspace showcase — one large primary panel plus two
+           smaller supporting ones, stacked full-width on mobile (each stays
+           fully readable, never shrunk to postage-stamp size) and arranged
+           as an asymmetric bento (primary spans both rows in a narrower
+           left column) from tablet-landscape up. Strict grid tracks, not
+           free-floating offsets — the asymmetry comes from the column/row
+           split, not from breaking out of a grid. */
+        .mb-land-showcase-grid { display:grid; grid-template-columns:1fr; gap:${SPACE.lg}px; }
+        @media (min-width: ${BREAKPOINT.tablet}px) {
+          .mb-land-showcase-grid {
+            grid-template-columns:1.6fr 1fr;
+            grid-template-rows:auto auto;
+            align-items:stretch;
+          }
+          .mb-land-showcase-primary { grid-column:1; grid-row:1 / 3; }
+        }
+        @media (max-width: 480px) {
+          .mb-land-showcase-body { padding: ${SPACE.md}px !important; }
+        }
       `}</style>
 
       <Nav t={t} onGetStarted={onGetStarted} />
       <main>
         <Hero t={t} onGetStarted={onGetStarted} reducedMotion={reducedMotion} />
         <ProductNarrative t={t} reducedMotion={reducedMotion} />
+        <KnowledgeWorkspace t={t} isDark={isDark} />
       </main>
     </div>
   );
