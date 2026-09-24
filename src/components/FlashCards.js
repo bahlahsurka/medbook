@@ -8,6 +8,7 @@ import DeckBrowser from './ImportedDecks/DeckBrowser';
 import ImportWizard from './ImportedDecks/ImportWizard';
 import StudySession from './ImportedDecks/StudySession';
 import BrowseDeck from './ImportedDecks/BrowseDeck';
+import { STUDY_SCOPE_CLASS, suppressContextMenu } from '../lib/studyInteraction';
 import ImportedStats from './ImportedDecks/ImportedStats';
 import FavoritesScreen from './ImportedDecks/FavoritesScreen';
 import { loadActiveStudy, saveActiveStudy, clearActiveStudy } from '../lib/importedDecks/studySessionStore';
@@ -550,19 +551,26 @@ export default function FlashCards({ userId, userSystems }) {
 
         {/* The card IS the screen — minimal chrome around it, per the "card
             as visual focus" direction. */}
-        <div key={studyIdx} className="mb-fc-fade" style={{ background:t.surface, border:`1px solid ${t.border}`,
+        {/* mb-study-scope + data-selectable: the question/answer text stays
+            fully selectable and copyable, but without the browser's own
+            right-click menu / OS selection callout popping up over a study
+            card — see lib/studyInteraction.js. The "Question"/"Answer"
+            labels and buttons around it are untouched (not selectable,
+            same as any UI chrome, same as before this change). */}
+        <div key={studyIdx} className={`mb-fc-fade ${STUDY_SCOPE_CLASS}`} onContextMenu={suppressContextMenu}
+          style={{ background:t.surface, border:`1px solid ${t.border}`,
           borderRadius:RADIUS.lg, padding:SPACE.xl2, minHeight:220, boxShadow:elevation(t,'sm'),
           marginBottom:SPACE.lg, display:'flex', flexDirection:'column', justifyContent:'center' }}>
           <div style={{ fontSize:FONT.size.micro, color:t.text4, fontWeight:FONT.weight.semibold,
             textTransform:'uppercase', letterSpacing:.8, marginBottom:SPACE.md }}>Question</div>
-          <div style={{ fontSize:FONT.size.xl, fontWeight:FONT.weight.semibold, color:t.text, lineHeight:1.5 }}>
+          <div data-selectable="true" style={{ fontSize:FONT.size.xl, fontWeight:FONT.weight.semibold, color:t.text, lineHeight:1.5 }}>
             {card.question}
           </div>
           {flipped && (
             <div className="mb-fc-fade" style={{ marginTop:SPACE.xl2, paddingTop:SPACE.xl2, borderTop:`1px solid ${t.border}` }}>
               <div style={{ fontSize:FONT.size.micro, color:t.ok, fontWeight:FONT.weight.semibold,
                 textTransform:'uppercase', letterSpacing:.8, marginBottom:SPACE.md }}>Answer</div>
-              <div style={{ fontSize:FONT.size.lg, color:t.text2, lineHeight:1.7, whiteSpace:'pre-wrap' }}>
+              <div data-selectable="true" style={{ fontSize:FONT.size.lg, color:t.text2, lineHeight:1.7, whiteSpace:'pre-wrap' }}>
                 {card.answer}
               </div>
             </div>

@@ -44,6 +44,18 @@ const RESET_CSS = `
        child below be vertically centered via its own auto margins. */
     min-height:100%; display:flex; flex-direction:column;
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+    /* Native-app selection feel (see lib/studyInteraction.js): suppress
+       iOS's long-press callout without touching selection itself — the
+       card's own text stays fully selectable/copyable (user-select:text is
+       the default anyway; stated explicitly here so it can't be quietly
+       undone by a future change to this reset). There is no JS-level
+       contextmenu suppression possible in here: this iframe has sandbox=""
+       (no allow-scripts, by deliberate security design — see the file
+       header), so a right-click still shows the plain browser menu. That's
+       an accepted, documented limitation of the sandboxed rendering
+       architecture, not an oversight. */
+    -webkit-touch-callout:none;
+    -webkit-user-select:text; user-select:text;
   }
   /* Vertical centering lives on this ONE wrapper (auto top/bottom margins),
      not on body as a flex container of every top-level node — that would
@@ -63,7 +75,7 @@ const RESET_CSS = `
     margin:auto 0; padding:16px; box-sizing:border-box;
     overflow-wrap:break-word; word-break:break-word;
   }
-  img{max-width:100%;height:auto;}
+  img{max-width:100%;height:auto;-webkit-touch-callout:none;-webkit-user-drag:none;}
   .cloze-blank{font-weight:700;color:#2563eb;border-bottom:2px solid #2563eb;padding:0 2px;}
   .cloze-reveal{font-weight:700;color:#16a34a;background:#f0fdf4;padding:0 3px;border-radius:3px;}
   .media-missing{display:inline-block;background:#f3f4f6;color:#9ca3af;border:1px dashed #d1d5db;

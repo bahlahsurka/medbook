@@ -20,6 +20,14 @@ export default function HLPopover({ rect, onApply, onRemove, onCopy, hasHighligh
   const ref = useRef(null);
   const [pos, setPos] = useState({ left: 0, top: 0, below: false, ready: false });
 
+  // Read once, non-reactive — same pattern already used elsewhere in this
+  // codebase (e.g. LandingPage's scrollToId). The popover's own appearance
+  // is the only thing animated here; repositioning (left/top, driven by
+  // scroll) is never part of the transition below, so this can't cause the
+  // bar to visibly lag behind a moving selection.
+  const reducedMotion = typeof window !== 'undefined' &&
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
   useLayoutEffect(() => {
     if (!rect || !ref.current) { setPos(p => ({ ...p, ready: false })); return; }
     const el = ref.current;
@@ -59,13 +67,20 @@ export default function HLPopover({ rect, onApply, onRemove, onCopy, hasHighligh
       aria-label="Highlight selection"
       onMouseDown={prevent}
       onTouchStart={prevent}
+      aria-hidden={!pos.ready}
       style={{
         position: 'fixed',
         left: pos.left,
         top: pos.top,
         zIndex: 1200,
-        // Avoid a first-paint flash at (0,0) before we've measured.
-        visibility: pos.ready ? 'visible' : 'hidden',
+        // Avoid a first-paint flash at (0,0) before we've measured, and a
+        // restrained (never re-triggered by a mid-scroll reposition, since
+        // those never flip `ready` back to false) fade+lift-in on the way
+        // to full opacity — the one bit of motion this component allows.
+        opacity: pos.ready ? 1 : 0,
+        transform: pos.ready ? 'scale(1)' : 'scale(0.96)',
+        transition: reducedMotion ? 'none' : 'opacity 120ms ease, transform 120ms ease',
+        pointerEvents: pos.ready ? 'auto' : 'none',
         display: 'flex', alignItems: 'center', gap: 2,
         background: t.surface,
         border: `1px solid ${t.border}`,

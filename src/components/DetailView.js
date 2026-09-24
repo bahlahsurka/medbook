@@ -12,6 +12,7 @@ import AISections from './AISections';
 import AIService, { normalizeSections, isAllEmpty } from '../services/ai';
 import { limitsFor } from '../services/ai/PromptBuilder';
 import { handleBulletKeyDown, toggleBulletLines, handleBulletPaste } from '../lib/bulletList';
+import { STUDY_SCOPE_CLASS, suppressContextMenu } from '../lib/studyInteraction';
 
 
 // --- helpers -------------------------------------------------------------
@@ -339,9 +340,16 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     const start = pre.toString().length;
     const end   = start + range.toString().length;
     if (start >= end) return null;
+    const text = range.toString();
+    // "Meaningful text" — reject a selection that's whitespace-only (a stray
+    // drag across a line break/paragraph gap, common on mobile) so the
+    // toolbar doesn't pop up over nothing worth acting on. A short but real
+    // token (an abbreviation like "CD4" or "PR") still counts — there's no
+    // arbitrary length minimum beyond "isn't just blank space".
+    if (!text.trim()) return null;
     const r = range.getBoundingClientRect();
     if (!r || (r.width === 0 && r.height === 0)) return null;
-    return { start, end, rect: r, text: range.toString() };
+    return { start, end, rect: r, text };
   }, []);
 
   const clearSelState = useCallback(() => {
@@ -1012,10 +1020,18 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                 math walks notesRef's text content, which this doesn't
                 change. On mobile the card is already narrower than this,
                 so it has no effect there. */}
+            {/* mb-study-scope + data-selectable: native-app selection feel
+                (no stray OS "Copy/Select All" callout, no browser right-click
+                menu) while text stays fully selectable and copyable — see
+                lib/studyInteraction.js. Applied regardless of hlViewOn: text
+                selection and Ctrl/Cmd+C keep working either way, and when
+                highlight mode is on, HLPopover below gives an in-app
+                substitute for the browser menu this suppresses. */}
             <div ref={notesRef}
-              data-selectable={hlViewOn ? 'true' : 'false'}
-              style={{lineHeight:1.9,fontSize:FONT.size.md,color:t.text2,maxWidth:640,
-              userSelect:hlViewOn?'text':'auto'}}>
+              className={STUDY_SCOPE_CLASS}
+              data-selectable="true"
+              onContextMenu={suppressContextMenu}
+              style={{lineHeight:1.9,fontSize:FONT.size.md,color:t.text2,maxWidth:640}}>
               <RenderedNotes text={entry.notes} highlights={viewHL} />
             </div>
           </>

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useTheme, MOTION } from '../lib/theme';
+import { STUDY_SCOPE_CLASS, suppressContextMenu } from '../lib/studyInteraction';
 
 // Animated collapse/expand (batch 6) — a CSS-grid-rows trick rather than a
 // JS-measured max-height: the row track animates between 0fr and 1fr, so the
@@ -51,7 +52,11 @@ export default function AISections({
   };
 
   return (
-    <div style={{ fontFamily:'Inter,sans-serif' }}>
+    // mb-study-scope: native-app selection feel for the read-only AI text
+    // below (no browser right-click menu / OS callout on it), while the
+    // section headers, buttons and the editable front/back <input>s stay
+    // exactly as interactive as before — see lib/studyInteraction.js.
+    <div className={STUDY_SCOPE_CLASS} onContextMenu={suppressContextMenu} style={{ fontFamily:'Inter,sans-serif' }}>
       {SECTIONS.map(s => {
         const list = Array.isArray(sections?.[s.key]) ? sections[s.key] : [];
         const isOpen = !collapsed[s.key];
@@ -110,7 +115,7 @@ export default function AISections({
                     Nothing here. Your Review didn't support this section.
                   </div>
                 ) : (
-                  <ul style={{ margin:0, paddingLeft:18 }}>
+                  <ul data-selectable="true" style={{ margin:0, paddingLeft:18 }}>
                     {list.map((item,i)=>(
                       <li key={i} style={{ fontSize:13, color:t.text2, lineHeight:1.65,
                         marginBottom:4 }}>{item}</li>
