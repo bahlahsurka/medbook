@@ -340,9 +340,16 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     const start = pre.toString().length;
     const end   = start + range.toString().length;
     if (start >= end) return null;
+    const text = range.toString();
+    // "Meaningful text" — reject a selection that's whitespace-only (a stray
+    // drag across a line break/paragraph gap, common on mobile) so the
+    // toolbar doesn't pop up over nothing worth acting on. A short but real
+    // token (an abbreviation like "CD4" or "PR") still counts — there's no
+    // arbitrary length minimum beyond "isn't just blank space".
+    if (!text.trim()) return null;
     const r = range.getBoundingClientRect();
     if (!r || (r.width === 0 && r.height === 0)) return null;
-    return { start, end, rect: r, text: range.toString() };
+    return { start, end, rect: r, text };
   }, []);
 
   const clearSelState = useCallback(() => {
