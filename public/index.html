@@ -228,6 +228,45 @@
       /* No long-press image save / drag, no tap highlight flash. */
       body.cap-native img { -webkit-touch-callout: none; -webkit-user-drag: none; }
       body.cap-native { -webkit-tap-highlight-color: transparent; }
+
+      /* ===== Study-content interaction scope (web + native) =====
+         Same pattern as body.cap-native above, generalized to the ordinary
+         web/PWA build and scoped PER COMPONENT (via a class on the specific
+         study-content container) instead of the whole body — a visitor
+         reading a Review Entry, an AI Analysis section or a flashcard gets
+         the native-app "no stray Copy/Select All/Look Up/Share callout"
+         feel; everywhere else on the site (inputs, forms, nav, settings,
+         the landing page) is completely unaffected, since nothing outside a
+         .mb-study-scope container ever sees this rule.
+
+         The scoped container defaults to no incidental selection (so a
+         button label, icon or heading inside it never becomes selectable by
+         accident), and the one thing actually meant to be read opts back in
+         via [data-selectable="true"] — never the reverse. Selection itself,
+         drag-select, and Ctrl/Cmd+C copying all keep working normally on
+         that opted-in text; only the surrounding OS/browser chrome around
+         it is suppressed. See src/lib/studyInteraction.js for where this is
+         applied and why. */
+      .mb-study-scope {
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .mb-study-scope[data-selectable="true"],
+      .mb-study-scope [data-selectable="true"] {
+        -webkit-touch-callout: default;
+        -webkit-user-select: text;
+        user-select: text;
+      }
+      .mb-study-scope input,
+      .mb-study-scope textarea,
+      .mb-study-scope [contenteditable="true"] {
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-touch-callout: default;
+      }
+      .mb-study-scope img { -webkit-touch-callout: none; -webkit-user-drag: none; }
     </style>
     <script>
       // Paint body dark immediately if needed (before React mounts).
