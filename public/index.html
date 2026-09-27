@@ -83,8 +83,8 @@
          regardless of theme without needing exact surface-color values in
          static CSS, and composes fine with SelectableCard's own independent
          press-scale on its wrapper (different element, own transform box). */
-      .mb-entrycard:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.08); }
-      body.medbook-dark .mb-entrycard:hover { box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+      .mb-entrycard:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.08); filter: brightness(0.98); }
+      body.medbook-dark .mb-entrycard:hover { box-shadow: 0 4px 14px rgba(0,0,0,.4); filter: brightness(1.1); }
       .mb-entrycard:active { transform: scale(0.99); }
 
       /* Filter chips (batch 5) — difficulty/pinned filters above the
