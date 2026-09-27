@@ -1,15 +1,18 @@
 // components/SystemHome.js
 //
-// The System page. Second pass at this component — the first attempt
-// (identity hero + full-bleed colour wash + a grayscaled/blurred stock-style
-// background image) still read as a generic AI-dashboard hero: an artificial
-// gradient standing in for real content. This version removes the wash and
-// the borrowed landing-page artwork entirely and replaces them with the
-// system's OWN real entry images, arranged as a small editorial mosaic next
-// to the title — the user's actual medical knowledge becomes the page's
-// visual identity instead of a decorative backdrop. See pickHeroImages()
-// below. A system with no photographed entries yet simply gets a
-// typography-only header — nothing is ever generated or substituted.
+// The System page. Third pass at the hero — the first attempt was an
+// artificial full-bleed colour wash plus a blurred, borrowed landing-page
+// image; the second replaced that with a small curated mosaic of the
+// system's own entry photos sitting beside the title. This version keeps
+// "always the system's real content, never stock/generated" but changes
+// how that imagery is used: instead of a few clickable foreground tiles,
+// the real photos now tile across the FULL hero as a low-opacity
+// background collage/texture, faded into the page's flat background via a
+// left-to-right and bottom-to-top gradient so it reads as rich texture
+// behind the text rather than a distraction competing with it. See
+// pickHeroImages()/HeroCollageBackground() below. A system with no
+// photographed entries yet still gets a typography-only header — nothing
+// is ever generated or substituted to fill the collage.
 //
 // All data/behaviour here is exactly what App.js already computed and
 // owned before this component existed (sysEntries, activeSystemProgress,
@@ -25,8 +28,7 @@ import FilterChips from './FilterChips';
 import EntryCard from './EntryCard';
 
 const CONTENT_MAX_WIDTH = 1040;
-const MOSAIC_MAX_DESKTOP = 3;
-const MOSAIC_MAX_MOBILE = 2;
+const COLLAGE_MAX_IMAGES = 10;
 
 // ── Continue Studying — derived, not fabricated: the entry that's overdue
 // soonest, or (nothing due) the most recent entry that's never been
@@ -60,52 +62,46 @@ function pickHeroImages(allEntries, max) {
     .map(e => ({ src: e.images[0], entry: e }));
 }
 
-// A small curated mosaic rather than a uniform grid: one image genuinely
-// dominant, the rest supporting it — the arrangement (and each tile's
-// aspect ratio) changes with how many real photographed entries exist,
-// down to a single asymmetrically-sized image rather than stretching one
-// photo to fill a grid built for three. Every tile opens the entry it's
-// from — the imagery is real content, not decoration, so it stays useful.
-function HeroImageMosaic({ t, images, onOpen, isMobile }) {
-  const shown = images.slice(0, isMobile ? MOSAIC_MAX_MOBILE : MOSAIC_MAX_DESKTOP);
-  if (!shown.length) return null;
-  const count = shown.length;
-
-  const tilePos = (i) => {
-    if (count === 1) return { gridColumn:'1', gridRow:'1' };
-    if (count === 2) return { gridColumn: i===0 ? '1' : '2', gridRow:'1' };
-    return i===0 ? { gridColumn:'1', gridRow:'1 / 3' } : { gridColumn:'2', gridRow: i===1 ? '1' : '2' };
-  };
+// The real-photo background texture. Non-interactive (it's a backdrop, not
+// a set of featured cases) and deliberately low-opacity — a CSS grid tiles
+// as many of the system's own recent entry photos as exist (auto-fit, so
+// one image simply fills the whole strip rather than the grid looking
+// sparse), then two gradients on top fade it into the flat page colour:
+// left-to-right so the text side stays fully legible while the far side
+// shows more texture, and bottom-to-top so the collage doesn't end in a
+// hard seam where the notes section begins. Absent entirely (not even a
+// faded rectangle) when the system has no photographed entries.
+function HeroCollageBackground({ t, isDark, images, isMobile }) {
+  if (!images.length) return null;
+  const tileMin = isMobile ? 110 : 170;
+  const imgOpacity = isDark ? 0.18 : 0.1;
 
   return (
-    <div style={{
-      width: isMobile ? '100%' : (count===1 ? 220 : 320),
-      height: isMobile ? 120 : (count===1 ? 240 : 264),
-      display:'grid', gap: isMobile ? 6 : 8, flexShrink:0,
-      gridTemplateColumns: count===1 ? '1fr' : '1.3fr 1fr',
-      gridTemplateRows: count===3 ? '1fr 1fr' : '1fr',
-    }}>
-      {shown.map((img, i) => (
-        <button key={img.entry.id} className="mb-mosaic-tile" onClick={()=>onOpen(img.entry)} title={img.entry.title}
-          style={{ ...tilePos(i), padding:0, margin:0, minWidth:0, minHeight:0, overflow:'hidden',
-            border:`1px solid ${t.border}`, borderRadius:RADIUS.lg, cursor:'pointer', background:t.surface3 }}>
-          <img src={img.src} alt="" loading="lazy" decoding="async"
-            style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
-        </button>
-      ))}
+    <div aria-hidden="true" style={{ position:'absolute', inset:0, overflow:'hidden', pointerEvents:'none' }}>
+      <div style={{ position:'absolute', inset:0, display:'grid',
+        gridTemplateColumns:`repeat(auto-fit, minmax(${tileMin}px, 1fr))` }}>
+        {images.map(img => (
+          <div key={img.entry.id} style={{ overflow:'hidden' }}>
+            <img src={img.src} alt="" loading="lazy" decoding="async" style={{
+              width:'100%', height:'100%', objectFit:'cover', display:'block', opacity:imgOpacity }} />
+          </div>
+        ))}
+      </div>
+      <div style={{ position:'absolute', inset:0, background:
+        `linear-gradient(90deg, ${t.bg} 0%, ${t.bg}cc 40%, ${t.bg}66 66%, transparent 100%),` +
+        `linear-gradient(0deg, ${t.bg} 0%, ${t.bg}00 46%)` }} />
     </div>
   );
 }
 
-// The header itself. Deliberately not one enclosing card/panel — it sits
-// directly on the page like the opening of a chapter: a small eyebrow
-// label, the system name, a one-line description, the review-state line,
-// then actions. On desktop the real-image mosaic sits beside that column;
-// on mobile it drops in as a short, bounded strip right after the
-// description rather than either a giant vertical block or being pushed
-// below the fold.
-function SystemHero({ t, system, color, total, progress, onAdd, onReview, continueInfo, onOpen, heroImages, isMobile }) {
+// The header itself. Deliberately not one enclosing card/panel — the real-
+// photo collage (if any) is a background layer filling this whole block,
+// faded low so it reads as texture; the text sits on top of it like the
+// opening of a chapter: a small eyebrow label, the system name, a one-line
+// description, the review-state line, then actions.
+function SystemHero({ t, isDark, system, color, total, progress, onAdd, onReview, continueInfo, onOpen, heroImages, isMobile }) {
   const blurb = SYSTEM_BLURBS[system];
+  const hasCollage = heroImages.length > 0;
 
   const eyebrow = (
     <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
@@ -144,12 +140,15 @@ function SystemHero({ t, system, color, total, progress, onAdd, onReview, contin
       <button className="mb-hero-cta" onClick={onAdd} style={{
         background:color, color:'#fff', border:'none', borderRadius:RADIUS.md,
         padding:'11px 20px', fontSize:FONT.size.base, fontWeight:FONT.weight.semibold,
-        cursor:'pointer', display:'inline-flex', alignItems:'center', gap:7 }}>
+        cursor:'pointer', display:'inline-flex', alignItems:'center', gap:7,
+        boxShadow:`0 4px 14px ${color}35` }}>
         <IconPlus size={14} /> Add Entry
       </button>
       {total > 0 && (
         <button className="mb-hero-ghost" onClick={onReview} style={{
-          background:'transparent', color:t.text2, border:`1px solid ${t.borderStrong}`,
+          background: hasCollage ? 'rgba(255,255,255,0.06)' : 'transparent',
+          backdropFilter: hasCollage ? 'blur(8px)' : 'none', WebkitBackdropFilter: hasCollage ? 'blur(8px)' : 'none',
+          color:t.text2, border:`1px solid ${hasCollage ? 'rgba(255,255,255,0.14)' : t.borderStrong}`,
           borderRadius:RADIUS.md, padding:'11px 18px', fontSize:FONT.size.base,
           fontWeight:FONT.weight.semibold, cursor:'pointer',
           display:'inline-flex', alignItems:'center', gap:7 }}>
@@ -171,34 +170,16 @@ function SystemHero({ t, system, color, total, progress, onAdd, onReview, contin
     </div>
   );
 
-  const mosaicEl = heroImages.length > 0 && (
-    <HeroImageMosaic t={t} images={heroImages} onOpen={onOpen} isMobile={isMobile} />
-  );
-
-  if (isMobile) {
-    return (
-      <div style={{ maxWidth:CONTENT_MAX_WIDTH, margin:'0 auto', padding:`${SPACE.xl2}px ${SPACE.lg}px 0` }}>
+  return (
+    <div style={{ position:'relative', minHeight: hasCollage ? (isMobile?240:300) : 'auto' }}>
+      <HeroCollageBackground t={t} isDark={isDark} images={heroImages} isMobile={isMobile} />
+      <div style={{ position:'relative', maxWidth:CONTENT_MAX_WIDTH, margin:'0 auto',
+        padding: isMobile ? `${SPACE.xl2}px ${SPACE.lg}px 0` : `${SPACE.xl4}px ${SPACE.xl2}px 0` }}>
         {eyebrow}
         {titleEl}
         {blurbEl}
-        {mosaicEl && <div style={{ marginTop:18 }}>{mosaicEl}</div>}
         <div style={{ marginTop:18 }}>{statsEl}</div>
-        <div style={{ marginTop:16 }}>{actionsEl}</div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ maxWidth:CONTENT_MAX_WIDTH, margin:'0 auto', padding:`${SPACE.xl4}px ${SPACE.xl2}px 0` }}>
-      <div style={{ display:'flex', gap:48, alignItems:'flex-start' }}>
-        <div style={{ flex:'1 1 380px', minWidth:0 }}>
-          {eyebrow}
-          {titleEl}
-          {blurbEl}
-          <div style={{ marginTop:18 }}>{statsEl}</div>
-          <div style={{ marginTop:22 }}>{actionsEl}</div>
-        </div>
-        {mosaicEl}
+        <div style={{ marginTop: isMobile?16:22 }}>{actionsEl}</div>
       </div>
     </div>
   );
@@ -290,7 +271,7 @@ function bulkBtnStyle(color) {
 }
 
 export default function SystemHome({
-  t, system, color, allEntries, sysEntries, progress,
+  t, isDark, system, color, allEntries, sysEntries, progress,
   search, setSearch, difficultyFilter, setDifficultyFilter, pinnedOnly, setPinnedOnly,
   bulkMode, setBulkMode, selected2, toggleSelect, onOpen, onStartBulk,
   onAdd, onReview, userSystems, bulkPin, bulkMove, bulkDelete, isMobile,
@@ -300,25 +281,21 @@ export default function SystemHome({
 
   const continueInfo = useMemo(() => (total > 0 ? pickContinueEntry(allEntries) : null), [allEntries, total]);
   const shown = useMemo(() => sortEntries(sysEntries, sortMode), [sysEntries, sortMode]);
-  const heroImages = useMemo(() => pickHeroImages(allEntries, MOSAIC_MAX_DESKTOP), [allEntries]);
+  const heroImages = useMemo(() => pickHeroImages(allEntries, COLLAGE_MAX_IMAGES), [allEntries]);
 
   return (
     <div>
       <style>{`
         .mb-hero-cta { transition: filter ${MOTION.fast} ${MOTION.ease}, transform ${MOTION.fast} ${MOTION.ease}; }
-        .mb-hero-cta:hover { filter: brightness(1.06); }
+        .mb-hero-cta:hover { filter: brightness(1.06); transform: translateY(-1px); }
         .mb-hero-cta:active { transform: scale(0.97); }
-        .mb-hero-ghost:hover { background: ${t.surface2}; border-color: ${t.text4}; }
+        .mb-hero-ghost:hover { filter: brightness(1.2); border-color: ${t.text4}; }
         .mb-hero-ghost:active { transform: scale(0.97); }
         .mb-continue-link:hover span:nth-child(2) { color: ${color}; }
         .mb-sorttoggle:hover { background: ${t.surface2}; }
-        .mb-mosaic-tile { transition: border-color ${MOTION.fast} ${MOTION.ease}; }
-        .mb-mosaic-tile img { transition: transform ${MOTION.slow} ${MOTION.ease}; }
-        .mb-mosaic-tile:hover { border-color: ${t.borderStrong}; }
-        .mb-mosaic-tile:hover img { transform: scale(1.045); }
       `}</style>
 
-      <SystemHero t={t} system={system} color={color} total={total} progress={progress}
+      <SystemHero t={t} isDark={isDark} system={system} color={color} total={total} progress={progress}
         onAdd={onAdd} onReview={onReview} continueInfo={continueInfo} onOpen={onOpen}
         heroImages={heroImages} isMobile={isMobile} />
 
@@ -342,7 +319,7 @@ export default function SystemHome({
               <input value={search} onChange={e=>setSearch(e.target.value)} placeholder={`Search ${system}…`}
                 style={{ flex: isMobile ? '1 1 auto' : '1 1 220px', minWidth: isMobile?0:160,
                   background:t.surface2, border:`1px solid ${t.border}`,
-                  borderRadius:RADIUS.sm+1, color:t.text, padding: isMobile?'9px 12px':'8px 12px',
+                  borderRadius:RADIUS.xl, color:t.text, padding: isMobile?'10px 14px':'9px 14px',
                   fontSize:FONT.size.base, outline:'none' }} />
 
               <button className="mb-bulkbtn" onClick={()=>setBulkMode(p=>!p)} style={{

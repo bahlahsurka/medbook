@@ -9,26 +9,28 @@ function EntryCard({ entry, color, onClick, showSystem }) {
 
   return (
     <div onClick={onClick} className="mb-entrycard"
-      style={{ background:t.surface, border:`1px solid ${t.border}`,
-        borderLeft:`4px solid ${sc}`, borderRadius:RADIUS.md, padding:`${SPACE.md}px ${SPACE.lg}px`,
+      style={{ position:'relative', background:t.surface, border:`1px solid ${t.border}`,
+        borderRadius:RADIUS.xl, padding:`${SPACE.md+2}px ${SPACE.lg}px ${SPACE.md+2}px ${SPACE.xl2}px`,
         cursor:'pointer', display:'flex', gap:SPACE.md+2, alignItems:'flex-start',
-        transition:`transform ${MOTION.fast} ${MOTION.ease}, box-shadow ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}`,
+        transition:`transform ${MOTION.fast} ${MOTION.ease}, box-shadow ${MOTION.fast} ${MOTION.ease}, filter ${MOTION.fast} ${MOTION.ease}`,
         boxShadow:elevation(t,'sm') }}>
 
-      {/* Every row gets the same thumbnail-sized anchor whether or not it
-          has a photo — a real image when there is one, a quiet colour-
-          matched placeholder when there isn't — so a mixed list of
-          photographed and text-only entries keeps one consistent rhythm
-          instead of photographed rows reading as "richer" than the rest. */}
-      {entry.images?.length > 0 ? (
-        <div style={{ width:72, height:54, borderRadius:RADIUS.sm, flexShrink:0,
+      {/* A refined inset accent rather than a full-height straight border —
+          a short rounded pill, roughly centred, reads as a quiet marker
+          instead of a hard rule down the card's whole edge. */}
+      <span aria-hidden="true" style={{ position:'absolute', left:10, top:'22%', bottom:'22%',
+        width:4, borderRadius:RADIUS.pill, background:sc }} />
+
+      {/* No placeholder when an entry has no photo — the thumbnail slot is
+          omitted entirely and the text column simply takes the extra
+          width, rather than every row reserving space for an image that
+          may not exist. */}
+      {entry.images?.length > 0 && (
+        <div style={{ width:96, height:64, borderRadius:RADIUS.lg, flexShrink:0,
           background:t.surface3, overflow:'hidden', border:`1px solid ${t.border}` }}>
           <img src={entry.images[0]} alt="" loading="lazy" decoding="async"
             style={{ width:'100%', height:'100%', objectFit:'cover' }} />
         </div>
-      ) : (
-        <div aria-hidden="true" style={{ width:72, height:54, borderRadius:RADIUS.sm, flexShrink:0,
-          background:`${sc}0f`, border:`1px solid ${sc}22` }} />
       )}
 
       <div style={{ flex:1, minWidth:0 }}>
@@ -36,7 +38,7 @@ function EntryCard({ entry, color, onClick, showSystem }) {
             bumped a step up the type scale and given the most contrast on
             the card, everything else here is deliberately quieter. */}
         <div style={{ display:'flex', alignItems:'flex-start', gap:6, marginBottom:5 }}>
-          <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.semibold, color:t.text,
+          <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.medium, color:t.text,
             lineHeight:FONT.leading.tight, flex:1 }}>{entry.title}</div>
           {entry.pinned && <span style={{ fontSize:FONT.size.sm, flexShrink:0 }}>📌</span>}
         </div>
