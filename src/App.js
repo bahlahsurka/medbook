@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { supabase } from './lib/supabase';
 import { loadSystems, saveSystems, DEFAULT_SYSTEMS } from './lib/systems';
-import { SYS_COLOR, DIFFICULTY, DIFF_COLOR } from './lib/constants';
+import { SYS_COLOR } from './lib/constants';
 import { useScrollRestore } from './lib/useScrollRestore';
 import { useDebouncedValue } from './lib/useDebouncedValue';
 import { useStudySession } from './lib/useStudySession';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation, BREAKPOINT } from './lib/theme';
-import { IconMenu, IconX, IconChevronLeft, IconRepeat, IconPlus, IconInbox, IconSearch } from './lib/icons';
+import { IconMenu, IconX, IconChevronLeft, IconPlus, IconInbox, IconSearch } from './lib/icons';
 import Auth from './components/Auth';
 import LandingPage from './components/LandingPage';
 import Sidebar from './components/Sidebar';
@@ -21,6 +21,8 @@ import FlashCards from './components/FlashCards';
 import Onboarding from './components/Onboarding';
 import QuickAdd from './components/QuickAdd';
 import SystemReview from './components/SystemReview';
+import SystemHome from './components/SystemHome';
+import FilterChips from './components/FilterChips';
 
 const ONBOARD_KEY = 'medbook_onboarded';
 
@@ -35,7 +37,7 @@ function storagePathFromUrl(url) {
 }
 
 export default function App() {
-  const { t } = useTheme();
+  const { t, isDark } = useTheme();
   const [session, setSession]         = useState(null);
   // Detect Supabase's password-recovery redirect (#...&type=recovery in the
   // URL). getSession()/onAuthStateChange below will make `session` truthy
@@ -675,17 +677,6 @@ export default function App() {
               <div style={{width:7,height:7,borderRadius:RADIUS.circle,background:color,flexShrink:0}} />
               <span style={{fontSize:FONT.size.md,fontWeight:FONT.weight.bold,color:t.text,
                 overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{activeSystem}</span>
-              {view==='list' && (
-                <span style={{fontSize:FONT.size.xs,color:t.text4,flexShrink:0,whiteSpace:'nowrap'}}>
-                  {sysEntries.length}
-                  {!isMobile && sysEntries.length>0 && (
-                    <>
-                      {activeSystemProgress.due>0 && <span style={{color:t.accent,fontWeight:FONT.weight.semibold}}> · {activeSystemProgress.due} due</span>}
-                      {' · '}{activeSystemProgress.reviewed}/{sysEntries.length} reviewed
-                    </>
-                  )}
-                </span>
-              )}
             </>
           )}
 
@@ -699,38 +690,12 @@ export default function App() {
               zero behavior change for them. */}
           <div id="mb-study-toolbar-slot" style={{flex:1, display:'flex', alignItems:'center', minWidth:0}} />
 
-          {view==='list' && !isMobile && (
-            <input value={search} onChange={e=>setSearch(e.target.value)}
-              placeholder="Search notes…"
-              style={{background:t.surface2,border:`1px solid ${t.border}`,borderRadius:RADIUS.sm+1,
-                color:t.text,padding:'7px 12px',fontSize:FONT.size.base,width:180,outline:'none'}} />
-          )}
           {view==='search' && (
             <input value={globalSearch} onChange={e=>setGS(e.target.value)}
               placeholder="Search all systems…" autoFocus
               style={{background:t.surface2,border:`1px solid ${t.border}`,borderRadius:RADIUS.sm+1,
                 color:t.text,padding:'7px 12px',fontSize:FONT.size.base,outline:'none',
                 width:isMobile?'100%':260,flex:isMobile?1:'none'}} />
-          )}
-
-          {view==='list' && (
-            <div style={{display:'flex',gap:8,flexShrink:0}}>
-              {(entries[activeSystem]||[]).length>0 && (
-                <button className="mb-headerbtn2" onClick={()=>setSysReview(true)} style={{
-                  background:t.surface2,color:t.text2,border:`1px solid ${t.border}`,
-                  borderRadius:RADIUS.sm+1,padding:isMobile?'8px 10px':'8px 14px',
-                  fontSize:FONT.size.base,fontWeight:FONT.weight.semibold,cursor:'pointer',
-                  display:'flex',alignItems:'center',gap:6}}>
-                  <IconRepeat size={13} />{!isMobile && 'Review'}
-                </button>
-              )}
-              <button className="mb-headerbtn2" onClick={()=>{ setView('add'); setSB(false); }} style={{background:color,color:'#fff',
-                border:'none',borderRadius:RADIUS.sm+1,padding:isMobile?'8px 14px':'8px 16px',
-                fontSize:FONT.size.base,fontWeight:FONT.weight.semibold,cursor:'pointer',
-                display:'flex',alignItems:'center',gap:6}}>
-                <IconPlus size={13} />{!isMobile && 'Add Entry'}
-              </button>
-            </div>
           )}
 
           {(view==='add'||view==='detail') && (
@@ -744,20 +709,12 @@ export default function App() {
           )}
         </div>
 
-        {/* Mobile search */}
-        {isMobile && view==='list' && (
-          <div style={{padding:'8px 12px',background:t.surface,borderBottom:`1px solid ${t.border}`}}>
-            <input value={search} onChange={e=>setSearch(e.target.value)}
-              placeholder={`Search ${activeSystem}…`}
-              style={{width:'100%',background:t.surface2,border:`1px solid ${t.border}`,
-                borderRadius:RADIUS.sm+1,color:t.text,padding:'8px 12px',
-                fontSize:FONT.size.base,outline:'none',boxSizing:'border-box'}} />
-          </div>
-        )}
-
-        {/* Content — scrollRef attached here for scroll restoration */}
+        {/* Content — scrollRef attached here for scroll restoration.
+            The System page (view==='list') manages its own padding —
+            SystemHome's hero is deliberately full-bleed edge-to-edge, so
+            this pane can't also be padding it in from the sides. */}
         <div ref={scrollRef}
-          style={{flex:1,overflowY:'auto',padding:isMobile?'14px 12px':'20px'}}>
+          style={{flex:1,overflowY:'auto',padding: view==='list' ? 0 : (isMobile?'14px 12px':'20px')}}>
 
           {fetching && (
             ['list','search'].includes(view) ? (
@@ -794,8 +751,10 @@ export default function App() {
                     <EmptyHint t={t} Icon={IconSearch} text="Type to search all systems" />
                   )}
                   {globalSearch && (
-                    <FilterChips t={t} difficultyFilter={difficultyFilter} setDifficultyFilter={setDifficultyFilter}
-                      pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} />
+                    <div style={{marginBottom:10}}>
+                      <FilterChips t={t} difficultyFilter={difficultyFilter} setDifficultyFilter={setDifficultyFilter}
+                        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} />
+                    </div>
                   )}
                   {globalSearch && globalResults.length===0 && (
                     <EmptyHint t={t} Icon={IconInbox} text="No results match your search and filters" />
@@ -847,91 +806,22 @@ export default function App() {
               )}
 
               {view==='list' && (
-                <div style={{maxWidth:680,margin:'0 auto',position:'relative'}}>
-
-                  {/* Filters — stays mounted at bulk-mode toggle, just
-                      disabled in place (see FilterChips) so nothing shifts.
-                      Exiting bulk mode by clicking its now-inert background
-                      is handled by the one delegated handler on the Main
-                      pane above, not by FilterChips itself. */}
-                  {(entries[activeSystem]||[]).length>0 && (
-                    <FilterChips t={t} difficultyFilter={difficultyFilter} setDifficultyFilter={setDifficultyFilter}
-                      pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} disabled={bulkMode} />
-                  )}
-
-                  {/* Bulk toolbar */}
-                  {sysEntries.length>0 && (
-                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
-                      <button className="mb-bulkbtn" onClick={()=>{ setBulkMode(p=>!p); setSelected2(new Set()); }}
-                        style={{fontSize:FONT.size.sm,
-                          background:bulkMode?t.navActiveBg:t.surface3,
-                          border:`1px solid ${bulkMode?t.navActiveBorder:t.border}`,
-                          borderRadius:RADIUS.sm,padding:'5px 12px',cursor:'pointer',
-                          color:bulkMode?t.navActiveText:t.text3,fontWeight:FONT.weight.semibold}}>
-                        {bulkMode?`☑ ${selected2.size} selected`:'☑ Select'}
-                      </button>
-                      {bulkMode && selected2.size>0 && (<>
-                        <button className="mb-bulkbtn" onClick={()=>bulkPin(true)} style={bb('#d97706')}>📌 Pin</button>
-                        <button className="mb-bulkbtn" onClick={()=>bulkPin(false)} style={bb('#6b7280')}>Unpin</button>
-                        <select onChange={e=>{if(e.target.value){bulkMove(e.target.value);e.target.value='';}}}
-                          defaultValue=""
-                          style={{fontSize:FONT.size.sm,border:`1px solid ${t.border}`,borderRadius:RADIUS.sm,
-                            padding:'5px 10px',cursor:'pointer',color:t.text2,background:t.surface}}>
-                          <option value="" disabled>Move to…</option>
-                          {userSystems.filter(s=>s.name!==activeSystem).map(s=>(
-                            <option key={s.name} value={s.name}>{s.name}</option>
-                          ))}
-                        </select>
-                        <button className="mb-bulkbtn" onClick={bulkDelete} style={bb('#dc2626')}>🗑 Delete</button>
-                      </>)}
-                      {bulkMode && selected2.size===0 && (
-                        <span style={{fontSize:FONT.size.sm,color:t.text4}}>
-                          {isMobile?'Tap cards to select':'Click or right-click to select'}
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {sysEntries.length===0 ? (
-                    <div style={{textAlign:'center',padding:'60px 20px',
-                      animation:`medbook-fade-in ${MOTION.normal} ${MOTION.ease}`}}>
-                      <div style={{width:56,height:56,borderRadius:RADIUS.xl2,background:t.surface3,
-                        display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 14px'}}>
-                        <IconInbox size={24} style={{color:t.text4}} />
-                      </div>
-                      <div style={{fontSize:FONT.size.base,color:t.text3}}>
-                        {hasActiveFilter
-                          ? 'No entries match your search and filters'
-                          : `No entries yet for ${activeSystem}`}
-                      </div>
-                      {!hasActiveFilter && (
-                        <button className="mb-hero-cta" onClick={()=>{ setView('add'); setSB(false); }} style={{marginTop:16,
-                          background:color,color:'#fff',border:'none',borderRadius:RADIUS.md,
-                          padding:'10px 22px',fontSize:FONT.size.base,fontWeight:FONT.weight.semibold,cursor:'pointer',
-                          display:'inline-flex',alignItems:'center',gap:7,
-                          transition:`transform ${MOTION.fast} ${MOTION.ease}`}}>
-                          <IconPlus size={14} /> Add First Entry
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <div key={`${debSearch}-${difficultyFilter}-${pinnedOnly}`}
-                      style={{display:'flex',flexDirection:'column',gap:8,
-                        animation:`medbook-fade-in ${MOTION.fast} ${MOTION.ease}`}}>
-                      {sysEntries.map(entry=>(
-                        <SelectableCard
-                          key={entry.id}
-                          entry={entry}
-                          color={color}
-                          bulkMode={bulkMode}
-                          isSelected={selected2.has(entry.id)}
-                          onOpen={openEntry}
-                          onToggleSelect={toggleSelect}
-                          onStartBulk={startBulk}
-                        />
-                      ))}
-                    </div>
-                  )}
+                <div style={{position:'relative'}}>
+                  <SystemHome
+                    t={t} isDark={isDark} system={activeSystem} color={color}
+                    allEntries={entries[activeSystem]||[]} sysEntries={sysEntries}
+                    progress={activeSystemProgress}
+                    search={search} setSearch={setSearch}
+                    difficultyFilter={difficultyFilter} setDifficultyFilter={setDifficultyFilter}
+                    pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly}
+                    bulkMode={bulkMode} setBulkMode={setBulkMode}
+                    selected2={selected2} toggleSelect={toggleSelect}
+                    onOpen={openEntry} onStartBulk={startBulk}
+                    onAdd={()=>{ setView('add'); setSB(false); }}
+                    onReview={()=>setSysReview(true)}
+                    userSystems={userSystems} bulkPin={bulkPin} bulkMove={bulkMove} bulkDelete={bulkDelete}
+                    isMobile={isMobile}
+                  />
 
                   {/* Mobile FAB */}
                   {isMobile && !bulkMode && (
@@ -954,94 +844,12 @@ export default function App() {
   );
 }
 
-const SelectableCard = React.memo(function SelectableCard({ entry, color, bulkMode, isSelected, onOpen, onToggleSelect, onStartBulk }) {
-  const { t } = useTheme();
-  const timer = React.useRef(null);
-  const moved = React.useRef(false);
-  const fired = React.useRef(false);
-  const startXY = React.useRef({x:0,y:0});
-  const [pressed, setPressed] = React.useState(false);
-
-  // 650ms + a real movement tolerance (not "cancel on any touchmove event").
-  // The old 500ms threshold with zero tolerance was easy for an ordinary tap
-  // to cross — especially on a tablet, where a slightly larger or slightly
-  // lingering touch contact reads as a "hold" — which is what made bulk
-  // mode trigger itself on normal taps. 650ms is comfortably past a normal
-  // tap's duration while still feeling immediate for a deliberate hold, and
-  // measuring actual pixel movement (not "did a touchmove event fire at
-  // all") keeps a genuine long-press from being cancelled by natural
-  // finger micro-jitter.
-  const HOLD_MS = 650;
-  const MOVE_TOLERANCE_PX = 10;
-
-  const startPress = (e) => {
-    const t0 = e.touches?.[0];
-    startXY.current = t0 ? { x:t0.clientX, y:t0.clientY } : { x:0, y:0 };
-    moved.current=false; fired.current=false; setPressed(true);
-    timer.current=setTimeout(()=>{ if(!moved.current){fired.current=true;onStartBulk(entry.id);} },HOLD_MS);
-  };
-  const endPress = () => { clearTimeout(timer.current); setPressed(false); };
-  // The browser fires touchcancel — not touchmove/touchend — the moment it
-  // decides a touch is becoming a scroll/pan gesture instead of a tap, and
-  // that decision can happen before our own trackMove sees enough delta to
-  // clear the timer itself. Without listening for it, the long-press timer
-  // below just keeps running: the user scrolls the finger away and lifts it
-  // somewhere else entirely, and ~650ms later this card selects itself
-  // anyway. That reads exactly as "gets selected even by minute touches" —
-  // the touch that "selected" it was actually a scroll, not a hold.
-  const cancelPress = () => { clearTimeout(timer.current); setPressed(false); };
-  const trackMove = (e) => {
-    const t0 = e.touches?.[0];
-    if (!t0) return;
-    const dx = t0.clientX - startXY.current.x, dy = t0.clientY - startXY.current.y;
-    if (Math.hypot(dx,dy) > MOVE_TOLERANCE_PX) {
-      moved.current=true; clearTimeout(timer.current); setPressed(false);
-    }
-  };
-
-  const tap = () => { if (bulkMode) onToggleSelect(entry.id); else onOpen(entry); };
-
-  // After a long-press the browser still fires a click, which used to immediately
-  // toggle the selection back off — making long-press look broken on mobile.
-  const handleClick = () => {
-    if (fired.current) { fired.current=false; return; }
-    tap();
-  };
-
-  return (
-    <div data-bulk-card style={{position:'relative',outline:isSelected?`2px solid ${color}`:'none',
-      borderRadius:RADIUS.md,cursor:'pointer',
-      WebkitUserSelect:'none',userSelect:'none',
-      // Subtle press feedback so a tap always feels registered (A4).
-      // Touch/press handling itself (below) is untouched from before —
-      // only these cosmetic values moved onto tokens.
-      transform: pressed ? 'scale(0.985)' : 'scale(1)',
-      transition:`outline ${MOTION.fast} ${MOTION.ease}, transform ${MOTION.fast} ${MOTION.ease}`}}
-      onClick={handleClick}
-      onContextMenu={e=>{e.preventDefault();fired.current=true;onStartBulk(entry.id);}}
-      onMouseDown={()=>setPressed(true)} onMouseUp={()=>setPressed(false)} onMouseLeave={()=>setPressed(false)}
-      onTouchStart={startPress} onTouchEnd={endPress} onTouchMove={trackMove} onTouchCancel={cancelPress}>
-      {bulkMode && (
-        <div style={{position:'absolute',top:10,left:10,zIndex:10,width:22,height:22,
-          borderRadius:RADIUS.sm,background:isSelected?color:t.surface,
-          border:`2px solid ${isSelected?color:t.borderStrong}`,
-          display:'flex',alignItems:'center',justifyContent:'center',
-          boxShadow:elevation(t,'sm'),pointerEvents:'none',
-          transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}`}}>
-          {isSelected&&<span style={{color:'#fff',fontSize:FONT.size.sm,fontWeight:FONT.weight.bold}}>✓</span>}
-        </div>
-      )}
-      <EntryCard entry={entry} color={color} />
-    </div>
-  );
-});
-
 // Entry-list-shaped loading placeholder (batch 5) — shown instead of the
 // generic spinner specifically while the destination is the list or search
 // view, so the loading state already hints at what's about to appear.
 function EntryListSkeleton({ t }) {
   return (
-    <div style={{maxWidth:680,margin:'0 auto',display:'flex',flexDirection:'column',gap:8}}>
+    <div style={{maxWidth:880,margin:'20px auto 0',padding:'0 20px',boxSizing:'border-box',display:'flex',flexDirection:'column',gap:8}}>
       {[0,1,2,3,4].map(i => (
         <div key={i} className="mb-skeleton" style={{background:t.surface,border:`1px solid ${t.border}`,
           borderLeft:`4px solid ${t.surface3}`, borderRadius:RADIUS.md, padding:`${SPACE.md+1}px ${SPACE.lg}px`,
@@ -1070,11 +878,6 @@ function Spinner({ track='#e5e7eb', accent='#2563eb' }) {
   );
 }
 
-function bb(color) {
-  return {fontSize:FONT.size.sm,background:`${color}10`,border:`1px solid ${color}30`,
-    color,borderRadius:RADIUS.sm,padding:'5px 10px',cursor:'pointer',fontWeight:FONT.weight.semibold};
-}
-
 // Small icon + text empty/prompt state, shared by Global Search's two
 // blank moments (nothing typed yet / no matches) — matches the icon-based
 // empty-state treatment the per-system list already uses (batch 4).
@@ -1090,45 +893,3 @@ function EmptyHint({ t, Icon, text }) {
   );
 }
 
-// Difficulty + pinned filters (batch 5), shared by the per-system list and
-// Global Search. Purely a client-side narrowing of whatever list the caller
-// already computed — no data fetching, no navigation changes.
-// `disabled` (bulk mode) greys the chips out and makes them inert in
-// place — deliberately NOT unmounting this row when bulk mode toggles.
-// An earlier version hid it entirely, which shifted the toolbar and list
-// up by this row's height at the exact moment bulk mode activates —
-// disorienting on its own, and it could shift a card into the spot a
-// blank-space exit tap was aimed at, or vice versa. Same layout at every
-// moment, only interactivity changes. With pointer-events:none while
-// disabled, a tap here passes straight through to whatever's underneath,
-// which is how it ends up triggering the Main pane's delegated exit
-// handler like any other non-card, non-control area does.
-function FilterChips({ t, difficultyFilter, setDifficultyFilter, pinnedOnly, setPinnedOnly, disabled }) {
-  return (
-    <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',marginBottom:10,
-        opacity:disabled?0.45:1, pointerEvents:disabled?'none':'auto',
-        transition:`opacity ${MOTION.fast} ${MOTION.ease}`}}>
-      {['All', ...DIFFICULTY].map(d => {
-        const active = difficultyFilter===d;
-        const c = d==='All' ? t.text3 : (DIFF_COLOR[d] || t.text3);
-        return (
-          <button key={d} className="mb-chip" onClick={()=>setDifficultyFilter(d)} style={{
-            fontSize:FONT.size.xs, fontWeight:FONT.weight.semibold, cursor:'pointer',
-            borderRadius:RADIUS.pill, padding:'4px 11px',
-            background:active?`${c}1f`:'transparent', color:active?c:t.text4,
-            border:`1px solid ${active?`${c}44`:t.border}`}}>
-            {d}
-          </button>
-        );
-      })}
-      <span style={{width:1,height:14,background:t.border,margin:'0 2px',flexShrink:0}} />
-      <button className="mb-chip" onClick={()=>setPinnedOnly(p=>!p)} style={{
-        fontSize:FONT.size.xs, fontWeight:FONT.weight.semibold, cursor:'pointer',
-        borderRadius:RADIUS.pill, padding:'4px 11px', display:'flex', alignItems:'center', gap:4,
-        background:pinnedOnly?t.navActiveBg:'transparent', color:pinnedOnly?t.navActiveText:t.text4,
-        border:`1px solid ${pinnedOnly?t.navActiveBorder:t.border}`}}>
-        📌 Pinned
-      </button>
-    </div>
-  );
-}
