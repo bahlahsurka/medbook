@@ -21,13 +21,13 @@ function EntryCard({ entry, color, onClick, showSystem }) {
           photographed and text-only entries keeps one consistent rhythm
           instead of photographed rows reading as "richer" than the rest. */}
       {entry.images?.length > 0 ? (
-        <div style={{ width:64, height:48, borderRadius:RADIUS.sm, flexShrink:0,
+        <div style={{ width:72, height:54, borderRadius:RADIUS.sm, flexShrink:0,
           background:t.surface3, overflow:'hidden', border:`1px solid ${t.border}` }}>
           <img src={entry.images[0]} alt="" loading="lazy" decoding="async"
             style={{ width:'100%', height:'100%', objectFit:'cover' }} />
         </div>
       ) : (
-        <div aria-hidden="true" style={{ width:64, height:48, borderRadius:RADIUS.sm, flexShrink:0,
+        <div aria-hidden="true" style={{ width:72, height:54, borderRadius:RADIUS.sm, flexShrink:0,
           background:`${sc}0f`, border:`1px solid ${sc}22` }} />
       )}
 
@@ -35,9 +35,9 @@ function EntryCard({ entry, color, onClick, showSystem }) {
         {/* Title is the thing being scanned for during a study session —
             bumped a step up the type scale and given the most contrast on
             the card, everything else here is deliberately quieter. */}
-        <div style={{ display:'flex', alignItems:'flex-start', gap:6, marginBottom:4 }}>
-          <div style={{ fontSize:FONT.size.md, fontWeight:FONT.weight.semibold, color:t.text,
-            lineHeight:FONT.leading.normal, flex:1 }}>{entry.title}</div>
+        <div style={{ display:'flex', alignItems:'flex-start', gap:6, marginBottom:5 }}>
+          <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.semibold, color:t.text,
+            lineHeight:FONT.leading.tight, flex:1 }}>{entry.title}</div>
           {entry.pinned && <span style={{ fontSize:FONT.size.sm, flexShrink:0 }}>📌</span>}
         </div>
 

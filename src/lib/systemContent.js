@@ -3,15 +3,10 @@
 // Static, factual, editorial-style content for the System page hero — NOT
 // user data, NOT fabricated statistics. A concise one-line description of
 // what each of the app's built-in default systems covers (museum-wall-label
-// style), plus an optional pairing to one of the real medical diagrams
-// already supplied for the public landing page's "Medicine is visual"
-// section (lib/landingImages.js) — reused here as a very subtle, low-
-// opacity background treatment for the handful of systems where a genuine
-// visual match exists. Every other system (a custom name, or simply one
-// without a mapped image) falls back to a pure colour-wash hero instead —
-// nothing below is required for the System hero to render correctly.
-import { LANDING_IMAGES } from './landingImages';
-
+// style). The hero's imagery is deliberately NOT sourced from here — it's
+// pulled live from the system's own entries (see SystemHome's
+// pickHeroImages) so the visual identity is always the user's real content,
+// never a shared stock/landing-page asset.
 export const SYSTEM_BLURBS = {
   'Internal Medicine': 'Adult general medicine — the connective tissue between every organ system.',
   'Surgery': 'Operative and perioperative care, from indication to recovery.',
@@ -40,15 +35,4 @@ export const SYSTEM_BLURBS = {
   'Anatomy': 'The structure of the human body, region by region.',
   'Biochemistry': 'The molecular machinery underlying physiology and disease.',
   'Immunology': "The body's defence systems, and how they can misfire.",
-};
-
-// Only a genuine visual match, reused from an asset already in the app —
-// never a generic stock photo. Absent for every system without one; the
-// hero's own colour wash already carries the page on its own in that case.
-export const SYSTEM_HERO_IMAGE = {
-  'Dermatology': LANDING_IMAGES.skinImmunology,
-  'Cardiology': LANDING_IMAGES.heartFailurePathway,
-  'Neurology': LANDING_IMAGES.circleOfWillis,
-  'Infectious Disease': LANDING_IMAGES.hivAntiviral,
-  'Hematology & Oncology': LANDING_IMAGES.cancerImmunology,
 };

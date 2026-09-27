@@ -710,9 +710,10 @@ export default function App() {
         </div>
 
         {/* Content — scrollRef attached here for scroll restoration.
-            The System page (view==='list') manages its own padding —
-            SystemHome's hero is deliberately full-bleed edge-to-edge, so
-            this pane can't also be padding it in from the sides. */}
+            The System page (view==='list') manages its own padding — its
+            header, divider and notes list each need the same centred
+            max-width column, so this pane can't also be padding it in from
+            the sides. */}
         <div ref={scrollRef}
           style={{flex:1,overflowY:'auto',padding: view==='list' ? 0 : (isMobile?'14px 12px':'20px')}}>
 
