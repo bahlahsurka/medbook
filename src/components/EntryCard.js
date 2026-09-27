@@ -15,12 +15,20 @@ function EntryCard({ entry, color, onClick, showSystem }) {
         transition:`transform ${MOTION.fast} ${MOTION.ease}, box-shadow ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}`,
         boxShadow:elevation(t,'sm') }}>
 
-      {entry.images?.length > 0 && (
-        <div style={{ width:60, height:44, borderRadius:RADIUS.sm, flexShrink:0,
+      {/* Every row gets the same thumbnail-sized anchor whether or not it
+          has a photo — a real image when there is one, a quiet colour-
+          matched placeholder when there isn't — so a mixed list of
+          photographed and text-only entries keeps one consistent rhythm
+          instead of photographed rows reading as "richer" than the rest. */}
+      {entry.images?.length > 0 ? (
+        <div style={{ width:64, height:48, borderRadius:RADIUS.sm, flexShrink:0,
           background:t.surface3, overflow:'hidden', border:`1px solid ${t.border}` }}>
           <img src={entry.images[0]} alt="" loading="lazy" decoding="async"
             style={{ width:'100%', height:'100%', objectFit:'cover' }} />
         </div>
+      ) : (
+        <div aria-hidden="true" style={{ width:64, height:48, borderRadius:RADIUS.sm, flexShrink:0,
+          background:`${sc}0f`, border:`1px solid ${sc}22` }} />
       )}
 
       <div style={{ flex:1, minWidth:0 }}>
