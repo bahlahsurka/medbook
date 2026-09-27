@@ -210,23 +210,39 @@ export default function App() {
     }
   }, [authLoading, session, pathname]);
 
+  // Stable identity for "who's signed in", used instead of the raw `session`
+  // object below. Supabase's client automatically re-validates the session
+  // and re-emits a SIGNED_IN auth event every time the tab/PWA regains
+  // visibility — even after being backgrounded for just a second or two
+  // (GoTrueClient's _onVisibilityChanged -> _recoverAndRefresh; this is
+  // intentional upstream behavior, not a bug in it). Each re-emission hands
+  // App.js a brand-new `session` object with identical data, so an effect
+  // keyed on `[session]` used to re-fire on every app-switch/minimize/
+  // notification-glance — re-fetching every system and every entry from
+  // scratch and swapping the whole in-memory dataset out from under
+  // whatever the user was looking at. The signed-in user practically never
+  // changes on a mere re-emission, so keying these effects on their stable
+  // id instead of the object reference fixes the unwanted refetch at the
+  // root, without touching Supabase's own revalidation behavior at all.
+  const userId = session?.user?.id;
+
   // Load systems from Supabase
   useEffect(() => {
-    if (!session) return;
-    loadSystems(session.user.id).then(sys => {
+    if (!userId) return;
+    loadSystems(userId).then(sys => {
       setUS(sys); setSysLoaded(true);
       if (!localStorage.getItem(ONBOARD_KEY)) setOnboard(true);
     });
-  }, [session]);
+  }, [userId]);
 
   // Load entries
-  const loadEntries = useCallback(async (sess, systems) => {
-    if (!sess) { setEntries({}); return; }
+  const loadEntries = useCallback(async (uid, systems) => {
+    if (!uid) { setEntries({}); return; }
     setFetching(true); setFetchErr('');
     try {
       const { data, error } = await supabase
         .from('entries').select('*')
-        .eq('user_id', sess.user.id)
+        .eq('user_id', uid)
         .order('created_at', { ascending: false });
       if (error) throw error;
       const g = {};
@@ -241,8 +257,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (session && systemsLoaded) loadEntries(session, userSystems);
-  }, [session, systemsLoaded]);
+    if (userId && systemsLoaded) loadEntries(userId, userSystems);
+  }, [userId, systemsLoaded]);
 
   const showToast = useCallback((msg, type = 'ok') => {
     // `id` gives each toast a distinct key so the enter animation replays
@@ -420,7 +436,7 @@ export default function App() {
         const {error} = await supabase.from('entries').insert(rows);
         if (error) throw error;
         showToast(`Imported ${rows.length} entries ✓`);
-        loadEntries(session, userSystems);
+        loadEntries(userId, userSystems);
       } catch(err) { showToast('Import failed: '+err.message,'err'); }
     };
     reader.readAsText(f); e.target.value='';
@@ -758,7 +774,7 @@ export default function App() {
             <div style={{textAlign:'center',paddingTop:60}}>
               <div style={{fontSize:14,color:'#dc2626',marginBottom:8}}>Could not load entries</div>
               <div style={{fontSize:12,color:t.text4,marginBottom:20}}>{fetchErr}</div>
-              <button onClick={()=>loadEntries(session,userSystems)}
+              <button onClick={()=>loadEntries(userId,userSystems)}
                 style={{background:t.accent,color:'#fff',border:'none',borderRadius:8,
                   padding:'10px 24px',fontSize:14,fontWeight:600,cursor:'pointer'}}>Retry</button>
             </div>
