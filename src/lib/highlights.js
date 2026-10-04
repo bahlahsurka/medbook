@@ -114,6 +114,23 @@ export function adjustHighlights(oldText, newText, highlights) {
     .filter(h => h.end > h.start);
 }
 
+// Keyboard shortcut for applying/removing a highlight: Ctrl/Cmd+Alt+<digit>
+// applies the Nth colour in HL_COLORS (1-indexed), Ctrl/Cmd+Alt+0 clears a
+// highlight from the selection. Same chord shape Google Docs already uses
+// for its own Ctrl/Cmd+Alt+<digit> heading shortcuts (down to 0 = "Normal
+// text", i.e. "clear formatting") — chosen specifically because Ctrl+<digit>
+// and Ctrl+Shift+<digit> are both reserved for browser tab-switching, which
+// a page can't override.
+// Returns null when the keydown isn't this shortcut at all (including an
+// out-of-range digit like 6-9) so the caller can leave the event alone.
+export function matchHighlightShortcut(e) {
+  if (!(e.ctrlKey || e.metaKey) || !e.altKey || e.shiftKey) return null;
+  if (!/^[0-9]$/.test(e.key)) return null;
+  if (e.key === '0') return { remove: true };
+  const color = HL_COLORS[Number(e.key) - 1];
+  return color ? { color } : null;
+}
+
 // Get selection offsets from a textarea — works on all platforms
 export function getTextareaSelection(ta) {
   if (!ta) return null;

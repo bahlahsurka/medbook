@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
-import { getTextareaSelection, adjustHighlights } from './highlights';
+import { getTextareaSelection, adjustHighlights, matchHighlightShortcut } from './highlights';
 
 /**
  * Remove any part of existing highlights that overlaps [start,end).
@@ -76,5 +76,17 @@ export function useHighlight(taRef, initialHighlights = []) {
     setHighlights(prev => adjustHighlights(oldText, newText, prev));
   }, []);
 
-  return { highlights, setHighlights, hasSel, onSelChange, applyHL, removeHL, clearAllHL, handleTextChange };
+  // Ready to wire straight to the textarea's onKeyDown (compose with
+  // handleBulletKeyDown the same way the textarea already composes its
+  // other keydown behaviour — see AddEntry/DetailView). A no-op, un-
+  // prevented keydown whenever the chord doesn't match, exactly like
+  // handleBulletKeyDown's own "not my key, don't touch it" contract.
+  const handleShortcut = useCallback((e) => {
+    const m = matchHighlightShortcut(e);
+    if (!m) return;
+    e.preventDefault();
+    if (m.remove) removeHL(); else applyHL(m.color);
+  }, [applyHL, removeHL]);
+
+  return { highlights, setHighlights, hasSel, onSelChange, applyHL, removeHL, clearAllHL, handleTextChange, handleShortcut };
 }

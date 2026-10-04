@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
-import { buildHighlightParts, resolveHL, adjustHighlights } from '../lib/highlights';
+import { buildHighlightParts, resolveHL, adjustHighlights, matchHighlightShortcut } from '../lib/highlights';
 import { useHighlight, clearRange } from '../lib/useHighlight';
 import { useTheme, SPACE, RADIUS, FONT, Z, elevation } from '../lib/theme';
 import { IconChevronLeft, IconChevronRight, IconEdit, IconCheck, IconTrash, IconPin,
@@ -642,8 +642,11 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     return supabase.storage.from('entry-images').getPublicUrl(path).data.publicUrl;
   };
 
-  // View-mode DOM-based highlight
-  const applyViewHL = c => {
+  // View-mode DOM-based highlight. useCallback (not a plain function like
+  // the rest of this file's handlers) so the keyboard-shortcut effect below
+  // can list them as real dependencies instead of either going stale or
+  // re-subscribing its document listeners on every render.
+  const applyViewHL = useCallback((c) => {
     const s = readSelection();
     if (!s) return;
     const newHl = [...clearRange(viewHL, s.start, s.end), { start: s.start, end: s.end, color: c }]
@@ -653,9 +656,9 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     clearSelState();
     supabase.from('entries').update({highlights:newHl}).eq('id',entry.id).then(()=>{});
     onUpdated({...entry,highlights:newHl});
-  };
+  }, [readSelection, viewHL, clearSelState, entry, onUpdated]);
 
-  const removeViewHL = () => {
+  const removeViewHL = useCallback(() => {
     // Requires a real selection inside the notes. Previously, clicking Remove with
     // nothing selected silently deleted EVERY highlight and saved that to the DB.
     const s = readSelection();
@@ -666,7 +669,26 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     clearSelState();
     supabase.from('entries').update({highlights:newHl}).eq('id',entry.id).then(()=>{});
     onUpdated({...entry,highlights:newHl});
-  };
+  }, [readSelection, viewHL, clearSelState, entry, onUpdated]);
+
+  // Keyboard shortcut for the floating highlight bar — same chord as the
+  // textarea-based editors (useHighlight's handleShortcut below), wired
+  // separately here since view-mode highlighting works off a DOM selection
+  // rather than a textarea. Only acts while Highlight mode is on AND there's
+  // a real selection inside the notes, so the chord otherwise falls through
+  // untouched rather than stealing a keystroke from some other focused
+  // input elsewhere on the page.
+  useEffect(() => {
+    if (!hlViewOn) return;
+    const onKeyDown = (e) => {
+      const m = matchHighlightShortcut(e);
+      if (!m || !readSelection()) return;
+      e.preventDefault();
+      if (m.remove) removeViewHL(); else applyViewHL(m.color);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [hlViewOn, readSelection, applyViewHL, removeViewHL]);
 
   const saveEdit = async () => {
     if (!editTitle.trim()) { setErr('Title required'); return; }
@@ -789,7 +811,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                 onChange={e=>{ editHl.handleTextChange(editNotes,e.target.value); setEN(e.target.value); }}
                 onSelect={editHl.onSelChange} onMouseUp={editHl.onSelChange}
                 onKeyUp={editHl.onSelChange} onTouchEnd={editHl.onSelChange}
-                onKeyDown={handleBulletKeyDown}
+                onKeyDown={e => { handleBulletKeyDown(e); if (!e.defaultPrevented) editHl.handleShortcut(e); }}
                 onPaste={handleBulletPaste}
                 onScroll={syncEditOverlay}
                 rows={8} style={{...inp,resize:'vertical',lineHeight:'1.7',

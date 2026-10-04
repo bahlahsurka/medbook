@@ -324,7 +324,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
                 onMouseUp={hl.onSelChange}
                 onKeyUp={hl.onSelChange}
                 onTouchEnd={hl.onSelChange}
-                onKeyDown={handleBulletKeyDown}
+                onKeyDown={e => { handleBulletKeyDown(e); if (!e.defaultPrevented) hl.handleShortcut(e); }}
                 onPaste={handleBulletPaste}
                 onScroll={syncOverlayScroll}
                 placeholder="Key concepts, mnemonics, clinical pearls…"
