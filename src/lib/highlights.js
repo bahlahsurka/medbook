@@ -114,6 +114,41 @@ export function adjustHighlights(oldText, newText, highlights) {
     .filter(h => h.end > h.start);
 }
 
+// Keyboard shortcuts for applying/removing a highlight — mnemonic first
+// letters (Y)ellow/(G)reen/(B)lue/(P)ink/(O)range, (R)emove, built straight
+// from HL_COLORS' own labels so the mapping can never drift out of sync
+// with the actual colour list. Two variants, because the same bare letter
+// can't mean the same thing in both places it's used:
+//   - matchHighlightShortcutEditing: a plain `y` would just type the letter
+//     into the textarea, so this one requires Alt held (Alt+Y, Alt+G, …).
+//   - matchHighlightShortcutView: the saved-entry notes aren't editable in
+//     view mode — selecting text and pressing a key can't mean "type a
+//     character" there — so the bare letter alone IS the shortcut, same as
+//     a Kindle/Hypothesis-style reading-mode shortcut.
+// Both return null (and leave the keydown alone) for anything else,
+// including a Shift/Ctrl/Cmd chord riding along, so a capital-letter
+// keyboard shortcut from some other feature, or genuine typing, is never
+// swallowed by accident.
+const HL_LETTER_INDEX = Object.fromEntries(HL_COLORS.map((c, i) => [c.label[0].toLowerCase(), i]));
+
+function matchHighlightLetter(e) {
+  if (e.ctrlKey || e.metaKey || e.shiftKey) return null;
+  const key = e.key.toLowerCase();
+  if (key === 'r') return { remove: true };
+  const i = HL_LETTER_INDEX[key];
+  return i === undefined ? null : { color: HL_COLORS[i] };
+}
+
+export function matchHighlightShortcutEditing(e) {
+  if (!e.altKey) return null;
+  return matchHighlightLetter(e);
+}
+
+export function matchHighlightShortcutView(e) {
+  if (e.altKey) return null;
+  return matchHighlightLetter(e);
+}
+
 // Get selection offsets from a textarea — works on all platforms
 export function getTextareaSelection(ta) {
   if (!ta) return null;

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
-import { buildHighlightParts, resolveHL, adjustHighlights } from '../lib/highlights';
+import { buildHighlightParts, resolveHL, adjustHighlights, matchHighlightShortcutView } from '../lib/highlights';
 import { useHighlight, clearRange } from '../lib/useHighlight';
 import { useTheme, SPACE, RADIUS, FONT, Z, elevation } from '../lib/theme';
 import { IconChevronLeft, IconChevronRight, IconEdit, IconCheck, IconTrash, IconPin,
@@ -50,6 +50,15 @@ function useFlash(ms = 1600) {
     timer.current = setTimeout(() => setOn(false), ms);
   }, [ms]);
   return [on, fire];
+}
+
+// Shared by the arrow-key nav effect and the view-mode highlight-letter
+// effect below — both need "is the keyboard currently being used to type
+// somewhere" as a guard, not just "here".
+function isTypingTarget(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
 }
 
 function RenderedNotes({ text, highlights }) {
@@ -362,11 +371,6 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   // textarea/contentEditable has focus generally.
   useEffect(() => {
     if (editing) return;
-    const isTypingTarget = (el) => {
-      if (!el) return false;
-      const tag = el.tagName;
-      return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
-    };
     const onKeyDown = (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (lb !== null) return; // lightbox open — let it own the keyboard
@@ -642,8 +646,11 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     return supabase.storage.from('entry-images').getPublicUrl(path).data.publicUrl;
   };
 
-  // View-mode DOM-based highlight
-  const applyViewHL = c => {
+  // View-mode DOM-based highlight. useCallback (not a plain function like
+  // the rest of this file's handlers) so the keyboard-shortcut effect below
+  // can list them as real dependencies instead of either going stale or
+  // re-subscribing its document listeners on every render.
+  const applyViewHL = useCallback((c) => {
     const s = readSelection();
     if (!s) return;
     const newHl = [...clearRange(viewHL, s.start, s.end), { start: s.start, end: s.end, color: c }]
@@ -653,9 +660,9 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     clearSelState();
     supabase.from('entries').update({highlights:newHl}).eq('id',entry.id).then(()=>{});
     onUpdated({...entry,highlights:newHl});
-  };
+  }, [readSelection, viewHL, clearSelState, entry, onUpdated]);
 
-  const removeViewHL = () => {
+  const removeViewHL = useCallback(() => {
     // Requires a real selection inside the notes. Previously, clicking Remove with
     // nothing selected silently deleted EVERY highlight and saved that to the DB.
     const s = readSelection();
@@ -666,7 +673,30 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     clearSelState();
     supabase.from('entries').update({highlights:newHl}).eq('id',entry.id).then(()=>{});
     onUpdated({...entry,highlights:newHl});
-  };
+  }, [readSelection, viewHL, clearSelState, entry, onUpdated]);
+
+  // Keyboard shortcut for the floating highlight bar in view mode — bare
+  // mnemonic letters (y/g/b/p/o, r to remove) rather than a chord, since
+  // the notes aren't editable here: pressing a letter can only ever mean
+  // "I selected some text, now highlight it," never "type this letter."
+  // Works whether or not Highlight mode has been toggled on first —
+  // selecting text and pressing a letter is already unambiguous intent on
+  // its own. Still requires a real, live selection inside the notes
+  // (readSelection enforces that) and bails out entirely while some other
+  // input/textarea has focus, so it can never interfere with typing
+  // anywhere else on the page.
+  useEffect(() => {
+    if (editing) return;
+    const onKeyDown = (e) => {
+      if (isTypingTarget(document.activeElement)) return;
+      const m = matchHighlightShortcutView(e);
+      if (!m || !readSelection()) return;
+      e.preventDefault();
+      if (m.remove) removeViewHL(); else applyViewHL(m.color);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [editing, readSelection, applyViewHL, removeViewHL]);
 
   const saveEdit = async () => {
     if (!editTitle.trim()) { setErr('Title required'); return; }
@@ -789,7 +819,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                 onChange={e=>{ editHl.handleTextChange(editNotes,e.target.value); setEN(e.target.value); }}
                 onSelect={editHl.onSelChange} onMouseUp={editHl.onSelChange}
                 onKeyUp={editHl.onSelChange} onTouchEnd={editHl.onSelChange}
-                onKeyDown={handleBulletKeyDown}
+                onKeyDown={e => { handleBulletKeyDown(e); if (!e.defaultPrevented) editHl.handleShortcut(e); }}
                 onPaste={handleBulletPaste}
                 onScroll={syncEditOverlay}
                 rows={8} style={{...inp,resize:'vertical',lineHeight:'1.7',
