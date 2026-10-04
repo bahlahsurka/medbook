@@ -114,21 +114,39 @@ export function adjustHighlights(oldText, newText, highlights) {
     .filter(h => h.end > h.start);
 }
 
-// Keyboard shortcut for applying/removing a highlight: Ctrl/Cmd+Alt+<digit>
-// applies the Nth colour in HL_COLORS (1-indexed), Ctrl/Cmd+Alt+0 clears a
-// highlight from the selection. Same chord shape Google Docs already uses
-// for its own Ctrl/Cmd+Alt+<digit> heading shortcuts (down to 0 = "Normal
-// text", i.e. "clear formatting") — chosen specifically because Ctrl+<digit>
-// and Ctrl+Shift+<digit> are both reserved for browser tab-switching, which
-// a page can't override.
-// Returns null when the keydown isn't this shortcut at all (including an
-// out-of-range digit like 6-9) so the caller can leave the event alone.
-export function matchHighlightShortcut(e) {
-  if (!(e.ctrlKey || e.metaKey) || !e.altKey || e.shiftKey) return null;
-  if (!/^[0-9]$/.test(e.key)) return null;
-  if (e.key === '0') return { remove: true };
-  const color = HL_COLORS[Number(e.key) - 1];
-  return color ? { color } : null;
+// Keyboard shortcuts for applying/removing a highlight — mnemonic first
+// letters (Y)ellow/(G)reen/(B)lue/(P)ink/(O)range, (R)emove, built straight
+// from HL_COLORS' own labels so the mapping can never drift out of sync
+// with the actual colour list. Two variants, because the same bare letter
+// can't mean the same thing in both places it's used:
+//   - matchHighlightShortcutEditing: a plain `y` would just type the letter
+//     into the textarea, so this one requires Alt held (Alt+Y, Alt+G, …).
+//   - matchHighlightShortcutView: the saved-entry notes aren't editable in
+//     view mode — selecting text and pressing a key can't mean "type a
+//     character" there — so the bare letter alone IS the shortcut, same as
+//     a Kindle/Hypothesis-style reading-mode shortcut.
+// Both return null (and leave the keydown alone) for anything else,
+// including a Shift/Ctrl/Cmd chord riding along, so a capital-letter
+// keyboard shortcut from some other feature, or genuine typing, is never
+// swallowed by accident.
+const HL_LETTER_INDEX = Object.fromEntries(HL_COLORS.map((c, i) => [c.label[0].toLowerCase(), i]));
+
+function matchHighlightLetter(e) {
+  if (e.ctrlKey || e.metaKey || e.shiftKey) return null;
+  const key = e.key.toLowerCase();
+  if (key === 'r') return { remove: true };
+  const i = HL_LETTER_INDEX[key];
+  return i === undefined ? null : { color: HL_COLORS[i] };
+}
+
+export function matchHighlightShortcutEditing(e) {
+  if (!e.altKey) return null;
+  return matchHighlightLetter(e);
+}
+
+export function matchHighlightShortcutView(e) {
+  if (e.altKey) return null;
+  return matchHighlightLetter(e);
 }
 
 // Get selection offsets from a textarea — works on all platforms

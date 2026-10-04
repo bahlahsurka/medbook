@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
-import { getTextareaSelection, adjustHighlights, matchHighlightShortcut } from './highlights';
+import { getTextareaSelection, adjustHighlights, matchHighlightShortcutEditing } from './highlights';
 
 /**
  * Remove any part of existing highlights that overlaps [start,end).
@@ -82,7 +82,7 @@ export function useHighlight(taRef, initialHighlights = []) {
   // prevented keydown whenever the chord doesn't match, exactly like
   // handleBulletKeyDown's own "not my key, don't touch it" contract.
   const handleShortcut = useCallback((e) => {
-    const m = matchHighlightShortcut(e);
+    const m = matchHighlightShortcutEditing(e);
     if (!m) return;
     e.preventDefault();
     if (m.remove) removeHL(); else applyHL(m.color);
