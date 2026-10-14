@@ -1,12 +1,19 @@
 // services/ai/GeminiService.js
 //
 // Transport only. Knows how to talk to Gemini; knows nothing about prompts or
-// about MedBook's data shapes. If we ever move the key server-side (a Vercel
-// function), THIS is the only file that changes.
+// about MedBook's data shapes.
+//
+// Now the fallback provider, called ONLY from api/analyze.mjs when Groq's
+// quota is exhausted (or Groq isn't configured at all) — see that file's
+// header comment. Predicted correctly: moving the key server-side needed
+// zero changes to this file itself, since it only ever used `fetch` and
+// `process.env`, both available in Node. REACT_APP_GEMINI_API_KEY keeps its
+// name (no Vercel env var rename needed) — the REACT_APP_ prefix only
+// controls what Create React App inlines into the BROWSER bundle; nothing
+// in client code imports this module anymore, so the key simply never
+// appears there now, without this still being the var's "real" name.
+import { SYSTEM_INSTRUCTION, RESPONSE_SCHEMA } from './PromptBuilder.js';
 
-import { SYSTEM_INSTRUCTION, RESPONSE_SCHEMA } from './PromptBuilder';
-
-// Create React App exposes only REACT_APP_* vars to the browser.
 const API_KEY = process.env.REACT_APP_GEMINI_API_KEY;
 
 // Gemini's model lineup turns over fast (2.0 shut down June 2026; 2.5 has been

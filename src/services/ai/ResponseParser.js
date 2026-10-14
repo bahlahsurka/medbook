@@ -4,7 +4,7 @@
 // It never returns a partial/garbled object, because callers write the result
 // straight to the database and a half-parsed blob would corrupt an entry.
 
-import { LIMITS } from './PromptBuilder';
+import { LIMITS } from './PromptBuilder.js';
 
 export class ParseError extends Error {
   constructor(message) {

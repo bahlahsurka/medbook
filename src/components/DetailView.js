@@ -468,6 +468,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         ai_sections: sections,
         ai_generated_at: new Date().toISOString(),
         ai_model: AIService.activeModel(),
+        ai_provider: AIService.activeProvider(),
       };
       // NOTE: `notes` is deliberately absent from this update.
       const { error } = await supabase.from('entries').update(payload).eq('id', entry.id);
@@ -477,26 +478,34 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
       setAiDirty(false);
       onUpdated({ ...entry, ...payload });
 
-      // Update the temporary usage estimate. This is OUR count of requests
-      // sent this page session against Google's PUBLISHED limits — not a
-      // live number from Google (the free tier doesn't reliably expose one
-      // to a browser) — so it's labelled as an estimate, not a fact.
+      // Update the usage readout. The count now comes straight from the
+      // server (see api/analyze.mjs's ai_usage_daily) — Groq's and
+      // Gemini's free tiers are shared across every signed-in MedBook user
+      // via one API key each, so a per-browser-session count couldn't mean
+      // anything against that shared quota the way it could when this was
+      // a single-user, client-side-only integration.
       const usedModel = AIService.activeModel();
-      setUsageInfo({ model: usedModel, count: AIService.getRequestCount(), limits: limitsFor(usedModel) });
+      setUsageInfo({
+        provider: AIService.activeProvider(), model: usedModel, fallback: AIService.wasFallback(),
+        count: AIService.getRequestCount(), limits: limitsFor(usedModel),
+      });
 
       if (isAllEmpty(sections)) {
-        setAiNote('Gemini found nothing it could support from this Review. Try adding more detail, then Re-analyze.');
+        setAiNote('The AI found nothing it could support from this Review. Try adding more detail, then Re-analyze.');
       }
     } catch (e) {
       // Entry is untouched on any failure.
       setAiErr(e.message || 'Analysis failed.');
-      // Refresh the usage estimate on failure too, not just success — a 429
+      // Refresh the usage readout on failure too, not just success — a 429
       // still burned a real request against the quota, and this is the only
       // on-screen way to confirm exactly how many requests one click sent
       // (previously this only updated after a successful Analyze, so a
       // rate-limited click left the counter looking stale/untouched).
       const usedModel = AIService.activeModel();
-      setUsageInfo({ model: usedModel, count: AIService.getRequestCount(), limits: limitsFor(usedModel) });
+      setUsageInfo({
+        provider: AIService.activeProvider(), model: usedModel, fallback: AIService.wasFallback(),
+        count: AIService.getRequestCount(), limits: limitsFor(usedModel),
+      });
     } finally {
       setAiBusy(false);
       analyzeInFlight.current = false;
@@ -1106,24 +1115,32 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             </button>
           </div>
 
-          {/* Temporary usage estimate — appears after Analyze, gone the moment
-              you leave this entry (plain component state, not saved anywhere).
-              Numbers are OUR count of requests this session vs Google's
-              PUBLISHED limits, not a live figure from Google. */}
+          {/* Usage readout — appears after Analyze, gone the moment you leave
+              this entry (plain component state, not saved anywhere). The
+              count is a REAL server-side figure now (api/analyze.mjs's
+              ai_usage_daily), because Groq's and Gemini's free tiers are
+              shared across every signed-in MedBook user via one API key
+              each — a per-browser count couldn't mean anything against
+              that. Provider is always shown, including when Groq's quota
+              ran out and this call actually went to Gemini instead — that
+              should be visible, not quietly swapped underneath you. */}
           {usageInfo && (
             <div style={{display:'flex',alignItems:'center',gap:8,
               background:t.surface2,border:`1px solid ${t.border}`,borderRadius:RADIUS.sm+1,
               padding:'6px 12px',marginBottom:SPACE.md,fontSize:FONT.size.xs,color:t.text4}}>
               <IconChart size={12} style={{color:t.text4,flexShrink:0}} />
               <span>
-                ~{usageInfo.count} request{usageInfo.count!==1?'s':''} this session on{' '}
-                <strong style={{color:t.text3}}>{usageInfo.model}</strong>
+                ~{usageInfo.count} request{usageInfo.count!==1?'s':''} today via{' '}
+                <strong style={{color:t.text3}}>
+                  {usageInfo.provider === 'gemini' ? 'Gemini' : 'Groq'}{usageInfo.fallback ? ' (fallback)' : ''}
+                </strong>
+                {' '}· <strong style={{color:t.text3}}>{usageInfo.model}</strong>
                 {usageInfo.limits.rpd && (
                   <> · free tier is usually ~{usageInfo.limits.rpm}/min, ~{usageInfo.limits.rpd}/day</>
                 )}
               </span>
               <span style={{marginLeft:'auto',fontSize:FONT.size.micro,fontStyle:'italic',opacity:.7}}>
-                estimate, not from Google
+                estimate, not live from the provider
               </span>
             </div>
           )}
