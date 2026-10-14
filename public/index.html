@@ -111,6 +111,17 @@
       .mb-detailimg:hover { transform: scale(1.03); box-shadow: 0 4px 12px rgba(0,0,0,.12); }
       body.medbook-dark .mb-detailimg:hover { box-shadow: 0 4px 14px rgba(0,0,0,.45); }
 
+      /* View-mode gallery thumbnails specifically (DetailView.js's
+         GalleryThumb) get a more noticeable hover zoom than the 1.03 above
+         — that shared rule also covers the edit-mode existing/new-image
+         thumbnails, which this is deliberately NOT changing. The compound
+         selector (both classes) beats the bare .mb-detailimg:hover rule on
+         specificity, so this always wins for gallery thumbnails regardless
+         of source order. z-index lifts the scaled image above its
+         neighbours in the 2-up desktop grid instead of tucking under them. */
+      .mb-detailimg.mb-gallerythumb:hover { transform: scale(1.1); z-index: 2; box-shadow: 0 10px 28px rgba(0,0,0,.22); }
+      body.medbook-dark .mb-detailimg.mb-gallerythumb:hover { box-shadow: 0 10px 28px rgba(0,0,0,.55); }
+
       /* Entry detail responsive shell (tablet/laptop pass). Mobile is
          untouched below 768px — same single 680px column as before. From
          768px up the shell widens and, when the entry has images, splits

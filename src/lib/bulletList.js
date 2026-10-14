@@ -1,19 +1,32 @@
-// Bullet-list authoring helpers for a plain <textarea> (Review Notes).
+// Rich-paste + bullet-list authoring helpers for a plain <textarea>
+// (Review Notes).
 //
 // A native <textarea> keeps whatever's on the clipboard's plain-text
 // flavour verbatim, and notes render with `white-space: pre-wrap` — so if
 // the source's plain text already contains literal "•"/"-"/"*" characters,
 // they show up exactly as copied with zero code. But most rich sources
-// (Word, Google Docs, Notion, a webpage) represent a bullet list as real
-// <li> markup and DON'T put a bullet character in their plain-text
-// clipboard flavour at all — pasting from those gives you the list's text
-// with no marker in sight. handleBulletPaste below reads the clipboard's
-// HTML flavour instead and reconstructs "• " markers from the actual <li>
-// structure, so lists come in bulleted the way they looked at the source.
+// (ChatGPT, Claude, Gemini, Word, Google Docs, Notion, a webpage) carry
+// their REAL formatting only as HTML — bold as <strong>/<b>, lists as real
+// <li> markup, paragraphs as separate <p> tags — and put none of that in
+// the plain-text clipboard flavour at all. Pasting from those with a plain
+// <textarea> either loses the bold entirely or (depending on the source)
+// also collapses every paragraph break into one monotone run of text.
 //
-// The rest of this file is the AUTHORING side: continuing a bullet on
-// Enter, indenting a sub-bullet with Tab, and a one-click way to turn
-// line(s) into bullets without typing the marker by hand.
+// handleRichPaste below reads the clipboard's HTML flavour instead and
+// reconstructs a lightweight markdown-ish plain-text equivalent: **bold**
+// markers around anything that was <strong>/<b>, "• " markers for real
+// <li> structure (as before), and a blank line between paragraph-level
+// blocks so pasted prose still reads in paragraphs. That's still plain
+// text in the `notes` column — nothing about storage, highlight-offset
+// math, or search changes — only RenderedNotes (DetailView.js/
+// ReviewQueue.js) parses ** back out into actual bold when DISPLAYING a
+// saved entry. While editing, the textarea shows the raw **markers**
+// as-is, the same way any plain-text markdown editor does.
+//
+// The rest of this file is the bullet AUTHORING side: continuing a bullet
+// on Enter, indenting a sub-bullet with Tab, and a one-click way to turn
+// line(s) into bullets without typing the marker by hand. Unrelated to
+// pasting — these fire on user keystrokes/clicks, not clipboard content.
 //
 // Edits go through document.execCommand('insertText', …) rather than
 // touching React state directly — the same technique GitHub's own
@@ -112,17 +125,51 @@ export function toggleBulletLines(ta) {
   insert(ta, next);
 }
 
+// Inline text extraction that keeps <strong>/<b> runs as **bold** markers
+// instead of flattening them away — the one piece of "real" formatting
+// this app's plain-text notes field preserves. Nothing else (italic,
+// links, colour, headings-as-styling) is encoded; not asked for, and each
+// one would be another ambiguous marker to get right. <ul>/<ol> are
+// skipped here — callers that need nested-list handling (liOwnText) strip
+// them beforehand and walk them separately via collectLines.
+const BOLD_TAGS = /^(strong|b)$/i;
+function inlineTextWithBold(node) {
+  let out = '';
+  for (const child of Array.from(node.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE) { out += child.textContent; continue; }
+    if (child.nodeType !== Node.ELEMENT_NODE) continue;
+    const tag = child.tagName.toLowerCase();
+    if (tag === 'ul' || tag === 'ol') continue;
+    if (BOLD_TAGS.test(tag)) {
+      const inner = inlineTextWithBold(child).replace(/\s+/g, ' ').trim();
+      if (inner) out += `**${inner}**`;
+    } else {
+      out += inlineTextWithBold(child);
+    }
+  }
+  return out;
+}
+
 // A <li>'s "own" text — everything inside it EXCEPT a nested <ul>/<ol>
 // (those get walked separately as their own indented lines below), with
-// whatever inline markup it contains (spans, bold, a Google-Docs-style
-// wrapper <p> — Docs nests a <p> inside every <li>) flattened to plain text.
+// bold preserved (inlineTextWithBold) and everything else (spans, a
+// Google-Docs-style wrapper <p> — Docs nests a <p> inside every <li>)
+// flattened to plain text.
 function liOwnText(li) {
   const clone = li.cloneNode(true);
   clone.querySelectorAll('ul, ol').forEach(n => n.remove());
-  return clone.textContent.replace(/\s+/g, ' ').trim();
+  return inlineTextWithBold(clone).replace(/\s+/g, ' ').trim();
 }
 
 const BLOCK_TAGS = /^(p|div|h[1-6]|blockquote|section|article|li)$/;
+
+// A blank line between paragraph-level blocks, so pasted prose still reads
+// in paragraphs instead of every block running together — but never a
+// leading blank, and never two in a row (a wrapper div around a single
+// paragraph would otherwise double up).
+function pushParagraphBreak(lines) {
+  if (lines.length > 0 && lines[lines.length - 1] !== '') lines.push('');
+}
 
 // Walk a parsed clipboard fragment, emitting one plain-text line per list
 // item (bulleted, indented by nesting depth) and per paragraph/block —
@@ -144,13 +191,17 @@ function collectLines(node, depth, lines) {
         .filter(c => /^(ul|ol)$/i.test(c.tagName))
         .forEach(list => collectLines(list, depth + 1, lines));
     } else if (tag === 'ul' || tag === 'ol') {
+      // Only a genuinely top-level list (depth 0) gets paragraph spacing
+      // before it — a NESTED sub-list (reached via the `li` branch above,
+      // which recurses with depth + 1) stays tight under its parent bullet.
+      if (depth === 0) pushParagraphBreak(lines);
       collectLines(child, depth, lines);
     } else if (BLOCK_TAGS.test(tag)) {
       if (child.querySelector('li')) {
         collectLines(child, depth, lines); // a wrapper div/p around a list
       } else {
-        const t = child.textContent.replace(/\s+/g, ' ').trim();
-        if (t) lines.push(t);
+        const t = inlineTextWithBold(child).replace(/\s+/g, ' ').trim();
+        if (t) { pushParagraphBreak(lines); lines.push(t); }
       }
     } else {
       collectLines(child, depth, lines); // inline wrapper (span/b/a/font/…)
@@ -159,14 +210,17 @@ function collectLines(node, depth, lines) {
 }
 
 /**
- * Paste handler — wire to a textarea's onPaste. Only intervenes when the
- * clipboard carries HTML with an actual <li> in it; anything else (plain
- * text, rich text with no lists) falls straight through to the browser's
- * normal paste, untouched.
+ * Paste handler — wire to a textarea's onPaste. Intervenes whenever the
+ * clipboard carries an HTML flavour at all (which plain-text-only sources —
+ * a terminal, a bare .txt file, MedBook's own textarea — never do, so this
+ * never touches an ordinary plain-text paste). Reconstructs **bold**,
+ * paragraph spacing, and "• " bullets from the real HTML structure instead
+ * of trusting the source's plain-text clipboard flavour, which routinely
+ * drops all three.
  */
-export function handleBulletPaste(e) {
+export function handleRichPaste(e) {
   const html = e.clipboardData && e.clipboardData.getData('text/html');
-  if (!html || !/<li[\s>]/i.test(html)) return;
+  if (!html) return;
 
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const lines = [];
@@ -177,10 +231,10 @@ export function handleBulletPaste(e) {
   const text = ta.value;
   const start = ta.selectionStart, end = ta.selectionEnd;
   let block = lines.join('\n');
-  // Keep the pasted list on its own line(s) instead of fusing into
+  // Keep the pasted content on its own line(s) instead of fusing into
   // whatever text sits right before/after the cursor — without this,
-  // pasting a list mid-sentence runs the last item straight into the
-  // following text ("• Yafter") instead of a new line ("• Y\nafter").
+  // pasting mid-sentence runs the last line straight into the following
+  // text ("• Yafter") instead of a new line ("• Y\nafter").
   if (start > 0 && text[start - 1] !== '\n') block = '\n' + block;
   if (end < text.length && text[end] !== '\n') block += '\n';
 

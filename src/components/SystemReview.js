@@ -1,10 +1,17 @@
 import { useState, useMemo, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { DIFF_COLOR } from '../lib/constants';
-import { buildHighlightParts, resolveHL } from '../lib/highlights';
+import { buildHighlightParts, resolveHL, splitBold } from '../lib/highlights';
 import { useTheme } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue, buildCycledQueueWithScheduled } from '../lib/reviewQueue';
+
+// Splits out any **bold** markers a rich paste (lib/bulletList.js) left in
+// the plain-text notes — independent of highlight colour, which the caller
+// applies around this.
+function BoldRuns({ text }) {
+  return splitBold(text).map((b, j) => b.bold ? <strong key={j}>{b.t}</strong> : <span key={j}>{b.t}</span>);
+}
 
 // Renders notes with the same highlight colours the entry has in its system view
 function RenderedNotes({ text, highlights, isDark }) {
@@ -12,9 +19,9 @@ function RenderedNotes({ text, highlights, isDark }) {
   return (
     <span style={{whiteSpace:'pre-wrap'}}>
       {parts.map((p,i) => {
-        if (!p.hl) return <span key={i}>{p.t}</span>;
+        if (!p.hl) return <span key={i}><BoldRuns text={p.t} /></span>;
         const c = resolveHL(p.hl, isDark);
-        return <mark key={i} style={{background:c.bg,color:c.text,borderRadius:2,padding:'0 2px'}}>{p.t}</mark>;
+        return <mark key={i} style={{background:c.bg,color:c.text,borderRadius:2,padding:'0 2px'}}><BoldRuns text={p.t} /></mark>;
       })}
     </span>
   );

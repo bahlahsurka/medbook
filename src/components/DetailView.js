@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
-import { buildHighlightParts, resolveHL, adjustHighlights, matchHighlightShortcutView } from '../lib/highlights';
+import { buildHighlightParts, resolveHL, adjustHighlights, matchHighlightShortcutView, splitBold } from '../lib/highlights';
 import { useHighlight, clearRange } from '../lib/useHighlight';
 import { useTheme, SPACE, RADIUS, FONT, Z, elevation } from '../lib/theme';
 import { IconChevronLeft, IconChevronRight, IconEdit, IconCheck, IconTrash, IconPin,
@@ -11,7 +11,7 @@ import HLPopover from './HLPopover';
 import AISections from './AISections';
 import AIService, { normalizeSections, isAllEmpty } from '../services/ai';
 import { limitsFor } from '../services/ai/PromptBuilder';
-import { handleBulletKeyDown, toggleBulletLines, handleBulletPaste } from '../lib/bulletList';
+import { handleBulletKeyDown, toggleBulletLines, handleRichPaste } from '../lib/bulletList';
 import { STUDY_SCOPE_CLASS, suppressContextMenu } from '../lib/studyInteraction';
 
 
@@ -23,6 +23,16 @@ function esc(str) {
   return String(str ?? '')
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Same escaping, then turns **bold** markers (from a rich paste — see
+// lib/bulletList.js) into real <strong> tags for the exported PDF, so a
+// note that reads bold on screen doesn't lose that the moment it's
+// printed. Escaping first (so a user's own literal < > & are always safe)
+// means the ** this converts afterward can only ever be markers this app
+// itself wrote, never something pasted in from the note's own text.
+function escWithBold(str) {
+  return esc(str).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
 }
 
 // Convert a Supabase public URL back to its storage object path ("<uid>/<file>"),
@@ -61,15 +71,22 @@ function isTypingTarget(el) {
   return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
 }
 
+// Renders a highlight-coloured slice's text, further splitting out any
+// **bold** markers a rich paste (lib/bulletList.js) left in the plain-text
+// notes — bold and highlight colour are independent and compose freely.
+function BoldRuns({ text }) {
+  return splitBold(text).map((b, j) => b.bold ? <strong key={j}>{b.t}</strong> : <span key={j}>{b.t}</span>);
+}
+
 function RenderedNotes({ text, highlights }) {
   const { isDark } = useTheme();
   const parts = buildHighlightParts(text, highlights);
   return (
     <span style={{whiteSpace:'pre-wrap'}}>
       {parts.map((p,i) => {
-        if (!p.hl) return <span key={i}>{p.t}</span>;
+        if (!p.hl) return <span key={i}><BoldRuns text={p.t} /></span>;
         const c = resolveHL(p.hl, isDark);
-        return <mark key={i} style={{background:c.bg,color:c.text,borderRadius:2,padding:'0 2px'}}>{p.t}</mark>;
+        return <mark key={i} style={{background:c.bg,color:c.text,borderRadius:2,padding:'0 2px'}}><BoldRuns text={p.t} /></mark>;
       })}
     </span>
   );
@@ -238,10 +255,10 @@ function ActionButton({ t, icon, label, onClick, tone='neutral', disabled, pulse
 function GalleryThumb({ t, src, onClick }) {
   const [loaded, setLoaded] = useState(false);
   return (
-    <img src={src} alt="" className="mb-detailimg" onClick={onClick}
+    <img src={src} alt="" className="mb-detailimg mb-gallerythumb" onClick={onClick}
       loading="lazy" onLoad={()=>setLoaded(true)}
       style={{borderRadius:RADIUS.md,border:`1px solid ${t.border}`,cursor:'pointer',
-        objectFit:'contain',background:t.surface2,
+        objectFit:'contain',background:t.surface2,position:'relative',
         opacity:loaded?1:0,transition:'opacity 200ms ease'}} />
   );
 }
@@ -631,7 +648,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     @media print{.back{display:none}body{padding:0}}</style></head><body>
     <a class="back" onclick="window.close()">← Close & Go Back</a>
     <div class="meta">${esc(entry.system)} · ${esc(entry.difficulty)} · ${esc(fmt(entry.created_at))}</div>
-    <h1>${esc(entry.title)}</h1><div class="notes">${esc(entry.notes||'')}</div>
+    <h1>${esc(entry.title)}</h1><div class="notes">${escWithBold(entry.notes||'')}</div>
     ${(entry.images||[]).map(u=>`<img src="${esc(u)}"/>`).join('')}
     </body></html>`);
     win.document.close(); win.focus();
@@ -829,7 +846,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                 onSelect={editHl.onSelChange} onMouseUp={editHl.onSelChange}
                 onKeyUp={editHl.onSelChange} onTouchEnd={editHl.onSelChange}
                 onKeyDown={e => { handleBulletKeyDown(e); if (!e.defaultPrevented) editHl.handleShortcut(e); }}
-                onPaste={handleBulletPaste}
+                onPaste={handleRichPaste}
                 onScroll={syncEditOverlay}
                 rows={8} style={{...inp,resize:'vertical',lineHeight:'1.7',
                   marginTop:0,

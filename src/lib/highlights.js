@@ -1,3 +1,27 @@
+// Splits text containing **bold** markers (written by lib/bulletList.js's
+// rich-paste handler, never by hand-typed notes unless the user types the
+// markers themselves — which renders the same way, same as any markdown
+// tool) into runs of {t, bold}. Callers render each run as plain text or
+// <strong>, independently of whatever else (e.g. a highlight colour) is
+// also being applied to that same stretch of text — see RenderedNotes in
+// DetailView.js/ReviewQueue.js, which call this per buildHighlightParts
+// slice so bold and highlight colour compose correctly together.
+const BOLD_RE = /\*\*([^*]+)\*\*/g;
+export function splitBold(text) {
+  if (!text) return [];
+  const out = [];
+  let last = 0;
+  let m;
+  BOLD_RE.lastIndex = 0;
+  while ((m = BOLD_RE.exec(text))) {
+    if (m.index > last) out.push({ t: text.slice(last, m.index), bold: false });
+    out.push({ t: m[1], bold: true });
+    last = BOLD_RE.lastIndex;
+  }
+  if (last < text.length) out.push({ t: text.slice(last), bold: false });
+  return out;
+}
+
 export const HL_COLORS = [
   { bg:'#fef08a', text:'#713f12', label:'Yellow' },
   { bg:'#bbf7d0', text:'#14532d', label:'Green'  },

@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { SYS_COLOR } from '../lib/constants';
-import { buildHighlightParts, resolveHL } from '../lib/highlights';
+import { SYS_COLOR, DIFF_COLOR } from '../lib/constants';
+import { buildHighlightParts, resolveHL, splitBold } from '../lib/highlights';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue } from '../lib/reviewQueue';
@@ -9,15 +9,22 @@ import { computeSystemStats } from '../lib/systemStats';
 import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
   IconX, IconZap } from '../lib/icons';
 
+// Splits out any **bold** markers a rich paste (lib/bulletList.js) left in
+// the plain-text notes — independent of highlight colour, which the caller
+// applies around this.
+function BoldRuns({ text }) {
+  return splitBold(text).map((b, j) => b.bold ? <strong key={j}>{b.t}</strong> : <span key={j}>{b.t}</span>);
+}
+
 // Renders notes with the same highlight colours the entry has in its system view
 function RenderedNotes({ text, highlights, isDark }) {
   const parts = buildHighlightParts(text, highlights);
   return (
     <span style={{whiteSpace:'pre-wrap'}}>
       {parts.map((p,i) => {
-        if (!p.hl) return <span key={i}>{p.t}</span>;
+        if (!p.hl) return <span key={i}><BoldRuns text={p.t} /></span>;
         const c = resolveHL(p.hl, isDark);
-        return <mark key={i} style={{background:c.bg,color:c.text,borderRadius:2,padding:'0 2px'}}>{p.t}</mark>;
+        return <mark key={i} style={{background:c.bg,color:c.text,borderRadius:2,padding:'0 2px'}}><BoldRuns text={p.t} /></mark>;
       })}
     </span>
   );
@@ -78,6 +85,12 @@ const RATINGS = [
   { key:'good',  label:'Good',  tone:'accent' },
   { key:'easy',  label:'Easy',  tone:'ok'     },
 ];
+
+// Deliberately just these three (+ "All" below) — not the full DIFFICULTY
+// list from lib/constants.js, which also has "Flagged". This filter is
+// about how hard an entry is to review, not about flagging; Flagged stays
+// out unless asked for.
+const REVIEW_DIFFICULTIES = ['Easy', 'Medium', 'Hard'];
 
 // Same scheduling math as before this batch — UNCHANGED. This is the "Review
 // Queue data logic" the brief explicitly says not to touch.
@@ -140,6 +153,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   const [sessionStarted, setSessionStarted] = useState(false);
   const [filterMode, setFilterMode]     = useState('all');   // 'all' | 'due' | 'new'
   const [filterSystem, setFilterSystem] = useState('');       // '' = every system
+  const [filterDifficulty, setFilterDifficulty] = useState('All'); // 'All' | 'Easy' | 'Medium' | 'Hard'
 
   const [queue, setQueue] = useState([]);
   const [idx, setIdx]  = useState(0);
@@ -152,20 +166,21 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   // Same due/fresh definitions used everywhere else in the app (Dashboard,
   // reviewQueue.js's own buildCycledQueue) — filtering just chooses which
   // entries feed the UNCHANGED queue builder, it doesn't reimplement it.
-  const filterEntries = useCallback((mode, system) => {
+  const filterEntries = useCallback((mode, system, difficulty = 'All') => {
     let list = Object.values(entriesRef.current).flat();
     if (system) list = list.filter(e => e.system === system);
+    if (difficulty !== 'All') list = list.filter(e => e.difficulty === difficulty);
     const now = new Date();
     if (mode === 'due') list = list.filter(e => e.next_review && new Date(e.next_review) <= now);
     else if (mode === 'new') list = list.filter(e => !e.next_review);
     return list;
   }, []);
 
-  const startNewSession = useCallback((mode = filterMode, system = filterSystem) => {
-    setQueue(buildCycledQueue(filterEntries(mode, system)));
+  const startNewSession = useCallback((mode = filterMode, system = filterSystem, difficulty = filterDifficulty) => {
+    setQueue(buildCycledQueue(filterEntries(mode, system, difficulty)));
     setIdx(0); setFlipped(false); setDone(false); setEnded(false); setSess(0);
     setSessionStarted(true);
-  }, [filterMode, filterSystem, filterEntries]);
+  }, [filterMode, filterSystem, filterDifficulty, filterEntries]);
 
   const backToOverview = () => setSessionStarted(false);
 
@@ -184,7 +199,11 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   useEffect(() => {
     if (!initialFilterSystem) return;
     setFilterSystem(initialFilterSystem);
-    setQueue(buildCycledQueue(filterEntries('due', initialFilterSystem)));
+    // A difficulty picked in some earlier session on this screen shouldn't
+    // silently narrow this one too — arriving from "Needs attention" means
+    // every due card in this system, not whatever was last selected here.
+    setFilterDifficulty('All');
+    setQueue(buildCycledQueue(filterEntries('due', initialFilterSystem, 'All')));
     setIdx(0); setFlipped(false); setDone(false); setEnded(false); setSess(0);
     setSessionStarted(true);
   }, [initialFilterSystem, filterEntries]);
@@ -204,17 +223,27 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   const progress = total > 0 ? Math.round((sessionDone / total) * 100) : 0;
 
   // ── Overview data — all real, all already-used definitions ──────────────
-  const dueCount = useMemo(() => {
+  //
+  // Global (unscoped — every system, every difficulty) counts, used ONLY to
+  // decide whether to show the "you're caught up" celebratory screen below.
+  // That decision has to stay global: if it used the scoped counts instead,
+  // picking a system/difficulty combination that happens to have zero due
+  // or new cards would swap the ENTIRE overview (filters included) for that
+  // dead-end screen, with no way back to change the selection. Starting a
+  // session that matches nothing already has its own proper empty state
+  // (the "Nothing matches this filter" screen further down, with a Back to
+  // Overview button) — this one is reserved for "truly nothing, anywhere".
+  const globalDueCount = useMemo(() => {
     const now = new Date();
     return Object.values(allEntries).flat()
       .filter(e => e.next_review && new Date(e.next_review) <= now).length;
   }, [allEntries]);
 
-  const newCount = useMemo(() =>
+  const globalNewCount = useMemo(() =>
     Object.values(allEntries).flat().filter(e => !e.next_review).length,
   [allEntries]);
 
-  const nextDue = useMemo(() => {
+  const globalNextDue = useMemo(() => {
     const now = new Date();
     const upcoming = Object.values(allEntries).flat()
       .filter(e => e.next_review && new Date(e.next_review) > now)
@@ -222,6 +251,40 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
       .sort((a, b) => a - b);
     return upcoming[0] || null;
   }, [allEntries]);
+
+  // Scoped to whichever system/difficulty is currently selected below, NOT
+  // always every system — this is exactly the bug that made picking a
+  // system here do nothing visible: dueCount/newCount used to read straight
+  // from `allEntries` regardless of filterSystem, so the StatPills (and the
+  // "Due (N)"/"New (N)" filter button labels, which read these same two
+  // values) kept showing the all-systems totals no matter what you'd just
+  // selected. Deriving everything from one `scopedEntries` memo means
+  // picking a system or a difficulty can't leave any one of these three
+  // numbers stale while the others update.
+  const scopedEntries = useMemo(() => {
+    let list = Object.values(allEntries).flat();
+    if (filterSystem) list = list.filter(e => e.system === filterSystem);
+    if (filterDifficulty !== 'All') list = list.filter(e => e.difficulty === filterDifficulty);
+    return list;
+  }, [allEntries, filterSystem, filterDifficulty]);
+
+  const dueCount = useMemo(() => {
+    const now = new Date();
+    return scopedEntries.filter(e => e.next_review && new Date(e.next_review) <= now).length;
+  }, [scopedEntries]);
+
+  const newCount = useMemo(() =>
+    scopedEntries.filter(e => !e.next_review).length,
+  [scopedEntries]);
+
+  const nextDue = useMemo(() => {
+    const now = new Date();
+    const upcoming = scopedEntries
+      .filter(e => e.next_review && new Date(e.next_review) > now)
+      .map(e => new Date(e.next_review))
+      .sort((a, b) => a - b);
+    return upcoming[0] || null;
+  }, [scopedEntries]);
 
   // Same shared per-system rollup Dashboard/Sidebar already use — not a
   // second counting system, the same one, just surfaced here too.
@@ -295,7 +358,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
 
   // ── Overview / landing screen ────────────────────────────────────────
   if (!sessionStarted) {
-    const nothingAtAll = dueCount === 0 && newCount === 0;
+    const nothingAtAll = globalDueCount === 0 && globalNewCount === 0;
     return (
       <div className="mb-rq-fade" style={{ maxWidth:640, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
         <style>{localCss}</style>
@@ -317,10 +380,10 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
               You're caught up
             </div>
             <div style={{ fontSize:FONT.size.sm, color:t.text3, lineHeight:1.6 }}>
-              {nextDue
+              {globalNextDue
                 ? <>No reviews are due right now. Next card is scheduled for{' '}
                     <strong style={{ color:t.text2 }}>
-                      {nextDue.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}
+                      {globalNextDue.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}
                     </strong>.</>
                 : 'No cards due. Rate entries here as you review them to start scheduling.'}
             </div>
@@ -344,7 +407,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                 </div>
                 <div style={{ display:'flex', flexDirection:'column' }}>
                   {priority.map((s, i) => (
-                    <button key={s.name} className="mb-rq-row" onClick={() => { setFilterSystem(s.name); startNewSession('due', s.name); }}
+                    <button key={s.name} className="mb-rq-row" onClick={() => { setFilterSystem(s.name); setFilterDifficulty('All'); startNewSession('due', s.name, 'All'); }}
                       style={{ display:'flex', alignItems:'center', gap:SPACE.sm, padding:'9px 8px',
                         borderRadius:RADIUS.sm, cursor:'pointer', background:'none', border:'none', textAlign:'left',
                         transition:`background ${MOTION.fast} ${MOTION.ease}` }}>
@@ -391,6 +454,26 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                     {userSystems.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
                   </select>
                 )}
+              </div>
+
+              {/* Difficulty — narrows the same session, same scoped counts
+                  above update the moment this changes, same as the system
+                  dropdown. */}
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginTop:8 }}>
+                {['All', ...REVIEW_DIFFICULTIES].map(d => {
+                  const active = filterDifficulty === d;
+                  const c = d === 'All' ? t.text3 : (DIFF_COLOR[d] || t.text3);
+                  return (
+                    <button key={d} className="mb-rq-filter" onClick={()=>setFilterDifficulty(d)} style={{
+                      fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:'Inter,sans-serif',
+                      background: active ? `${c}1f` : t.surface2, color: active ? c : t.text3,
+                      border:`1px solid ${active ? `${c}44` : t.border}`,
+                      borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer',
+                      transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}` }}>
+                      {d}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 

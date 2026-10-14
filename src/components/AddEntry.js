@@ -7,7 +7,7 @@ import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
 import { IconEdit, IconImages, IconUpload, IconX, IconCheck, IconSparkle, IconListBullet } from '../lib/icons';
 import HLToolbar from './HLToolbar';
 import AIService from '../services/ai';
-import { handleBulletKeyDown, toggleBulletLines, handleBulletPaste } from '../lib/bulletList';
+import { handleBulletKeyDown, toggleBulletLines, handleRichPaste } from '../lib/bulletList';
 
 const DRAFT_KEY = 'medbook_draft_v2';
 const loadDraft = sys => { try { return JSON.parse(localStorage.getItem(DRAFT_KEY)||'{}')[sys]||null; } catch { return null; } };
@@ -326,7 +326,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
                 onKeyUp={hl.onSelChange}
                 onTouchEnd={hl.onSelChange}
                 onKeyDown={e => { handleBulletKeyDown(e); if (!e.defaultPrevented) hl.handleShortcut(e); }}
-                onPaste={handleBulletPaste}
+                onPaste={handleRichPaste}
                 onScroll={syncOverlayScroll}
                 placeholder="Key concepts, mnemonics, clinical pearls…"
                 rows={8}
