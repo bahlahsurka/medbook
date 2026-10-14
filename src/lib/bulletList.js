@@ -270,28 +270,90 @@ function collectLines(node, depth, lines) {
   }
 }
 
+// --- Plain-text markdown fallback ----------------------------------------
+// Some sources put ONLY their raw markdown source on the clipboard, with no
+// "text/html" flavour at all — notably native chat apps (the iOS/iPadOS
+// Claude app, among others) rather than a browser tab. Without this
+// fallback, collectLines above never runs (nothing to parse as HTML) and
+// the markdown's own "# "/"## "/"- " syntax pastes in completely
+// literally; **bold** happens to "work" only by coincidence, since it's
+// already our own marker syntax. This recognizes that same markdown
+// syntax directly in the plain-text clipboard flavour and converts it to
+// the exact same **/{{…}}/• marker scheme the HTML path produces above, so
+// both paths render identically afterward.
+const MD_HEADING_SIZE = { 1: 'xl', 2: 'xl', 3: 'lg', 4: null, 5: 'sm', 6: 'sm' };
+
+function mdInlineToMarks(text) {
+  // __bold__ is CommonMark's other bold syntax — normalise it to **bold**,
+  // our own native marker, so splitRich doesn't need to know about it.
+  let t = text.replace(/__([^_]+)__/g, '**$1**');
+  // Italic: a single * or _, not part of a **/__ pair. The "no space right
+  // after the opening marker" rule (and, for *, "preceded by a non-* char
+  // or line start") means a bare "3 * 4" or a **bold** pair is never
+  // mistaken for emphasis. No lookbehind (older WebKit on a tablet may not
+  // support it) — the preceding character is captured and put back instead.
+  t = t.replace(/(^|[^*])\*([^\s*][^*]*?)\*(?!\*)/g, '$1{{i}}$2{{/i}}');
+  // '_' counts as a word character for \b, so \b never sits between two
+  // underscore-adjacent word chars — "snake_case"/"beta_2" are untouched.
+  t = t.replace(/\b_([^\s_][^_]*?)_\b/g, '{{i}}$1{{/i}}');
+  return t;
+}
+
+// Only engage this fallback for clipboard text that actually looks like
+// markdown — an ordinary plain-text paste (a stray "-" or "*" in normal
+// prose) must never be rewritten.
+function looksLikeMarkdown(text) {
+  return /(^|\n) {0,3}#{1,6} /.test(text) ||
+    /\*\*[^*]+\*\*/.test(text) ||
+    /(^|\n) *[-*•] /.test(text) ||
+    /\b_[^\s_][^_]*_\b/.test(text);
+}
+
+function markdownPlainTextToMarked(text) {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  return lines.map(raw => {
+    const heading = /^ {0,3}(#{1,6}) +(.*)$/.exec(raw);
+    if (heading) {
+      const size = MD_HEADING_SIZE[heading[1].length];
+      const content = mdInlineToMarks(heading[2].trim());
+      return size ? `{{${size}}}${content}{{/${size}}}` : content;
+    }
+    const bullet = /^( *)[-*•] +(.*)$/.exec(raw) || /^( *)\d+\. +(.*)$/.exec(raw);
+    if (bullet) {
+      const depth = Math.floor(bullet[1].length / 2);
+      return `${INDENT.repeat(depth)}• ${mdInlineToMarks(bullet[2].trim())}`;
+    }
+    return mdInlineToMarks(raw);
+  }).join('\n');
+}
+
 /**
- * Paste handler — wire to a textarea's onPaste. Intervenes whenever the
- * clipboard carries an HTML flavour at all (which plain-text-only sources —
- * a terminal, a bare .txt file, MedBook's own textarea — never do, so this
- * never touches an ordinary plain-text paste). Reconstructs bold/italic/
- * relative size, paragraph spacing, and "• " bullets from the real HTML
- * structure instead of trusting the source's plain-text clipboard flavour,
- * which routinely drops all of it.
+ * Paste handler — wire to a textarea's onPaste. Reconstructs bold/italic/
+ * relative size, paragraph spacing, and "• " bullets either from the
+ * clipboard's real HTML structure, or — when a source (e.g. a native chat
+ * app) carries no HTML flavour at all — from markdown syntax recognized
+ * directly in its plain-text flavour. Never touches an ordinary plain-text
+ * paste that is neither of those.
  */
 export function handleRichPaste(e) {
   const html = e.clipboardData && e.clipboardData.getData('text/html');
-  if (!html) return;
+  let block;
 
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  const lines = [];
-  collectLines(doc.body, 0, lines);
-  if (lines.length === 0) return;
+  if (html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const lines = [];
+    collectLines(doc.body, 0, lines);
+    if (lines.length === 0) return;
+    block = lines.join('\n');
+  } else {
+    const plain = e.clipboardData && e.clipboardData.getData('text/plain');
+    if (!plain || !looksLikeMarkdown(plain)) return;
+    block = markdownPlainTextToMarked(plain);
+  }
 
   const ta = e.target;
   const text = ta.value;
   const start = ta.selectionStart, end = ta.selectionEnd;
-  let block = lines.join('\n');
   // Keep the pasted content on its own line(s) instead of fusing into
   // whatever text sits right before/after the cursor — without this,
   // pasting mid-sentence runs the last line straight into the following
