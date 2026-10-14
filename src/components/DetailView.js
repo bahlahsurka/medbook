@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
-import { buildHighlightParts, resolveHL, adjustHighlights, matchHighlightShortcutView, splitRich, RICH_SIZE_EM } from '../lib/highlights';
+import { buildHighlightParts, resolveHL, adjustHighlights, matchHighlightShortcutView, splitRich, RICH_SIZE_STYLE } from '../lib/highlights';
 import { useHighlight, clearRange } from '../lib/useHighlight';
 import { useTheme, SPACE, RADIUS, FONT, Z, elevation } from '../lib/theme';
 import { IconChevronLeft, IconChevronRight, IconEdit, IconCheck, IconTrash, IconPin,
@@ -31,11 +31,15 @@ function esc(str) {
 // printed. Escaping first (so a user's own literal < > & are always safe)
 // means the markers this converts afterward can only ever be ones this app
 // itself wrote, never something pasted in from the note's own text.
+function sizeStyleAttr(size) {
+  const s = RICH_SIZE_STYLE[size];
+  return s.fontWeight ? `font-size:${s.fontSize};font-weight:${s.fontWeight}` : `font-size:${s.fontSize}`;
+}
 function escWithBold(str) {
   let s = esc(str);
-  s = s.replace(/\{\{xl\}\}([\s\S]*?)\{\{\/xl\}\}/g, `<span style="font-size:${RICH_SIZE_EM.xl}">$1</span>`);
-  s = s.replace(/\{\{lg\}\}([\s\S]*?)\{\{\/lg\}\}/g, `<span style="font-size:${RICH_SIZE_EM.lg}">$1</span>`);
-  s = s.replace(/\{\{sm\}\}([\s\S]*?)\{\{\/sm\}\}/g, `<span style="font-size:${RICH_SIZE_EM.sm}">$1</span>`);
+  s = s.replace(/\{\{xl\}\}([\s\S]*?)\{\{\/xl\}\}/g, `<span style="${sizeStyleAttr('xl')}">$1</span>`);
+  s = s.replace(/\{\{lg\}\}([\s\S]*?)\{\{\/lg\}\}/g, `<span style="${sizeStyleAttr('lg')}">$1</span>`);
+  s = s.replace(/\{\{sm\}\}([\s\S]*?)\{\{\/sm\}\}/g, `<span style="${sizeStyleAttr('sm')}">$1</span>`);
   s = s.replace(/\{\{i\}\}([\s\S]*?)\{\{\/i\}\}/g, '<em>$1</em>');
   s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   return s;
@@ -80,14 +84,21 @@ function isTypingTarget(el) {
 // Renders a highlight-coloured slice's text, further splitting out any
 // bold/italic/size markers a rich paste (lib/bulletList.js) left in the
 // plain-text notes — formatting and highlight colour are independent and
-// compose freely. Colour is never part of this — a run always renders in
-// the surrounding (theme) text colour.
+// compose freely. Bold and a lg/xl size bump up to the theme's full-contrast
+// text colour (notes otherwise render in the dimmer t.text2) — on a small
+// base font, bold/bigger text in the SAME dim grey barely reads as
+// different at all; sm (fine print) stays the surrounding colour, since
+// it's meant to read smaller, not louder.
 function BoldRuns({ text }) {
+  const { t } = useTheme();
   return splitRich(text).map((r, j) => {
     let el = r.t;
-    if (r.bold) el = <strong>{el}</strong>;
+    if (r.bold) el = <strong style={{ color: t.text }}>{el}</strong>;
     if (r.italic) el = <em>{el}</em>;
-    if (r.size) el = <span style={{ fontSize: RICH_SIZE_EM[r.size] }}>{el}</span>;
+    if (r.size) {
+      const strong = r.size === 'lg' || r.size === 'xl';
+      el = <span style={{ ...RICH_SIZE_STYLE[r.size], color: strong ? t.text : undefined }}>{el}</span>;
+    }
     return <span key={j}>{el}</span>;
   });
 }

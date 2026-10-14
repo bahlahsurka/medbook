@@ -43,7 +43,17 @@ export function splitRich(text) {
 
 // em-relative (not px) so a resized run still scales with the surrounding
 // context instead of a fixed pixel size — see detectSize in bulletList.js.
-export const RICH_SIZE_EM = { sm: '0.85em', lg: '1.15em', xl: '1.4em' };
+// lg/xl also carry their own weight so a pasted heading actually reads as
+// a heading (bigger AND bolder), not just scaled-up regular text; sm stays
+// regular weight — fine print isn't meant to stand out, just read smaller.
+// Colour is applied by the renderer (DetailView.js/ReviewQueue.js/
+// SystemReview.js), which has the current theme's token to pick a properly
+// high-contrast one from — this file stays theme-agnostic.
+export const RICH_SIZE_STYLE = {
+  sm: { fontSize: '0.92em' },
+  lg: { fontSize: '1.3em', fontWeight: 600 },
+  xl: { fontSize: '1.6em', fontWeight: 700 },
+};
 
 export const HL_COLORS = [
   { bg:'#fef08a', text:'#713f12', label:'Yellow' },
