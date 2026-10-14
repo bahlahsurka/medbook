@@ -34,7 +34,7 @@ const HighlightOverlay = React.forwardRef(function HighlightOverlay({ text, high
     <div ref={ref} aria-hidden="true" style={{
       position:'absolute', inset:0, pointerEvents:'none',
       whiteSpace:'pre-wrap', wordBreak:'normal', overflowWrap:'break-word',
-      fontSize:FONT.size.md, lineHeight:'1.7', padding:'10px 12px',
+      fontSize:FONT.size.lg, lineHeight:'1.7', padding:'10px 12px',
       fontFamily:'Inter,sans-serif', fontWeight:400, letterSpacing:'normal',
       boxSizing:'border-box',
       // Android's text-autosizing ("font boosting") can inflate a <textarea>'s
@@ -334,6 +334,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
                 style={{
                   ...inp, resize:'vertical', lineHeight:'1.7', marginTop:0,
                   position:'relative', zIndex:1,
+                  fontSize:FONT.size.lg,
                   fontWeight:400, letterSpacing:'normal',
                   WebkitTextSizeAdjust:'100%', textSizeAdjust:'100%',
                   background: hl.highlights.length > 0 ? 'transparent' : t.surface,

@@ -1,13 +1,27 @@
 // Splits text containing bold/italic/size markers (written by
 // lib/bulletList.js's rich-paste handler, never by hand-typed notes unless
 // the user types the markers themselves — which renders the same way, same
-// as any markdown tool) into runs of {t, bold, italic, size}. size is null
-// or one of 'sm'/'lg'/'xl'. Callers render each run as plain text or
+// as any markdown tool) into runs of {t, bold, italic, size, start}. size is
+// null or one of 'sm'/'lg'/'xl'. Callers render each run as plain text or
 // <strong>/<em>/a resized <span>, independently of whatever else (e.g. a
 // highlight colour) is also being applied to that same stretch of text —
 // see RenderedNotes in DetailView.js/ReviewQueue.js/SystemReview.js, which
 // call this per buildHighlightParts slice so formatting and highlight
 // colour compose correctly together.
+//
+// `start` is the run's own offset into the exact string passed in — not a
+// separately-recomputed position, just `last` (where the previous token
+// left off) at the moment each run is pushed, which is already,
+// unavoidably, that run's position in the untouched input. DetailView.js's
+// view-mode highlight capture (readSelection) uses this (added to the
+// enclosing buildHighlightParts slice's own `start`) to map a selection
+// in the RENDERED, marker-stripped DOM back to the matching offset in the
+// RAW stored string — see the data-raw-start annotation in BoldRuns below.
+// Reusing this file's own parse position, rather than a second pass that
+// re-derives "where markers were" by walking the rendered DOM, is what
+// keeps that mapping structurally unable to drift from this parser: there
+// is only one piece of code that knows where a marker sits in the raw
+// string, and both the renderer and the selection-capture read it.
 //
 // Each marker toggles (bold, italic) or sets/clears (size) its own
 // independent flag as it's scanned, rather than building a nested tree —
@@ -26,7 +40,7 @@ export function splitRich(text) {
   let m;
   RICH_TOKEN_RE.lastIndex = 0;
   while ((m = RICH_TOKEN_RE.exec(text))) {
-    if (m.index > last) out.push({ t: text.slice(last, m.index), bold, italic, size });
+    if (m.index > last) out.push({ t: text.slice(last, m.index), bold, italic, size, start: last });
     if (m[0] === '**') {
       bold = !bold;
     } else {
@@ -37,7 +51,7 @@ export function splitRich(text) {
     }
     last = RICH_TOKEN_RE.lastIndex;
   }
-  if (last < text.length) out.push({ t: text.slice(last), bold, italic, size });
+  if (last < text.length) out.push({ t: text.slice(last), bold, italic, size, start: last });
   return out;
 }
 
@@ -84,9 +98,15 @@ export function resolveHL(color, isDark) {
   return { bg: color.bg, text: color.text };
 }
 
+// Each returned part also carries `start` — its own offset into `text`
+// (the raw, marker-included string) — for the same reason splitRich's runs
+// do: so DetailView.js's view-mode highlight capture can map a rendered
+// selection back to a raw-string offset by adding a run's own `start`
+// (relative to its enclosing part) to that part's `start` here, without a
+// second parser having to re-derive either position.
 export function buildHighlightParts(text, highlights) {
   if (!text) return [];
-  if (!highlights || highlights.length === 0) return [{ t: text, hl: null }];
+  if (!highlights || highlights.length === 0) return [{ t: text, hl: null, start: 0 }];
 
   // Defensive clamp — never let a stale/out-of-range highlight crash the render
   const sorted = highlights
@@ -95,19 +115,19 @@ export function buildHighlightParts(text, highlights) {
     .filter(h => h.end > h.start)
     .sort((a, b) => a.start - b.start);
 
-  if (sorted.length === 0) return [{ t: text, hl: null }];
+  if (sorted.length === 0) return [{ t: text, hl: null, start: 0 }];
 
   const parts = [];
   let cursor = 0;
   sorted.forEach(h => {
     const start = Math.max(h.start, cursor);
-    if (start > cursor) parts.push({ t: text.slice(cursor, start), hl: null });
+    if (start > cursor) parts.push({ t: text.slice(cursor, start), hl: null, start: cursor });
     if (start < h.end) {
-      parts.push({ t: text.slice(start, h.end), hl: h.color });
+      parts.push({ t: text.slice(start, h.end), hl: h.color, start });
       cursor = h.end;
     }
   });
-  if (cursor < text.length) parts.push({ t: text.slice(cursor), hl: null });
+  if (cursor < text.length) parts.push({ t: text.slice(cursor), hl: null, start: cursor });
   return parts;
 }
 
