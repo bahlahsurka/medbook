@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
-import { buildHighlightParts, resolveHL, adjustHighlights, matchHighlightShortcutView, splitBold } from '../lib/highlights';
+import { buildHighlightParts, resolveHL, adjustHighlights, matchHighlightShortcutView, splitRich, RICH_SIZE_EM } from '../lib/highlights';
 import { useHighlight, clearRange } from '../lib/useHighlight';
 import { useTheme, SPACE, RADIUS, FONT, Z, elevation } from '../lib/theme';
 import { IconChevronLeft, IconChevronRight, IconEdit, IconCheck, IconTrash, IconPin,
@@ -25,14 +25,20 @@ function esc(str) {
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
-// Same escaping, then turns **bold** markers (from a rich paste — see
-// lib/bulletList.js) into real <strong> tags for the exported PDF, so a
-// note that reads bold on screen doesn't lose that the moment it's
+// Same escaping, then turns the rich-paste markers (bold/italic/size — see
+// lib/bulletList.js) into real HTML tags for the exported PDF, so a note
+// that reads formatted on screen doesn't lose that the moment it's
 // printed. Escaping first (so a user's own literal < > & are always safe)
-// means the ** this converts afterward can only ever be markers this app
+// means the markers this converts afterward can only ever be ones this app
 // itself wrote, never something pasted in from the note's own text.
 function escWithBold(str) {
-  return esc(str).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  let s = esc(str);
+  s = s.replace(/\{\{xl\}\}([\s\S]*?)\{\{\/xl\}\}/g, `<span style="font-size:${RICH_SIZE_EM.xl}">$1</span>`);
+  s = s.replace(/\{\{lg\}\}([\s\S]*?)\{\{\/lg\}\}/g, `<span style="font-size:${RICH_SIZE_EM.lg}">$1</span>`);
+  s = s.replace(/\{\{sm\}\}([\s\S]*?)\{\{\/sm\}\}/g, `<span style="font-size:${RICH_SIZE_EM.sm}">$1</span>`);
+  s = s.replace(/\{\{i\}\}([\s\S]*?)\{\{\/i\}\}/g, '<em>$1</em>');
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  return s;
 }
 
 // Convert a Supabase public URL back to its storage object path ("<uid>/<file>"),
@@ -72,10 +78,18 @@ function isTypingTarget(el) {
 }
 
 // Renders a highlight-coloured slice's text, further splitting out any
-// **bold** markers a rich paste (lib/bulletList.js) left in the plain-text
-// notes — bold and highlight colour are independent and compose freely.
+// bold/italic/size markers a rich paste (lib/bulletList.js) left in the
+// plain-text notes — formatting and highlight colour are independent and
+// compose freely. Colour is never part of this — a run always renders in
+// the surrounding (theme) text colour.
 function BoldRuns({ text }) {
-  return splitBold(text).map((b, j) => b.bold ? <strong key={j}>{b.t}</strong> : <span key={j}>{b.t}</span>);
+  return splitRich(text).map((r, j) => {
+    let el = r.t;
+    if (r.bold) el = <strong>{el}</strong>;
+    if (r.italic) el = <em>{el}</em>;
+    if (r.size) el = <span style={{ fontSize: RICH_SIZE_EM[r.size] }}>{el}</span>;
+    return <span key={j}>{el}</span>;
+  });
 }
 
 function RenderedNotes({ text, highlights }) {

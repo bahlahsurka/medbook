@@ -1,26 +1,49 @@
-// Splits text containing **bold** markers (written by lib/bulletList.js's
-// rich-paste handler, never by hand-typed notes unless the user types the
-// markers themselves — which renders the same way, same as any markdown
-// tool) into runs of {t, bold}. Callers render each run as plain text or
-// <strong>, independently of whatever else (e.g. a highlight colour) is
-// also being applied to that same stretch of text — see RenderedNotes in
-// DetailView.js/ReviewQueue.js, which call this per buildHighlightParts
-// slice so bold and highlight colour compose correctly together.
-const BOLD_RE = /\*\*([^*]+)\*\*/g;
-export function splitBold(text) {
+// Splits text containing bold/italic/size markers (written by
+// lib/bulletList.js's rich-paste handler, never by hand-typed notes unless
+// the user types the markers themselves — which renders the same way, same
+// as any markdown tool) into runs of {t, bold, italic, size}. size is null
+// or one of 'sm'/'lg'/'xl'. Callers render each run as plain text or
+// <strong>/<em>/a resized <span>, independently of whatever else (e.g. a
+// highlight colour) is also being applied to that same stretch of text —
+// see RenderedNotes in DetailView.js/ReviewQueue.js/SystemReview.js, which
+// call this per buildHighlightParts slice so formatting and highlight
+// colour compose correctly together.
+//
+// Each marker toggles (bold, italic) or sets/clears (size) its own
+// independent flag as it's scanned, rather than building a nested tree —
+// so a run's active formatting is always the union of whatever markers
+// are currently open, regardless of the order they were nested in by the
+// source HTML. That's sufficient for rendering (multiple attributes just
+// become multiple style props on the same run) and avoids needing to
+// resolve crossing/overlapping tags, which bulletList.js's encoder never
+// produces anyway (its markers always nest cleanly, mirroring the DOM).
+const RICH_TOKEN_RE = /\*\*|\{\{(\/?)(i|sm|lg|xl)\}\}/g;
+export function splitRich(text) {
   if (!text) return [];
   const out = [];
+  let bold = false, italic = false, size = null;
   let last = 0;
   let m;
-  BOLD_RE.lastIndex = 0;
-  while ((m = BOLD_RE.exec(text))) {
-    if (m.index > last) out.push({ t: text.slice(last, m.index), bold: false });
-    out.push({ t: m[1], bold: true });
-    last = BOLD_RE.lastIndex;
+  RICH_TOKEN_RE.lastIndex = 0;
+  while ((m = RICH_TOKEN_RE.exec(text))) {
+    if (m.index > last) out.push({ t: text.slice(last, m.index), bold, italic, size });
+    if (m[0] === '**') {
+      bold = !bold;
+    } else {
+      const closing = m[1] === '/';
+      const kind = m[2];
+      if (kind === 'i') italic = !closing;
+      else size = closing ? null : kind;
+    }
+    last = RICH_TOKEN_RE.lastIndex;
   }
-  if (last < text.length) out.push({ t: text.slice(last), bold: false });
+  if (last < text.length) out.push({ t: text.slice(last), bold, italic, size });
   return out;
 }
+
+// em-relative (not px) so a resized run still scales with the surrounding
+// context instead of a fixed pixel size — see detectSize in bulletList.js.
+export const RICH_SIZE_EM = { sm: '0.85em', lg: '1.15em', xl: '1.4em' };
 
 export const HL_COLORS = [
   { bg:'#fef08a', text:'#713f12', label:'Yellow' },

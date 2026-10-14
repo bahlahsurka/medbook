@@ -6,22 +6,25 @@
 // the source's plain text already contains literal "•"/"-"/"*" characters,
 // they show up exactly as copied with zero code. But most rich sources
 // (ChatGPT, Claude, Gemini, Word, Google Docs, Notion, a webpage) carry
-// their REAL formatting only as HTML — bold as <strong>/<b>, lists as real
-// <li> markup, paragraphs as separate <p> tags — and put none of that in
-// the plain-text clipboard flavour at all. Pasting from those with a plain
-// <textarea> either loses the bold entirely or (depending on the source)
+// their REAL formatting only as HTML — bold/italic as <strong>/<em> (or
+// <b>/<i>), relative size as a heading tag or an inline font-size, lists as
+// real <li> markup, paragraphs as separate <p> tags — and put none of that
+// in the plain-text clipboard flavour at all. Pasting from those with a
+// plain <textarea> either loses all of it or (depending on the source)
 // also collapses every paragraph break into one monotone run of text.
 //
 // handleRichPaste below reads the clipboard's HTML flavour instead and
 // reconstructs a lightweight markdown-ish plain-text equivalent: **bold**
-// markers around anything that was <strong>/<b>, "• " markers for real
-// <li> structure (as before), and a blank line between paragraph-level
-// blocks so pasted prose still reads in paragraphs. That's still plain
-// text in the `notes` column — nothing about storage, highlight-offset
-// math, or search changes — only RenderedNotes (DetailView.js/
-// ReviewQueue.js) parses ** back out into actual bold when DISPLAYING a
-// saved entry. While editing, the textarea shows the raw **markers**
-// as-is, the same way any plain-text markdown editor does.
+// around anything that was <strong>/<b>, {{i}}…{{/i}} for <em>/<i>,
+// {{sm}}/{{lg}}/{{xl}}…{{/…}} for a relative font size, "• " markers for
+// real <li> structure (as before), and a blank line between paragraph-level
+// blocks so pasted prose still reads in paragraphs. Colour is deliberately
+// not captured (see inlineTextWithMarks below). That's still plain text in
+// the `notes` column — nothing about storage, highlight-offset math, or
+// search changes — only RenderedNotes (DetailView.js/ReviewQueue.js/
+// SystemReview.js) parses the markers back out into real formatting when
+// DISPLAYING a saved entry. While editing, the textarea shows the raw
+// markers as-is, the same way any plain-text markdown editor does.
 //
 // The rest of this file is the bullet AUTHORING side: continuing a bullet
 // on Enter, indenting a sub-bullet with Tab, and a one-click way to turn
@@ -125,40 +128,98 @@ export function toggleBulletLines(ta) {
   insert(ta, next);
 }
 
-// Inline text extraction that keeps <strong>/<b> runs as **bold** markers
-// instead of flattening them away — the one piece of "real" formatting
-// this app's plain-text notes field preserves. Nothing else (italic,
-// links, colour, headings-as-styling) is encoded; not asked for, and each
-// one would be another ambiguous marker to get right. <ul>/<ol> are
-// skipped here — callers that need nested-list handling (liOwnText) strip
-// them beforehand and walk them separately via collectLines.
+// Inline text extraction that keeps formatting as plain-text markers
+// instead of flattening it away: <strong>/<b> as **bold**, <em>/<i> as
+// {{i}}…{{/i}}, and a relative font size (from a heading tag or an inline
+// font-size style/attribute) as {{sm}}/{{lg}}/{{xl}}…{{/…}}. Colour is
+// deliberately NOT captured — a colour authored for the source's light
+// background can be unreadable against this app's dark mode (or vice
+// versa), so notes always render in the current theme's text colour,
+// same as everywhere else. Brackets (not markdown's `_italic_`) are used
+// for italic/size so a plain underscore typed in a note (gene names,
+// snake_case) is never mistaken for a marker. <ul>/<ol> are skipped here —
+// callers that need nested-list handling (liOwnText) strip them beforehand
+// and walk them separately via collectLines.
 const BOLD_TAGS = /^(strong|b)$/i;
-function inlineTextWithBold(node) {
+const ITALIC_TAGS = /^(em|i)$/i;
+
+// A size is only recorded as "small/large/extra-large" relative to normal
+// body text — never the source's literal pixel value, which could be
+// sized for a full-width webpage and look oversized or tiny in the notes
+// panel. Headings fall back to their well-known default relative sizes
+// (DOMParser's detached document never computes CSS, so h1..h6 carry no
+// resolvable style of their own); <small>/<big> are checked the same way.
+function fontSizeToPx(value) {
+  if (!value) return null;
+  const m = /^([\d.]+)(px|pt|em|rem|%)?$/.exec(String(value).trim());
+  if (!m) return null;
+  const num = parseFloat(m[1]);
+  if (Number.isNaN(num)) return null;
+  switch (m[2]) {
+    case 'pt': return num * (96 / 72);
+    case 'em': case 'rem': return num * 16;
+    case '%': return num * 16 / 100;
+    default: return num; // px, or a bare unitless number
+  }
+}
+const HEADING_SIZE = { h1: 'xl', h2: 'xl', h3: 'lg', h5: 'sm', h6: 'sm', small: 'sm', big: 'lg' };
+function detectSize(el) {
+  const tag = el.tagName.toLowerCase();
+  if (HEADING_SIZE[tag]) return HEADING_SIZE[tag];
+  const px = fontSizeToPx(el.style && el.style.fontSize);
+  if (px == null) return null;
+  const ratio = px / 16;
+  if (ratio >= 1.5) return 'xl';
+  if (ratio >= 1.15) return 'lg';
+  if (ratio <= 0.85) return 'sm';
+  return null;
+}
+
+// Wraps `inner` (el's already-computed inner text) in whatever markers
+// el's OWN tag/style call for — bold/italic from its tag, size from either
+// its tag (a heading) or its inline style. Used both for an inline child
+// (inlineTextWithMarks) and for a block-level element's own text
+// (collectLines' BLOCK_TAGS branch) — a block tag's own formatting
+// (e.g. a plain <h2>, with no nested <strong> inside it) would otherwise
+// never be captured, since nothing else ever looks at that element itself.
+function wrapMarks(el, inner) {
+  const tag = el.tagName.toLowerCase();
+  if (BOLD_TAGS.test(tag)) {
+    const t = inner.replace(/\s+/g, ' ').trim();
+    if (t) inner = `**${t}**`;
+  } else if (ITALIC_TAGS.test(tag)) {
+    const t = inner.replace(/\s+/g, ' ').trim();
+    if (t) inner = `{{i}}${t}{{/i}}`;
+  }
+  const size = detectSize(el);
+  if (size) {
+    const t = inner.replace(/\s+/g, ' ').trim();
+    if (t) inner = `{{${size}}}${t}{{/${size}}}`;
+  }
+  return inner;
+}
+
+function inlineTextWithMarks(node) {
   let out = '';
   for (const child of Array.from(node.childNodes)) {
     if (child.nodeType === Node.TEXT_NODE) { out += child.textContent; continue; }
     if (child.nodeType !== Node.ELEMENT_NODE) continue;
     const tag = child.tagName.toLowerCase();
     if (tag === 'ul' || tag === 'ol') continue;
-    if (BOLD_TAGS.test(tag)) {
-      const inner = inlineTextWithBold(child).replace(/\s+/g, ' ').trim();
-      if (inner) out += `**${inner}**`;
-    } else {
-      out += inlineTextWithBold(child);
-    }
+    out += wrapMarks(child, inlineTextWithMarks(child));
   }
   return out;
 }
 
 // A <li>'s "own" text — everything inside it EXCEPT a nested <ul>/<ol>
 // (those get walked separately as their own indented lines below), with
-// bold preserved (inlineTextWithBold) and everything else (spans, a
+// formatting preserved (inlineTextWithMarks) and everything else (spans, a
 // Google-Docs-style wrapper <p> — Docs nests a <p> inside every <li>)
 // flattened to plain text.
 function liOwnText(li) {
   const clone = li.cloneNode(true);
   clone.querySelectorAll('ul, ol').forEach(n => n.remove());
-  return inlineTextWithBold(clone).replace(/\s+/g, ' ').trim();
+  return wrapMarks(clone, inlineTextWithMarks(clone)).replace(/\s+/g, ' ').trim();
 }
 
 const BLOCK_TAGS = /^(p|div|h[1-6]|blockquote|section|article|li)$/;
@@ -200,7 +261,7 @@ function collectLines(node, depth, lines) {
       if (child.querySelector('li')) {
         collectLines(child, depth, lines); // a wrapper div/p around a list
       } else {
-        const t = inlineTextWithBold(child).replace(/\s+/g, ' ').trim();
+        const t = wrapMarks(child, inlineTextWithMarks(child)).replace(/\s+/g, ' ').trim();
         if (t) { pushParagraphBreak(lines); lines.push(t); }
       }
     } else {
@@ -213,10 +274,10 @@ function collectLines(node, depth, lines) {
  * Paste handler — wire to a textarea's onPaste. Intervenes whenever the
  * clipboard carries an HTML flavour at all (which plain-text-only sources —
  * a terminal, a bare .txt file, MedBook's own textarea — never do, so this
- * never touches an ordinary plain-text paste). Reconstructs **bold**,
- * paragraph spacing, and "• " bullets from the real HTML structure instead
- * of trusting the source's plain-text clipboard flavour, which routinely
- * drops all three.
+ * never touches an ordinary plain-text paste). Reconstructs bold/italic/
+ * relative size, paragraph spacing, and "• " bullets from the real HTML
+ * structure instead of trusting the source's plain-text clipboard flavour,
+ * which routinely drops all of it.
  */
 export function handleRichPaste(e) {
   const html = e.clipboardData && e.clipboardData.getData('text/html');

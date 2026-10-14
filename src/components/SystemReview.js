@@ -1,16 +1,23 @@
 import { useState, useMemo, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { DIFF_COLOR } from '../lib/constants';
-import { buildHighlightParts, resolveHL, splitBold } from '../lib/highlights';
+import { buildHighlightParts, resolveHL, splitRich, RICH_SIZE_EM } from '../lib/highlights';
 import { useTheme } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue, buildCycledQueueWithScheduled } from '../lib/reviewQueue';
 
-// Splits out any **bold** markers a rich paste (lib/bulletList.js) left in
-// the plain-text notes — independent of highlight colour, which the caller
-// applies around this.
+// Splits out any bold/italic/size markers a rich paste (lib/bulletList.js)
+// left in the plain-text notes — independent of highlight colour, which the
+// caller applies around this. Colour itself is never part of this — a run
+// always renders in the surrounding (theme) text colour.
 function BoldRuns({ text }) {
-  return splitBold(text).map((b, j) => b.bold ? <strong key={j}>{b.t}</strong> : <span key={j}>{b.t}</span>);
+  return splitRich(text).map((r, j) => {
+    let el = r.t;
+    if (r.bold) el = <strong>{el}</strong>;
+    if (r.italic) el = <em>{el}</em>;
+    if (r.size) el = <span style={{ fontSize: RICH_SIZE_EM[r.size] }}>{el}</span>;
+    return <span key={j}>{el}</span>;
+  });
 }
 
 // Renders notes with the same highlight colours the entry has in its system view
