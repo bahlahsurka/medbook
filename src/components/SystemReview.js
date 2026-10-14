@@ -1,21 +1,26 @@
 import { useState, useMemo, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { DIFF_COLOR } from '../lib/constants';
-import { buildHighlightParts, resolveHL, splitRich, RICH_SIZE_EM } from '../lib/highlights';
+import { buildHighlightParts, resolveHL, splitRich, RICH_SIZE_STYLE } from '../lib/highlights';
 import { useTheme } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue, buildCycledQueueWithScheduled } from '../lib/reviewQueue';
 
 // Splits out any bold/italic/size markers a rich paste (lib/bulletList.js)
 // left in the plain-text notes — independent of highlight colour, which the
-// caller applies around this. Colour itself is never part of this — a run
-// always renders in the surrounding (theme) text colour.
+// caller applies around this. Bold and a lg/xl size bump up to the theme's
+// full-contrast text colour, since notes otherwise render in a dimmer one —
+// bold/bigger text in that same dim colour barely reads as different at all.
 function BoldRuns({ text }) {
+  const { t } = useTheme();
   return splitRich(text).map((r, j) => {
     let el = r.t;
-    if (r.bold) el = <strong>{el}</strong>;
+    if (r.bold) el = <strong style={{ color: t.text }}>{el}</strong>;
     if (r.italic) el = <em>{el}</em>;
-    if (r.size) el = <span style={{ fontSize: RICH_SIZE_EM[r.size] }}>{el}</span>;
+    if (r.size) {
+      const strong = r.size === 'lg' || r.size === 'xl';
+      el = <span style={{ ...RICH_SIZE_STYLE[r.size], color: strong ? t.text : undefined }}>{el}</span>;
+    }
     return <span key={j}>{el}</span>;
   });
 }
