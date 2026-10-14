@@ -1,15 +1,19 @@
 // services/ai/PromptBuilder.js
 //
-// Builds the prompt sent to Gemini. Kept separate from transport (GeminiService)
-// and validation (ResponseParser) so prompts can be tuned or versioned without
-// touching anything else.
+// Builds the prompt sent to whichever provider is answering (Groq primary,
+// Gemini fallback — see api/analyze.mjs). Kept separate from transport
+// (GroqService/GeminiService) and validation (ResponseParser) so prompts
+// can be tuned or versioned without touching anything else. This file now
+// runs server-side (imported by api/analyze.mjs) as well as being bundled
+// into the client for the read-only bits (LIMITS, FREE_TIER_LIMITS) the UI
+// still needs — it has no env/browser dependency either way.
 
 export const PROMPT_VERSION = 'v1';
 
-// Google's documented free-tier ceilings, for the session-usage estimate shown
-// in the UI. These are NOT read from Google at runtime — the free-tier API
-// does not reliably return quota headers to a browser — so this is a rough
-// guide against published limits, not an authoritative live number.
+// Published free-tier ceilings, for the usage estimate shown in the UI.
+// These are NOT read from either provider at runtime — neither free tier
+// reliably exposes a remaining-quota figure — so this is a rough guide
+// against published limits, not an authoritative live number.
 export const FREE_TIER_LIMITS = {
   'gemini-2.5-pro':        { rpm: 5,  rpd: 100  },
   'gemini-2.5-flash':      { rpm: 10, rpd: 250  },
@@ -20,6 +24,13 @@ export const FREE_TIER_LIMITS = {
   // than the older Flash models above; this is exactly why the default
   // model was pinned instead of left on the auto-updating alias.
   'gemini-3.6-flash':      { rpm: 5,  rpd: 20   },
+  // Groq's own published numbers (console.groq.com/docs/rate-limits,
+  // confirmed 2026-10-14) for the Developer-plan base tier, which is what
+  // a fresh no-credit-card signup gets. Groq enforces these per
+  // ORGANIZATION, not per key — exactly why the request count this limit
+  // is compared against now has to be tracked server-side (see
+  // ai_usage_daily in api/analyze.mjs) rather than per browser session.
+  'openai/gpt-oss-20b':    { rpm: 30, rpd: 1000 },
 };
 export function limitsFor(model) {
   return FREE_TIER_LIMITS[model] || { rpm: null, rpd: null };
@@ -86,6 +97,41 @@ export const RESPONSE_SCHEMA = {
     'keyLearningPoints', 'highYield', 'clinicalPearls',
     'redFlags', 'relatedTopics', 'flashcards',
   ],
+};
+
+/**
+ * Groq structured-output schema — same six fields as RESPONSE_SCHEMA above,
+ * just standard JSON Schema instead of Gemini's uppercase OBJECT/ARRAY/STRING
+ * dialect. Shaped specifically for Groq's `strict: true` mode (confirmed
+ * against console.groq.com/docs/structured-outputs, 2026-10-14): every
+ * object — including the nested flashcard items — must list ALL of its own
+ * properties in `required` and set `additionalProperties: false`, or Groq
+ * rejects the request outright rather than just being less reliable about
+ * it. Sent via GroqService as response_format.json_schema.schema.
+ */
+export const GROQ_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    keyLearningPoints: { type: 'array', items: { type: 'string' } },
+    highYield:         { type: 'array', items: { type: 'string' } },
+    clinicalPearls:    { type: 'array', items: { type: 'string' } },
+    redFlags:          { type: 'array', items: { type: 'string' } },
+    relatedTopics:     { type: 'array', items: { type: 'string' } },
+    flashcards: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { front: { type: 'string' }, back: { type: 'string' } },
+        required: ['front', 'back'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: [
+    'keyLearningPoints', 'highYield', 'clinicalPearls',
+    'redFlags', 'relatedTopics', 'flashcards',
+  ],
+  additionalProperties: false,
 };
 
 /**

@@ -155,6 +155,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
             ai_sections: sections,
             ai_generated_at: new Date().toISOString(),
             ai_model: AIService.activeModel(),
+            ai_provider: AIService.activeProvider(),
           };
           const ids = data.map(d => d.id);
           const { error: aiErr } = await supabase.from('entries').update(payload).in('id', ids);
