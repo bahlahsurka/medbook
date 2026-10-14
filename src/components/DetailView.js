@@ -81,6 +81,30 @@ function isTypingTarget(el) {
   return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
 }
 
+// Maps a Range boundary (container, offset) to its position in the RAW
+// stored string, via the nearest ancestor BoldRuns leaf's data-raw-start
+// (see BoldRuns above) plus the in-run character count up to that boundary.
+// Every leaf BoldRuns renders carries this annotation, so any boundary a
+// real text selection can land on is inside one. Returns null only for a
+// boundary outside any annotated run (shouldn't happen for a selection
+// readSelection has already confirmed is inside notesRef, but checked
+// rather than assumed).
+// Exported (alongside RenderedNotes below) purely so a test can exercise
+// this exact mapping against this exact renderer's real DOM output, without
+// a parallel implementation of either — see
+// src/__tests__/highlightOffsetMapping.test.js. Not used by any other
+// module; DetailView's own default export is still the component.
+export function rawOffsetAt(container, offset) {
+  const el = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
+  const runEl = el && el.closest('[data-raw-start]');
+  if (!runEl) return null;
+  const rawStart = parseInt(runEl.getAttribute('data-raw-start'), 10);
+  const pre = document.createRange();
+  pre.selectNodeContents(runEl);
+  pre.setEnd(container, offset);
+  return rawStart + pre.toString().length;
+}
+
 // Renders a highlight-coloured slice's text, further splitting out any
 // bold/italic/size markers a rich paste (lib/bulletList.js) left in the
 // plain-text notes — formatting and highlight colour are independent and
@@ -89,7 +113,18 @@ function isTypingTarget(el) {
 // base font, bold/bigger text in the SAME dim grey barely reads as
 // different at all; sm (fine print) stays the surrounding colour, since
 // it's meant to read smaller, not louder.
-function BoldRuns({ text }) {
+//
+// `rawStart` is this text's own offset into the full RAW stored string
+// (entry.notes, markers included) — the enclosing buildHighlightParts
+// slice's `start`. Each run is tagged with its absolute raw offset via
+// data-raw-start, which readSelection() below reads back to translate a
+// selection made in this RENDERED (marker-stripped) view into the same
+// raw-string coordinates everything else (storage, buildHighlightParts,
+// edit-mode's textarea-based capture) already uses. Without this, a
+// highlight created by selecting text here lands at the wrong offset the
+// moment it's replayed against the raw string — every marker before the
+// selection (a **bold** pair, a {{lg}}…{{/lg}}) shifts it further out.
+function BoldRuns({ text, rawStart = 0 }) {
   const { t } = useTheme();
   return splitRich(text).map((r, j) => {
     let el = r.t;
@@ -99,19 +134,19 @@ function BoldRuns({ text }) {
       const strong = r.size === 'lg' || r.size === 'xl';
       el = <span style={{ ...RICH_SIZE_STYLE[r.size], color: strong ? t.text : undefined }}>{el}</span>;
     }
-    return <span key={j}>{el}</span>;
+    return <span key={j} data-raw-start={rawStart + r.start}>{el}</span>;
   });
 }
 
-function RenderedNotes({ text, highlights }) {
+export function RenderedNotes({ text, highlights }) {
   const { isDark } = useTheme();
   const parts = buildHighlightParts(text, highlights);
   return (
     <span style={{whiteSpace:'pre-wrap'}}>
       {parts.map((p,i) => {
-        if (!p.hl) return <span key={i}><BoldRuns text={p.t} /></span>;
+        if (!p.hl) return <span key={i}><BoldRuns text={p.t} rawStart={p.start} /></span>;
         const c = resolveHL(p.hl, isDark);
-        return <mark key={i} style={{background:c.bg,color:c.text,borderRadius:2,padding:'0 2px'}}><BoldRuns text={p.t} /></mark>;
+        return <mark key={i} style={{background:c.bg,color:c.text,borderRadius:2,padding:'0 2px'}}><BoldRuns text={p.t} rawStart={p.start} /></mark>;
       })}
     </span>
   );
@@ -129,7 +164,7 @@ const EditHighlightOverlay = React.forwardRef(function EditHighlightOverlay({ te
     <div ref={ref} aria-hidden="true" style={{
       position:'absolute', inset:0, pointerEvents:'none',
       whiteSpace:'pre-wrap', wordBreak:'normal', overflowWrap:'break-word',
-      fontSize:14, lineHeight:'1.7', padding:'10px 12px',
+      fontSize:FONT.size.lg, lineHeight:'1.7', padding:'10px 12px',
       fontFamily:'Inter,sans-serif', fontWeight:400, letterSpacing:'normal',
       boxSizing:'border-box',
       // Android's text-autosizing ("font boosting") can inflate a <textarea>'s
@@ -380,17 +415,25 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const pointerDown = useRef(false);
 
   // Read the current selection, but only if it lies inside the notes element.
+  // start/end are positions in the RAW stored string (entry.notes, markers
+  // included) — rawOffsetAt maps each Range boundary there via the
+  // data-raw-start BoldRuns annotated, rather than counting characters in
+  // the rendered (marker-stripped) DOM text directly. The rendered text is
+  // shorter than the raw string by however many marker characters precede
+  // a given point — e.g. a **bold** pair, a {{lg}}…{{/lg}} heading — so
+  // counting in rendered coordinates and using that as a raw-string offset
+  // (the previous approach) silently drifted the highlight forward into
+  // the wrong word by exactly that many characters once replayed against
+  // entry.notes, which is the one and only string buildHighlightParts (and
+  // every other render of this entry) ever slices against.
   const readSelection = useCallback(() => {
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !notesRef.current) return null;
     const range = sel.getRangeAt(0);
     if (!notesRef.current.contains(range.commonAncestorContainer)) return null;
-    const pre = document.createRange();
-    pre.selectNodeContents(notesRef.current);
-    pre.setEnd(range.startContainer, range.startOffset);
-    const start = pre.toString().length;
-    const end   = start + range.toString().length;
-    if (start >= end) return null;
+    const start = rawOffsetAt(range.startContainer, range.startOffset);
+    const end   = rawOffsetAt(range.endContainer, range.endOffset);
+    if (start == null || end == null || start >= end) return null;
     const text = range.toString();
     // "Meaningful text" — reject a selection that's whitespace-only (a stray
     // drag across a line break/paragraph gap, common on mobile) so the
@@ -876,6 +919,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                 rows={8} style={{...inp,resize:'vertical',lineHeight:'1.7',
                   marginTop:0,
                   position:'relative',zIndex:1,
+                  fontSize:FONT.size.lg,
                   fontWeight:400, letterSpacing:'normal',
                   WebkitTextSizeAdjust:'100%', textSizeAdjust:'100%',
                   background: editHl.highlights.length>0 ? 'transparent' : t.surface,
@@ -1112,7 +1156,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
               className={STUDY_SCOPE_CLASS}
               data-selectable="true"
               onContextMenu={suppressContextMenu}
-              style={{lineHeight:1.9,fontSize:FONT.size.md,color:t.text2,maxWidth:640}}>
+              style={{lineHeight:1.9,fontSize:FONT.size.lg,color:t.text2,maxWidth:640}}>
               <RenderedNotes text={entry.notes} highlights={viewHL} />
             </div>
           </>
