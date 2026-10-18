@@ -1,32 +1,14 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR } from '../lib/constants';
-import { buildHighlightParts, resolveHL, splitRich, RICH_SIZE_STYLE } from '../lib/highlights';
+import { buildHighlightParts, resolveHL } from '../lib/highlights';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue } from '../lib/reviewQueue';
 import { computeSystemStats } from '../lib/systemStats';
 import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
   IconX, IconZap } from '../lib/icons';
-
-// Splits out any bold/italic/size markers a rich paste (lib/bulletList.js)
-// left in the plain-text notes — independent of highlight colour, which the
-// caller applies around this. Bold and a lg/xl size bump up to the theme's
-// full-contrast text colour, since notes otherwise render in a dimmer one —
-// bold/bigger text in that same dim colour barely reads as different at all.
-function BoldRuns({ text }) {
-  const { t } = useTheme();
-  return splitRich(text).map((r, j) => {
-    let el = r.t;
-    if (r.bold) el = <strong style={{ color: t.text }}>{el}</strong>;
-    if (r.italic) el = <em>{el}</em>;
-    if (r.size) {
-      const strong = r.size === 'lg' || r.size === 'xl';
-      el = <span style={{ ...RICH_SIZE_STYLE[r.size], color: strong ? t.text : undefined }}>{el}</span>;
-    }
-    return <span key={j}>{el}</span>;
-  });
-}
+import RichRuns from '../lib/RichRuns';
 
 // Renders notes with the same highlight colours the entry has in its system view
 function RenderedNotes({ text, highlights, isDark }) {
@@ -34,9 +16,9 @@ function RenderedNotes({ text, highlights, isDark }) {
   return (
     <span style={{whiteSpace:'pre-wrap'}}>
       {parts.map((p,i) => {
-        if (!p.hl) return <span key={i}><BoldRuns text={p.t} /></span>;
+        if (!p.hl) return <span key={i}><RichRuns text={p.t} /></span>;
         const c = resolveHL(p.hl, isDark);
-        return <mark key={i} style={{background:c.bg,color:c.text,borderRadius:2,padding:'0 2px'}}><BoldRuns text={p.t} /></mark>;
+        return <mark key={i} style={{background:c.bg,color:c.text,borderRadius:2,padding:'0 2px'}}><RichRuns text={p.t} /></mark>;
       })}
     </span>
   );

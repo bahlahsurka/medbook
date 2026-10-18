@@ -1,6 +1,7 @@
 import React from 'react';
 import { SYS_COLOR } from '../lib/constants';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
+import RichRuns from '../lib/RichRuns';
 
 function EntryCard({ entry, color, onClick, showSystem }) {
   const { t } = useTheme();
@@ -62,7 +63,11 @@ function EntryCard({ entry, color, onClick, showSystem }) {
         {entry.notes && (
           <div style={{ fontSize:FONT.size.sm, color:t.text4, marginTop:5,
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-            {entry.notes}
+            {/* Strips/renders the rich-paste markers (bold, italic, size —
+                see lib/RichRuns.js) left in the raw text, so a pasted note's
+                card preview doesn't show the literal marker characters
+                instead of the formatting they represent. */}
+            <RichRuns text={entry.notes} />
           </div>
         )}
       </div>

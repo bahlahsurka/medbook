@@ -1,20 +1,19 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { DIFFICULTY, DIFF_COLOR } from '../lib/constants';
-import { buildHighlightParts, resolveHL, adjustHighlights } from '../lib/highlights';
+import { adjustHighlights, markedTextToHtml } from '../lib/highlights';
 import { useHighlight } from '../lib/useHighlight';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
 import { IconEdit, IconImages, IconUpload, IconX, IconCheck, IconSparkle, IconListBullet } from '../lib/icons';
 import HLToolbar from './HLToolbar';
 import AIService from '../services/ai';
-import { handleBulletKeyDown, toggleBulletLines, handleRichPaste } from '../lib/bulletList';
+import { handleBulletKeyDown, toggleBulletLines, handleRichPaste, inlineTextWithMarks } from '../lib/bulletList';
 
 const DRAFT_KEY = 'medbook_draft_v2';
 const loadDraft = sys => { try { return JSON.parse(localStorage.getItem(DRAFT_KEY)||'{}')[sys]||null; } catch { return null; } };
 const saveDraft = (sys,d) => { try { const o=JSON.parse(localStorage.getItem(DRAFT_KEY)||'{}'); o[sys]=d; localStorage.setItem(DRAFT_KEY,JSON.stringify(o)); } catch {} };
 const clearDraft = sys => { try { const o=JSON.parse(localStorage.getItem(DRAFT_KEY)||'{}'); delete o[sys]; localStorage.setItem(DRAFT_KEY,JSON.stringify(o)); } catch {} };
 
-// Overlay that renders highlight colours *behind* the textarea's own (always-opaque) text.
 // Stable field-label wrapper. MUST live at module scope — if it were defined
 // inside the component it would be a new function every render, remounting the
 // inputs on each keystroke and stealing focus.
@@ -27,36 +26,6 @@ function F({ label, children }) {
     </div>
   );
 }
-
-const HighlightOverlay = React.forwardRef(function HighlightOverlay({ text, highlights, isDark }, ref) {
-  const parts = buildHighlightParts(text + '\n', highlights);
-  return (
-    <div ref={ref} aria-hidden="true" style={{
-      position:'absolute', inset:0, pointerEvents:'none',
-      whiteSpace:'pre-wrap', wordBreak:'normal', overflowWrap:'break-word',
-      fontSize:FONT.size.lg, lineHeight:'1.7', padding:'10px 12px',
-      fontFamily:'Inter,sans-serif', fontWeight:400, letterSpacing:'normal',
-      boxSizing:'border-box',
-      // Android's text-autosizing ("font boosting") can inflate a <textarea>'s
-      // effective font size differently than a plain <div>, especially in a
-      // long block of text — the two elements drift apart line by line, only
-      // becoming visibly misaligned several paragraphs in. Disabling it on
-      // both this overlay AND the textarea below is what keeps them in sync
-      // on tablets. This must match the textarea's style exactly.
-      WebkitTextSizeAdjust:'100%', textSizeAdjust:'100%',
-      border:'1px solid transparent',
-      color:'transparent', overflow:'hidden'
-    }}>
-      {parts.map((p,i) => {
-        if (!p.hl) return <span key={i}>{p.t}</span>;
-        const c = resolveHL(p.hl, isDark);
-        // color stays transparent — the real (always-opaque) textarea text shows through.
-        return <mark key={i} style={{background:c.bg,color:'transparent',borderRadius:2,padding:'0 1px',
-          margin:0, fontWeight:'inherit', lineHeight:'inherit'}}>{p.t}</mark>;
-      })}
-    </div>
-  );
-});
 
 export default function AddEntry({ activeSystem, color, userId, onSaved, onCancel, userSystems }) {
   const { t, isDark } = useTheme();
@@ -73,10 +42,20 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
   const [dragOver,  setDrag]    = useState(false);
   const [hlMode,    setHlMode]  = useState(false);
 
-  const fileRef = useRef(); const galRef = useRef(); const taRef = useRef(); const overlayRef = useRef();
+  const fileRef = useRef(); const galRef = useRef(); const taRef = useRef();
   // Synchronous duplicate-submit guard (setSaving is async; two fast clicks can race).
   const saveInFlight = useRef(false);
-  const hl = useHighlight(taRef, draft?.highlights || []);
+  const hl = useHighlight(taRef, draft?.highlights || [], { textColor: t.text, isDark });
+
+  // The contentEditable's initial content, computed ONCE from the restored
+  // draft (markedTextToHtml — the same conversion RenderedNotes/RichRuns.js
+  // use everywhere else, so a draft with existing bold/highlights etc. looks
+  // identical here to how it'll look once saved). Never recomputed after
+  // mount: this editor is uncontrolled after that point (see onInput below)
+  // — React re-rendering it from live `notes` state on every keystroke would
+  // reset the caret position on every single character typed.
+  const [initialNotesHtml] = useState(() =>
+    markedTextToHtml(draft?.notes || '', draft?.highlights || [], t.text, isDark));
 
   const inp = {
     display:'block', width:'100%', marginTop:8, background:t.surface,
@@ -84,13 +63,6 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
     padding:'10px 12px', fontSize:FONT.size.md, outline:'none', boxSizing:'border-box',
     fontFamily:'Inter,sans-serif'
   };
-
-  const syncOverlayScroll = useCallback(() => {
-    if (overlayRef.current && taRef.current) {
-      overlayRef.current.scrollTop = taRef.current.scrollTop;
-      overlayRef.current.scrollLeft = taRef.current.scrollLeft;
-    }
-  }, []);
 
   useEffect(() => {
     saveDraft(activeSystem, { title, notes, difficulty, systems, highlights: hl.highlights });
@@ -191,6 +163,10 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
     .mb-ae-fade { animation: medbook-fade-in ${MOTION.normal} ${MOTION.ease}; }
     .mb-ae-thumb-x { transition: transform ${MOTION.fast} ${MOTION.ease}; }
     .mb-ae-thumb-x:hover { transform: scale(1.12); }
+    /* contentEditable has no native placeholder attribute — :empty only
+       matches when it truly has zero child nodes, which is exactly what
+       dangerouslySetInnerHTML leaves it with for an empty note. */
+    .mb-ae-notes:empty:before { content: attr(data-placeholder); color: ${t.text4}; pointer-events: none; }
   `;
 
   return (
@@ -314,30 +290,41 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
             )}
 
             <div style={{position:'relative', marginTop:8}}>
-              {hl.highlights.length > 0 && (
-                <HighlightOverlay ref={overlayRef} text={notes} highlights={hl.highlights} isDark={isDark} />
-              )}
-              <textarea
+              {/* A real contentEditable, not a <textarea> — bold/italic/size
+                  show formatted here, live, the moment you paste or type
+                  them, via the exact same rendering (markedTextToHtml)
+                  RenderedNotes/RichRuns.js use for the read-only view. Its
+                  initial content (initialNotesHtml) is set ONCE at mount;
+                  afterward this is deliberately uncontrolled — typing,
+                  pasting and the bullet/highlight helpers all mutate the
+                  live DOM directly (native typing, or execCommand), and
+                  onInput reads it back into `notes` state one-directionally.
+                  Re-rendering this div's content from React state on every
+                  keystroke would reset the caret position on every single
+                  character typed. */}
+              <div
                 ref={taRef}
-                value={notes}
-                onChange={e => { hl.handleTextChange(notes, e.target.value); setNotes(e.target.value); }}
-                onSelect={hl.onSelChange}
+                className="mb-ae-notes"
+                contentEditable={!saving}
+                suppressContentEditableWarning
+                dangerouslySetInnerHTML={{ __html: initialNotesHtml }}
+                onInput={() => {
+                  const next = inlineTextWithMarks(taRef.current);
+                  hl.handleTextChange(notes, next);
+                  setNotes(next);
+                }}
                 onMouseUp={hl.onSelChange}
                 onKeyUp={hl.onSelChange}
                 onTouchEnd={hl.onSelChange}
                 onKeyDown={e => { handleBulletKeyDown(e); if (!e.defaultPrevented) hl.handleShortcut(e); }}
-                onPaste={handleRichPaste}
-                onScroll={syncOverlayScroll}
-                placeholder="Key concepts, mnemonics, clinical pearls…"
-                rows={8}
-                disabled={saving}
+                onPaste={e => handleRichPaste(e, t.text)}
+                data-placeholder="Key concepts, mnemonics, clinical pearls…"
                 style={{
-                  ...inp, resize:'vertical', lineHeight:'1.7', marginTop:0,
-                  position:'relative', zIndex:1,
-                  fontSize:FONT.size.lg,
+                  ...inp, minHeight:168, lineHeight:'1.7', marginTop:0,
+                  fontSize:FONT.size.lg, whiteSpace:'pre-wrap', overflowWrap:'break-word',
                   fontWeight:400, letterSpacing:'normal',
                   WebkitTextSizeAdjust:'100%', textSizeAdjust:'100%',
-                  background: hl.highlights.length > 0 ? 'transparent' : t.surface,
+                  background: t.surface,
                   caretColor: t.text,
                   color: t.text,
                 }}

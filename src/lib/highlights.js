@@ -131,6 +131,55 @@ export function buildHighlightParts(text, highlights) {
   return parts;
 }
 
+// Escapes text before injecting into an HTML string. Without this, a note
+// containing "<", ">" or "&" (e.g. "CD4 < 200", "T&C") corrupts the markup.
+function escHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function sizeStyleAttr(size) {
+  const s = RICH_SIZE_STYLE[size];
+  return s.fontWeight ? `font-size:${s.fontSize};font-weight:${s.fontWeight}` : `font-size:${s.fontSize}`;
+}
+
+// Converts marker-string text (no highlight slicing) into an HTML string
+// with real <strong>/<em>/sized <span> tags — escaping first (so a note's
+// own literal < > & are always safe) means the markers this converts
+// afterward can only ever be ones this app itself wrote, never something
+// pasted into the note's own text. `textColor`, if given, is set explicitly
+// on bold/lg/xl runs (matching RichRuns.js's full-contrast bump for an
+// active theme) — sm (fine print) never gets one, same as RichRuns, since
+// it's meant to read smaller, not louder. Shared by the rich editor's
+// initial/paste HTML (lib/richEditor.js) and DetailView.js's PDF export
+// (escWithBold) — one definition of "what HTML does a marker become," not
+// two that could render differently from each other.
+export function richMarkersToHtml(text, textColor) {
+  let s = escHtml(text);
+  const colorAttr = textColor ? `;color:${textColor}` : '';
+  s = s.replace(/\{\{xl\}\}([\s\S]*?)\{\{\/xl\}\}/g, `<span style="${sizeStyleAttr('xl')}${colorAttr}">$1</span>`);
+  s = s.replace(/\{\{lg\}\}([\s\S]*?)\{\{\/lg\}\}/g, `<span style="${sizeStyleAttr('lg')}${colorAttr}">$1</span>`);
+  s = s.replace(/\{\{sm\}\}([\s\S]*?)\{\{\/sm\}\}/g, `<span style="${sizeStyleAttr('sm')}">$1</span>`);
+  s = s.replace(/\{\{i\}\}([\s\S]*?)\{\{\/i\}\}/g, '<em>$1</em>');
+  s = s.replace(/\*\*([^*]+)\*\*/g, textColor ? `<strong style="color:${textColor}">$1</strong>` : '<strong>$1</strong>');
+  return s;
+}
+
+// Full HTML for a marker-string PLUS highlight colour bands — the rich
+// editor's initial render and its paste-insertion both use this, so a note
+// (and any highlights already on it) shows up in edit mode looking exactly
+// like RenderedNotes already renders it everywhere else. `isDark` resolves
+// each highlight's colour the same way RenderedNotes does (resolveHL).
+export function markedTextToHtml(text, highlights, textColor, isDark) {
+  const parts = buildHighlightParts(text, highlights);
+  return parts.map(p => {
+    const inner = richMarkersToHtml(p.t, textColor);
+    if (!p.hl) return inner;
+    const c = resolveHL(p.hl, isDark);
+    return `<mark style="background:${c.bg};color:${c.text};border-radius:2px;padding:0 2px">${inner}</mark>`;
+  }).join('');
+}
+
 /**
  * Diff-based highlight adjustment.
  * Finds the single edited region (common prefix / common suffix trick — correct
