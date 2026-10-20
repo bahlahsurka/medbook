@@ -1,7 +1,8 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
-import { buildHighlightParts, resolveHL, adjustHighlights, matchHighlightShortcutView, splitRich, RICH_SIZE_STYLE } from '../lib/highlights';
+import { buildHighlightParts, resolveHL, adjustHighlights, matchHighlightShortcutView, richMarkersToHtml, markedTextToHtml } from '../lib/highlights';
+import RichRuns from '../lib/RichRuns';
 import { useHighlight, clearRange } from '../lib/useHighlight';
 import { useTheme, SPACE, RADIUS, FONT, Z, elevation } from '../lib/theme';
 import { IconChevronLeft, IconChevronRight, IconEdit, IconCheck, IconTrash, IconPin,
@@ -11,7 +12,7 @@ import HLPopover from './HLPopover';
 import AISections from './AISections';
 import AIService, { normalizeSections, isAllEmpty } from '../services/ai';
 import { limitsFor } from '../services/ai/PromptBuilder';
-import { handleBulletKeyDown, toggleBulletLines, handleRichPaste } from '../lib/bulletList';
+import { handleBulletKeyDown, toggleBulletLines, handleRichPaste, inlineTextWithMarks } from '../lib/bulletList';
 import { STUDY_SCOPE_CLASS, suppressContextMenu } from '../lib/studyInteraction';
 
 
@@ -25,24 +26,15 @@ function esc(str) {
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
-// Same escaping, then turns the rich-paste markers (bold/italic/size — see
-// lib/bulletList.js) into real HTML tags for the exported PDF, so a note
-// that reads formatted on screen doesn't lose that the moment it's
-// printed. Escaping first (so a user's own literal < > & are always safe)
-// means the markers this converts afterward can only ever be ones this app
-// itself wrote, never something pasted in from the note's own text.
-function sizeStyleAttr(size) {
-  const s = RICH_SIZE_STYLE[size];
-  return s.fontWeight ? `font-size:${s.fontSize};font-weight:${s.fontWeight}` : `font-size:${s.fontSize}`;
-}
+// Turns the rich-paste markers (bold/italic/size — see lib/bulletList.js)
+// into real HTML tags for the exported PDF, so a note that reads formatted
+// on screen doesn't lose that the moment it's printed. richMarkersToHtml
+// does its own escaping first (same as esc() above) — the markers it
+// converts afterward can only ever be ones this app itself wrote, never
+// something pasted in from the note's own text. No explicit textColor
+// (null): print output is plain black text, not theme-coloured.
 function escWithBold(str) {
-  let s = esc(str);
-  s = s.replace(/\{\{xl\}\}([\s\S]*?)\{\{\/xl\}\}/g, `<span style="${sizeStyleAttr('xl')}">$1</span>`);
-  s = s.replace(/\{\{lg\}\}([\s\S]*?)\{\{\/lg\}\}/g, `<span style="${sizeStyleAttr('lg')}">$1</span>`);
-  s = s.replace(/\{\{sm\}\}([\s\S]*?)\{\{\/sm\}\}/g, `<span style="${sizeStyleAttr('sm')}">$1</span>`);
-  s = s.replace(/\{\{i\}\}([\s\S]*?)\{\{\/i\}\}/g, '<em>$1</em>');
-  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  return s;
+  return richMarkersToHtml(str, null);
 }
 
 // Convert a Supabase public URL back to its storage object path ("<uid>/<file>"),
@@ -105,86 +97,27 @@ export function rawOffsetAt(container, offset) {
   return rawStart + pre.toString().length;
 }
 
-// Renders a highlight-coloured slice's text, further splitting out any
-// bold/italic/size markers a rich paste (lib/bulletList.js) left in the
-// plain-text notes — formatting and highlight colour are independent and
-// compose freely. Bold and a lg/xl size bump up to the theme's full-contrast
-// text colour (notes otherwise render in the dimmer t.text2) — on a small
-// base font, bold/bigger text in the SAME dim grey barely reads as
-// different at all; sm (fine print) stays the surrounding colour, since
-// it's meant to read smaller, not louder.
-//
-// `rawStart` is this text's own offset into the full RAW stored string
-// (entry.notes, markers included) — the enclosing buildHighlightParts
-// slice's `start`. Each run is tagged with its absolute raw offset via
-// data-raw-start, which readSelection() below reads back to translate a
+// readSelection() below reads each run's data-raw-start (written by the
+// shared RichRuns component — see lib/RichRuns.js) to translate a
 // selection made in this RENDERED (marker-stripped) view into the same
 // raw-string coordinates everything else (storage, buildHighlightParts,
-// edit-mode's textarea-based capture) already uses. Without this, a
-// highlight created by selecting text here lands at the wrong offset the
-// moment it's replayed against the raw string — every marker before the
-// selection (a **bold** pair, a {{lg}}…{{/lg}}) shifts it further out.
-function BoldRuns({ text, rawStart = 0 }) {
-  const { t } = useTheme();
-  return splitRich(text).map((r, j) => {
-    let el = r.t;
-    if (r.bold) el = <strong style={{ color: t.text }}>{el}</strong>;
-    if (r.italic) el = <em>{el}</em>;
-    if (r.size) {
-      const strong = r.size === 'lg' || r.size === 'xl';
-      el = <span style={{ ...RICH_SIZE_STYLE[r.size], color: strong ? t.text : undefined }}>{el}</span>;
-    }
-    return <span key={j} data-raw-start={rawStart + r.start}>{el}</span>;
-  });
-}
-
+// edit-mode's own capture) already uses. Without it, a highlight created
+// by selecting text here lands at the wrong offset the moment it's
+// replayed against the raw string — every marker before the selection
+// (a **bold** pair, a {{lg}}…{{/lg}}) shifts it further out.
 export function RenderedNotes({ text, highlights }) {
   const { isDark } = useTheme();
   const parts = buildHighlightParts(text, highlights);
   return (
     <span style={{whiteSpace:'pre-wrap'}}>
       {parts.map((p,i) => {
-        if (!p.hl) return <span key={i}><BoldRuns text={p.t} rawStart={p.start} /></span>;
+        if (!p.hl) return <span key={i}><RichRuns text={p.t} rawStart={p.start} /></span>;
         const c = resolveHL(p.hl, isDark);
-        return <mark key={i} style={{background:c.bg,color:c.text,borderRadius:2,padding:'0 2px'}}><BoldRuns text={p.t} rawStart={p.start} /></mark>;
+        return <mark key={i} style={{background:c.bg,color:c.text,borderRadius:2,padding:'0 2px'}}><RichRuns text={p.t} rawStart={p.start} /></mark>;
       })}
     </span>
   );
 }
-
-// Same always-opaque-text overlay used in AddEntry, so edit-mode highlighting
-// shows clean colour bands in both themes instead of washed-out text.
-// UNCHANGED from before this batch — its sizing/padding/line-height must
-// match the paired textarea's style exactly, character for character, or
-// highlight bands drift out of alignment with the text they're supposed to
-// sit behind.
-const EditHighlightOverlay = React.forwardRef(function EditHighlightOverlay({ text, highlights, isDark }, ref) {
-  const parts = buildHighlightParts(text + '\n', highlights);
-  return (
-    <div ref={ref} aria-hidden="true" style={{
-      position:'absolute', inset:0, pointerEvents:'none',
-      whiteSpace:'pre-wrap', wordBreak:'normal', overflowWrap:'break-word',
-      fontSize:FONT.size.lg, lineHeight:'1.7', padding:'10px 12px',
-      fontFamily:'Inter,sans-serif', fontWeight:400, letterSpacing:'normal',
-      boxSizing:'border-box',
-      // Android's text-autosizing ("font boosting") can inflate a <textarea>'s
-      // effective font size differently than a plain <div>, especially in a
-      // long block of text — the two elements drift apart line by line, only
-      // becoming visibly misaligned several paragraphs in. Disabling it here
-      // AND on the paired textarea below is what keeps them in sync on
-      // tablets. This must match the textarea's style exactly.
-      WebkitTextSizeAdjust:'100%', textSizeAdjust:'100%',
-      border:'1px solid transparent', color:'transparent', overflow:'hidden'
-    }}>
-      {parts.map((p,i) => {
-        if (!p.hl) return <span key={i}>{p.t}</span>;
-        const c = resolveHL(p.hl, isDark);
-        return <mark key={i} style={{background:c.bg,color:'transparent',borderRadius:2,padding:'0 1px',
-          margin:0, fontWeight:'inherit', lineHeight:'inherit'}}>{p.t}</mark>;
-      })}
-    </div>
-  );
-});
 
 // Small circular icon-button used throughout the lightbox chrome.
 function LbBtn({ onClick, title, style, children }) {
@@ -369,6 +302,15 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const [saving,    setSaving] = useState(false);
   const [err,       setErr]   = useState('');
   const [hlEditOn,  setHEOn]  = useState(false);
+  // The edit-mode contentEditable's initial content — set explicitly by
+  // openEdit() (below) each time a NEW edit session starts, never derived
+  // live from editNotes on every render. dangerouslySetInnerHTML re-applies
+  // itself whenever the __html value it's given actually changes, so if
+  // this were computed inline from editNotes, React would stomp the live,
+  // actively-being-typed-into DOM back to this string on every keystroke —
+  // this state is the one piece of edit-mode state that's deliberately NOT
+  // kept live-synced with typing, specifically so that can't happen.
+  const [editInitialHtml, setEditInitialHtml] = useState('');
 
   // View highlight state
   const [viewHL,   setVHL]   = useState(entry.highlights||[]);
@@ -397,15 +339,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const [hlViewOn, setHVOn]  = useState(false);
 
   const editTaRef = useRef();
-  const editOverlayRef = useRef();
   const notesRef  = useRef();
-
-  const syncEditOverlay = useCallback(() => {
-    if (editOverlayRef.current && editTaRef.current) {
-      editOverlayRef.current.scrollTop = editTaRef.current.scrollTop;
-      editOverlayRef.current.scrollLeft = editTaRef.current.scrollLeft;
-    }
-  }, []);
 
   // --- Selection tracking for the floating highlight bar ---------------------
   // We need three things: whether a valid selection exists, its character offsets
@@ -661,7 +595,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   };
 
   // Highlight hooks
-  const editHl = useHighlight(editTaRef, entry.highlights||[]);
+  const editHl = useHighlight(editTaRef, entry.highlights||[], { textColor: t.text, isDark });
 
   // colorProp comes from App (knows user's custom systems); SYS_COLOR is only a fallback.
   const color = colorProp || SYS_COLOR[entry.system] || '#2563eb';
@@ -841,6 +775,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     setET(entry.title); setEN(entry.notes||'');
     setED(entry.difficulty||'Medium'); setEI(entry.images||[]);
     editHl.setHighlights(entry.highlights||[]);
+    setEditInitialHtml(markedTextToHtml(entry.notes||'', entry.highlights||[], t.text, isDark));
     setNI([]); setErr(''); setHEOn(false);
     setEditing(true);
   };
@@ -902,27 +837,36 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
               {editHl.highlights.length>0 && <span style={{fontSize:FONT.size.xs,color:t.text4}}>{editHl.highlights.length} highlights</span>}
             </div>
             {hlEditOn && <HLToolbar onApply={editHl.applyHL} onRemove={editHl.removeHL} onClearAll={editHl.clearAllHL} hasSelection={editHl.hasSel} />}
-            {/* marginTop lives on the WRAPPER, not the textarea — otherwise the
-                textarea's own margin pushes its text 8px below the overlay bands. */}
             <div style={{position:'relative', marginTop:8}}>
-              {editHl.highlights.length>0 && (
-                <EditHighlightOverlay ref={editOverlayRef} text={editNotes}
-                  highlights={editHl.highlights} isDark={isDark} />
-              )}
-              <textarea ref={editTaRef} value={editNotes}
-                onChange={e=>{ editHl.handleTextChange(editNotes,e.target.value); setEN(e.target.value); }}
-                onSelect={editHl.onSelChange} onMouseUp={editHl.onSelChange}
-                onKeyUp={editHl.onSelChange} onTouchEnd={editHl.onSelChange}
+              {/* A real contentEditable, not a <textarea> — bold/italic/size
+                  show formatted here, live, the moment you paste or type
+                  them, via the exact same rendering (markedTextToHtml)
+                  RenderedNotes/RichRuns.js use for the view-mode render
+                  just below. Deliberately uncontrolled after the initial
+                  mount per edit session (see editInitialHtml, set by
+                  openEdit above): typing, pasting and the bullet/highlight
+                  helpers all mutate the live DOM directly, and onInput
+                  reads it back into `editNotes` state one-directionally —
+                  re-rendering this div's content from React state on every
+                  keystroke would reset the caret position on every single
+                  character typed. */}
+              <div ref={editTaRef}
+                contentEditable suppressContentEditableWarning
+                dangerouslySetInnerHTML={{ __html: editInitialHtml }}
+                onInput={() => {
+                  const next = inlineTextWithMarks(editTaRef.current);
+                  editHl.handleTextChange(editNotes, next);
+                  setEN(next);
+                }}
+                onMouseUp={editHl.onSelChange} onKeyUp={editHl.onSelChange} onTouchEnd={editHl.onSelChange}
                 onKeyDown={e => { handleBulletKeyDown(e); if (!e.defaultPrevented) editHl.handleShortcut(e); }}
-                onPaste={handleRichPaste}
-                onScroll={syncEditOverlay}
-                rows={8} style={{...inp,resize:'vertical',lineHeight:'1.7',
+                onPaste={e => handleRichPaste(e, t.text)}
+                style={{...inp, minHeight:168, lineHeight:'1.7',
                   marginTop:0,
-                  position:'relative',zIndex:1,
-                  fontSize:FONT.size.lg,
+                  fontSize:FONT.size.lg, whiteSpace:'pre-wrap', overflowWrap:'break-word',
                   fontWeight:400, letterSpacing:'normal',
                   WebkitTextSizeAdjust:'100%', textSizeAdjust:'100%',
-                  background: editHl.highlights.length>0 ? 'transparent' : t.surface,
+                  background: t.surface,
                   caretColor:t.text, color:t.text}} />
             </div>
           </F>
