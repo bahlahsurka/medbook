@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR } from '../lib/constants';
 import { buildHighlightParts, resolveHL } from '../lib/highlights';
@@ -217,6 +218,22 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   const cardAiSections = useMemo(() => normalizeSections(card?.ai_sections), [card]);
   const cardHasKeyPoints = hasKeyPoints(cardAiSections);
   const cardHasImages = card?.images?.length > 0;
+
+  // This screen's own prev/counter/pause cluster and progress fill portal
+  // into App.js's PERSISTENT header bar (#mb-study-toolbar-slot and
+  // #mb-header-progress-slot) instead of a second header row drawn inside
+  // this component — the same pattern StudySession.js already uses for its
+  // own toolbar. That frees the entire top of this screen for the card
+  // itself. Those divs are siblings rendered earlier in the same tree, so
+  // they already exist by the time this render runs, but `getElementById`
+  // still needs an effect (not a render-time call) — see StudySession.js's
+  // identical comment on its own headerSlot.
+  const [headerSlot, setHeaderSlot] = useState(null);
+  const [progressSlot, setProgressSlot] = useState(null);
+  useEffect(() => {
+    setHeaderSlot(document.getElementById('mb-study-toolbar-slot'));
+    setProgressSlot(document.getElementById('mb-header-progress-slot'));
+  }, []);
 
   // Keyboard: Space=reveal, Enter=Easy, g=Good, h=Hard, a=Again.
   // Disabled on the overview screen, once the session is over, or while the
@@ -622,38 +639,42 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
         <Lightbox images={card.images} start={lightboxIdx} onClose={()=>setLightboxIdx(null)} />
       )}
 
-      {/* Header — deliberately lean: title, a prev/counter/pause cluster,
-          and the progress bar directly beneath it with a minimal gap. Fixed
-          height (flexShrink:0) — it never scrolls away or grows. */}
-      <div style={{ flexShrink:0, marginBottom:SPACE.lg }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
-          <div style={{ fontSize:FONT.size.md, fontWeight:FONT.weight.bold, color:t.text }}>Review Queue</div>
-          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <button className="mb-rq-btn" onClick={goPrev} disabled={idx===0}
-              title="Previous card" aria-label="Previous card" style={{
-              fontSize:FONT.size.xs, background:t.surface2, border:`1px solid ${t.border}`,
-              color: idx===0 ? t.text4 : t.text3, opacity: idx===0 ? .45 : 1,
-              borderRadius:RADIUS.sm, width:30, height:30, cursor: idx===0 ? 'default' : 'pointer',
-              display:'flex', alignItems:'center', justifyContent:'center' }}>
-              <IconChevronLeft size={13} />
-            </button>
-            <span style={{ fontSize:FONT.size.sm, color:t.text3, fontWeight:FONT.weight.medium, padding:'0 2px' }}>{idx + 1} / {total}</span>
-            <button className="mb-rq-btn" onClick={pauseSession} title="Pause session" aria-label="Pause session" style={{
-              fontSize:FONT.size.xs, background:t.surface2, border:`1px solid ${t.border}`, color:t.text3,
-              borderRadius:RADIUS.sm, width:30, height:30, cursor:'pointer',
-              display:'flex', alignItems:'center', justifyContent:'center' }}>
-              <IconPause size={12} />
-            </button>
-          </div>
-        </div>
+      {/* Prev/counter/pause — portaled into App.js's persistent header bar
+          (see the headerSlot effect above) instead of a row drawn here, so
+          this component contributes NOTHING to the top of the screen and
+          the card gets the full height below the app's own header. */}
+      {headerSlot && createPortal(
+        <div style={{ display:'flex', alignItems:'center', gap:6, marginLeft:'auto' }}>
+          <button className="mb-headerbtn" onClick={goPrev} disabled={idx===0}
+            title="Previous card" aria-label="Previous card" style={{
+            background:'none', border:'none', color: idx===0 ? t.text4 : t.text3,
+            opacity: idx===0 ? .45 : 1, padding:6, width:28, height:28, borderRadius:RADIUS.sm,
+            cursor: idx===0 ? 'default' : 'pointer',
+            display:'flex', alignItems:'center', justifyContent:'center' }}>
+            <IconChevronLeft size={14} />
+          </button>
+          <span style={{ fontSize:FONT.size.sm, color:t.text3, fontWeight:FONT.weight.medium, padding:'0 2px' }}>{idx + 1} / {total}</span>
+          <button className="mb-headerbtn" onClick={pauseSession} title="Pause session" aria-label="Pause session" style={{
+            background:'none', border:'none', color:t.text3, padding:6, width:28, height:28,
+            borderRadius:RADIUS.sm, cursor:'pointer',
+            display:'flex', alignItems:'center', justifyContent:'center' }}>
+            <IconPause size={13} />
+          </button>
+        </div>,
+        headerSlot
+      )}
 
-        {/* Progress bar — the single source of "how far am I", instead of a
-            bar plus a "%done" pill saying the same thing two ways. */}
-        <div style={{ height:4, background:t.surface3, borderRadius:RADIUS.sm }}>
-          <div style={{ height:'100%', background:t.accent, borderRadius:RADIUS.sm,
+      {/* Progress fill — portaled into App.js's header-bottom-border slot
+          (see the progressSlot effect above), so the header's own bottom
+          edge doubles as this session's progress bar instead of a static
+          line drawn a second time inside this screen. */}
+      {progressSlot && createPortal(
+        <div style={{ position:'absolute', inset:0, background:t.surface3 }}>
+          <div style={{ height:'100%', background:t.accent,
             width:`${progress}%`, transition:`width ${MOTION.slow} ${MOTION.ease}` }} />
-        </div>
-      </div>
+        </div>,
+        progressSlot
+      )}
 
       {/* Scrollable study surface — the ONLY part of this screen that
           scrolls. minHeight:0 is load-bearing on a flex child sized by
@@ -670,7 +691,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
             points, revealed state only); otherwise the card column alone
             takes a comfortably wide, centred measure instead of stretching
             edge to edge with nothing beside it. */}
-        <div className={`mb-rq-content${showSide ? ' has-side' : ''}`} style={{ paddingBottom:SPACE.md }}>
+        <div className={`mb-rq-content${showSide ? ' has-side' : ''}`} style={{ paddingTop:SPACE.lg, paddingBottom:SPACE.md }}>
           <div className="mb-rq-card-col" style={showSide ? undefined : { maxWidth:760, margin:'0 auto', width:'100%' }}>
 
             {/* Card — a soft colour-tinted wash fading into the surface plus
