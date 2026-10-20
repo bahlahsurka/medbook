@@ -12,7 +12,8 @@ import HLPopover from './HLPopover';
 import AISections from './AISections';
 import AIService, { normalizeSections, isAllEmpty } from '../services/ai';
 import { limitsFor } from '../services/ai/PromptBuilder';
-import { handleBulletKeyDown, toggleBulletLines, handleRichPaste, inlineTextWithMarks } from '../lib/bulletList';
+import { handleBulletKeyDown, toggleBulletLines, handleRichPaste, handlePlainPaste,
+  sanitizeForStorage, inlineTextWithMarks } from '../lib/bulletList';
 import { STUDY_SCOPE_CLASS, suppressContextMenu } from '../lib/studyInteraction';
 
 
@@ -302,6 +303,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const [saving,    setSaving] = useState(false);
   const [err,       setErr]   = useState('');
   const [hlEditOn,  setHEOn]  = useState(false);
+  const [plainPaste,setPP]    = useState(false);
   // The edit-mode contentEditable's initial content — set explicitly by
   // openEdit() (below) each time a NEW edit session starts, never derived
   // live from editNotes on every render. dangerouslySetInnerHTML re-applies
@@ -758,8 +760,14 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
       // a trim is just an edit that removes a prefix/suffix.
       const trimmedNotes = editNotes.trim();
       const adjustedHighlights = adjustHighlights(editNotes, trimmedNotes, editHl.highlights);
+      // A literal NUL character or an unpaired UTF-16 surrogate (both real
+      // fallout from pasting out of some PDFs) makes Supabase/PostgREST
+      // reject the whole update with "unsupported Unicode escape sequence"
+      // — sanitize right before the payload is built, after highlight
+      // offsets are already computed against the untouched text, so this
+      // can't shift any highlight position.
       const ok = await updateDB({
-        title:editTitle.trim(), notes:trimmedNotes,
+        title:sanitizeForStorage(editTitle.trim()), notes:sanitizeForStorage(trimmedNotes),
         difficulty:editDiff, images:allImgs, highlights:adjustedHighlights
       });
       if (ok) { setVHL(adjustedHighlights); setEditing(false); setNI([]); fireSavedFlash(); }
@@ -771,7 +779,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     setEditing(false); setET(entry.title); setEN(entry.notes||'');
     setED(entry.difficulty||'Medium'); setEI(entry.images||[]);
     editHl.setHighlights(entry.highlights||[]);
-    setNI([]); setErr(''); setHEOn(false);
+    setNI([]); setErr(''); setHEOn(false); setPP(false);
   };
 
   // All the edit-mode fields (including editHl's highlights) are seeded
@@ -792,7 +800,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     setED(entry.difficulty||'Medium'); setEI(entry.images||[]);
     editHl.setHighlights(entry.highlights||[]);
     setEditInitialHtml(markedTextToHtml(entry.notes||'', entry.highlights||[], t.text, isDark));
-    setNI([]); setErr(''); setHEOn(false);
+    setNI([]); setErr(''); setHEOn(false); setPP(false);
     setEditing(true);
   };
 
@@ -850,6 +858,17 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                   color:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif'}}>
                 <IconListBullet size={11} /> Bullets
               </button>
+              <button className="mb-detailbtn"
+                onMouseDown={e=>e.preventDefault()} onTouchStart={e=>e.preventDefault()}
+                onClick={()=>setPP(p=>!p)}
+                title="While on, pasted text is inserted exactly as copied — no auto bold/italic/bullets — so you can format it yourself"
+                style={{fontSize:FONT.size.xs,background:plainPaste?t.hlBtnBg:t.surface3,
+                  border:`1px solid ${plainPaste?t.hlBtnBorder:t.border}`,
+                  borderRadius:RADIUS.sm-1,padding:'4px 10px',cursor:'pointer',display:'flex',
+                  alignItems:'center',gap:5,
+                  color:plainPaste?t.hlBtnText:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif'}}>
+                {plainPaste?'Plain paste on':'Plain Paste'}
+              </button>
               {editHl.highlights.length>0 && <span style={{fontSize:FONT.size.xs,color:t.text4}}>{editHl.highlights.length} highlights</span>}
             </div>
             {hlEditOn && <HLToolbar onApply={editHl.applyHL} onRemove={editHl.removeHL} onClearAll={editHl.clearAllHL} hasSelection={editHl.hasSel} />}
@@ -876,7 +895,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                 }}
                 onMouseUp={editHl.onSelChange} onKeyUp={editHl.onSelChange} onTouchEnd={editHl.onSelChange}
                 onKeyDown={e => { handleBulletKeyDown(e); if (!e.defaultPrevented) editHl.handleShortcut(e); }}
-                onPaste={e => handleRichPaste(e, t.text)}
+                onPaste={e => plainPaste ? handlePlainPaste(e) : handleRichPaste(e, t.text)}
                 style={{...inp, minHeight:168, lineHeight:'1.7',
                   marginTop:0,
                   fontSize:FONT.size.lg, whiteSpace:'pre-wrap', overflowWrap:'break-word',
