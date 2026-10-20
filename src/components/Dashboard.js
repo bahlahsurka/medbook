@@ -1,10 +1,11 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
 import { computeSystemStats } from '../lib/systemStats';
 import { timeAgo } from '../lib/timeAgo';
 import { SYS_COLOR } from '../lib/constants';
 import EntryCard from './EntryCard';
-import { IconRepeat, IconPlus, IconChart } from '../lib/icons';
+import { IconRepeat, IconPlus, IconChart, IconCheck } from '../lib/icons';
 
 function greetingFor(hour) {
   if (hour < 5)  return 'Still up?';
@@ -65,9 +66,41 @@ function DueBadge({ t, count }) {
   );
 }
 
-export default function Dashboard({ entries, userSystems, onOpenEntry, onNavigateSystem,
+export default function Dashboard({ entries, userSystems, userId, onOpenEntry, onNavigateSystem,
   onStartReview, onAddEntry }) {
   const { t } = useTheme();
+
+  // "Reviewed today" — a real per-review-event count from review_log (see
+  // SUPABASE_MIGRATION_INSIGHTS.sql), written by ReviewQueue/SystemReview's
+  // rate() and DetailView's markReviewed(). Deliberately NOT derived from
+  // entries.last_reviewed (a single overwritten timestamp per entry that
+  // can't distinguish "reviewed once today" from "reviewed three times
+  // today", and would conflate cards reviewed with entries studied).
+  // undefined=loading (card renders with a neutral placeholder, no layout
+  // shift), null=table unavailable (card omitted entirely rather than
+  // showing a guessed number), number=real count for the viewer's LOCAL day.
+  const [reviewedToday, setReviewedToday] = useState(undefined);
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    const localMidnight = new Date();
+    localMidnight.setHours(0, 0, 0, 0);
+    supabase.from('review_log').select('id', { count: 'exact', head: true })
+      .eq('user_id', userId).gte('reviewed_at', localMidnight.toISOString())
+      .then(({ count, error }) => {
+        if (cancelled) return;
+        if (error) {
+          if (process.env.NODE_ENV !== 'production') {
+            // eslint-disable-next-line no-console
+            console.warn('[Dashboard] review_log unavailable, hiding Reviewed Today — has SUPABASE_MIGRATION_INSIGHTS.sql been run?', error.message);
+          }
+          setReviewedToday(null);
+          return;
+        }
+        setReviewedToday(count || 0);
+      });
+    return () => { cancelled = true; };
+  }, [userId]);
 
   // Everything below is read straight off fields the rest of the app already
   // populates (next_review / review_count / last_reviewed / created_at) — the
@@ -157,6 +190,16 @@ export default function Dashboard({ entries, userSystems, onOpenEntry, onNavigat
 
   const reviewedPct = stats.total ? Math.round((stats.reviewedCount / stats.total) * 100) : 0;
 
+  // Only reserve a grid row/area for the card once we know it'll actually
+  // render (loading or real count) — never reserve space for a card that
+  // turns out to be permanently omitted (review_log unavailable), which
+  // would otherwise leave a hollow gap next to "Recent Entries" spanning it.
+  const showReviewedCard = reviewedToday !== null;
+  const mobileAreas = ['"focus"', '"recent"', showReviewedCard && '"reviewed"', '"studied"', '"activity"']
+    .filter(Boolean).join(' ');
+  const desktopAreas = ['"recent focus"', showReviewedCard && '"recent reviewed"', '"recent studied"', '"activity activity"']
+    .filter(Boolean).join(' ');
+
   return (
     <div className="mb-dash-shell">
       <style>{`
@@ -195,16 +238,17 @@ export default function Dashboard({ entries, userSystems, onOpenEntry, onNavigat
            brief) while desktop still reads Recent Entries as primary. */
         .mb-dash-grid {
           display:grid; grid-template-columns:minmax(0,1fr); gap:20px;
-          grid-template-areas: "focus" "recent" "studied" "activity";
+          grid-template-areas: ${mobileAreas};
         }
         @media (min-width:768px) {
           .mb-dash-grid {
             grid-template-columns:minmax(0,1fr) 340px; gap:24px; align-items:start;
-            grid-template-areas: "recent focus" "recent studied" "activity activity";
+            grid-template-areas: ${desktopAreas};
           }
         }
         .mb-dash-recent   { grid-area:recent; }
         .mb-dash-focus    { grid-area:focus; }
+        .mb-dash-reviewed { grid-area:reviewed; }
         .mb-dash-studied  { grid-area:studied; }
         .mb-dash-activity { grid-area:activity; }
 
@@ -302,6 +346,22 @@ export default function Dashboard({ entries, userSystems, onOpenEntry, onNavigat
             </>
           )}
         </div>
+
+        {/* Reviewed Today — real per-review-event count from review_log,
+            see the hook above. Omitted entirely (not rendered as 0) when
+            that table isn't reachable, so this card never shows a guess. */}
+        {showReviewedCard && (
+          <div className="mb-dash-reviewed" style={{ ...card, borderTop:`3px solid ${t.ok}` }}>
+            <div style={capLabel}><IconCheck size={12} /> Reviewed Today</div>
+            <div style={{ fontSize:FONT.size.xl2, fontWeight:FONT.weight.bold, color:t.text, lineHeight:1.1 }}>
+              {reviewedToday === undefined ? '–' : reviewedToday}
+            </div>
+            <div style={{ fontSize:FONT.size.xs, color:t.text4, marginTop:3 }}>
+              {reviewedToday === undefined ? 'Loading…'
+                : reviewedToday === 1 ? 'card reviewed' : 'cards reviewed'}
+            </div>
+          </div>
+        )}
 
         {/* Recently Studied — secondary, underneath Today's Focus rather
             than standing alone with a column of empty space around it. */}

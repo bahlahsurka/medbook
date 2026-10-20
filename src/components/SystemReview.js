@@ -87,7 +87,7 @@ function calcNext(entry, rating) {
   };
 }
 
-export default function SystemReview({ system, entries, color, onReviewed, onClose }) {
+export default function SystemReview({ system, entries, color, onReviewed, onClose, userId }) {
   const { t, isDark } = useTheme();
 
   // Latest entries available WITHOUT rebuilding the queue on every rating.
@@ -147,6 +147,19 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
       return; // don't advance — let the user retry after fixing
     }
     onReviewed({ ...card, ...updates });
+    // Same fire-and-forget analytics write ReviewQueue.js's rate() makes —
+    // keeps review_log complete across both review screens so Dashboard's
+    // "reviewed today" count doesn't undercount reviews done from here.
+    if (userId) {
+      supabase.from('review_log').insert({
+        user_id: userId, entry_id: card.id, system: card.system, rating,
+      }).then(({ error: logError }) => {
+        if (logError && process.env.NODE_ENV !== 'production') {
+          // eslint-disable-next-line no-console
+          console.warn('[SystemReview] review_log insert failed — has SUPABASE_MIGRATION_INSIGHTS.sql been run?', logError.message);
+        }
+      });
+    }
     setReviewed(p => p+1);
     if (idx+1 >= total) setDone(true);
     else { setIdx(p=>p+1); setFlipped(false); }

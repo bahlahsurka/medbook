@@ -6,6 +6,8 @@ import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation } from '../lib/them
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue } from '../lib/reviewQueue';
 import { computeSystemStats } from '../lib/systemStats';
+import { normalizeSections } from '../services/ai';
+import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
 import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
   IconX, IconZap } from '../lib/icons';
 import RichRuns from '../lib/RichRuns';
@@ -205,6 +207,17 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   const card = queue[idx];
   const total = queue.length;
 
+  // The existing AI Analysis output for this card, if any — never generated
+  // here, only read back (see services/ai/ResponseParser.js's
+  // normalizeSections, the same normaliser DetailView.js uses so an old/
+  // partial row can't crash this). Must run on EVERY render, including the
+  // overview/done/ended screens below where `card` is undefined — a hook
+  // can't be called only on some renders (Rules of Hooks), so this can't
+  // live further down past those early returns.
+  const cardAiSections = useMemo(() => normalizeSections(card?.ai_sections), [card]);
+  const cardHasKeyPoints = hasKeyPoints(cardAiSections);
+  const cardHasImages = card?.images?.length > 0;
+
   // Keyboard: Space=reveal, Enter=Easy, g=Good, h=Hard, a=Again.
   // Disabled on the overview screen, once the session is over, or while the
   // image lightbox is open on top.
@@ -348,6 +361,32 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     .mb-rq-row:active { transform: scale(0.99); }
     .mb-rq-filter:active { transform: scale(0.95); }
     .mb-rq-fade { animation: medbook-fade-in ${MOTION.normal} ${MOTION.ease}; }
+
+    /* Card column + supporting column — single column (card alone, or
+       card then supporting info stacked) until there's real width to work
+       with, matching every other responsive grid in this app (Dashboard). */
+    .mb-rq-content { display:grid; grid-template-columns:minmax(0,1fr); gap:${SPACE.xl}px; align-items:start; }
+    @media (min-width:900px) {
+      .mb-rq-content.has-side { grid-template-columns:minmax(0,1fr) 320px; gap:${SPACE.xl2+4}px; }
+    }
+
+    /* Scrollable study surface — the only part of the active-review screen
+       that scrolls. A visible but unobtrusive scrollbar so it doesn't read
+       as a cramped inner box. */
+    .mb-rq-scroll { scrollbar-width:thin; scrollbar-color:${t.borderStrong} transparent; }
+    .mb-rq-scroll::-webkit-scrollbar { width:8px; }
+    .mb-rq-scroll::-webkit-scrollbar-thumb { background:${t.borderStrong}; border-radius:8px; }
+
+    .mb-rq-img { transition:transform ${MOTION.fast} ${MOTION.ease}, box-shadow ${MOTION.fast} ${MOTION.ease}; }
+    .mb-rq-img:hover { transform:translateY(-2px); }
+
+    /* Anchored rating footer — a top divider plus an upward-cast shadow so
+       it reads as a surface sitting above the study area, not just content
+       that happens to trail the card. */
+    .mb-rq-ratingbar {
+      padding:${SPACE.lg}px 2px ${SPACE.xs}px; border-top:1px solid ${t.border};
+      box-shadow:0 -16px 28px -20px ${isDark?'rgba(0,0,0,.6)':'rgba(15,23,42,.14)'};
+    }
   `;
 
   // ── Overview / landing screen ────────────────────────────────────────
@@ -569,8 +608,14 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     ok:     isDark ? `${t.ok}22`     : t.okBg,
   };
 
+  // A side column only appears once the answer is revealed AND there's
+  // actually something to put in it (images or key points) — never an
+  // empty panel reserving dead space.
+  const showSide = flipped && (cardHasImages || cardHasKeyPoints);
+
   return (
-    <div className="mb-rq-fade" style={{ maxWidth:620, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
+    <div className="mb-rq-fade" style={{ maxWidth:1040, margin:'0 auto', width:'100%',
+      fontFamily:'Inter,sans-serif', height:'100%', display:'flex', flexDirection:'column' }}>
       <style>{localCss}</style>
 
       {lightboxIdx !== null && card?.images?.length > 0 && (
@@ -578,129 +623,183 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
       )}
 
       {/* Header — deliberately lean: title, a prev/counter/pause cluster,
-          and the progress bar below carry all the state that used to be
-          spread across a title row PLUS a separate 3-pill stats row
-          (due/reviewed/%done, redundant with the bar and the counter here). */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:SPACE.md }}>
-        <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.bold, color:t.text }}>Review Queue</div>
-        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <button className="mb-rq-btn" onClick={goPrev} disabled={idx===0}
-            title="Previous card" aria-label="Previous card" style={{
-            fontSize:FONT.size.xs, background:t.surface2, border:`1px solid ${t.border}`,
-            color: idx===0 ? t.text4 : t.text3, opacity: idx===0 ? .45 : 1,
-            borderRadius:RADIUS.sm, width:30, height:30, cursor: idx===0 ? 'default' : 'pointer',
-            display:'flex', alignItems:'center', justifyContent:'center' }}>
-            <IconChevronLeft size={13} />
-          </button>
-          <span style={{ fontSize:FONT.size.sm, color:t.text3, fontWeight:FONT.weight.medium, padding:'0 2px' }}>{idx + 1} / {total}</span>
-          <button className="mb-rq-btn" onClick={pauseSession} title="Pause session" aria-label="Pause session" style={{
-            fontSize:FONT.size.xs, background:t.surface2, border:`1px solid ${t.border}`, color:t.text3,
-            borderRadius:RADIUS.sm, width:30, height:30, cursor:'pointer',
-            display:'flex', alignItems:'center', justifyContent:'center' }}>
-            <IconPause size={12} />
-          </button>
+          and the progress bar directly beneath it with a minimal gap. Fixed
+          height (flexShrink:0) — it never scrolls away or grows. */}
+      <div style={{ flexShrink:0, marginBottom:SPACE.lg }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
+          <div style={{ fontSize:FONT.size.md, fontWeight:FONT.weight.bold, color:t.text }}>Review Queue</div>
+          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <button className="mb-rq-btn" onClick={goPrev} disabled={idx===0}
+              title="Previous card" aria-label="Previous card" style={{
+              fontSize:FONT.size.xs, background:t.surface2, border:`1px solid ${t.border}`,
+              color: idx===0 ? t.text4 : t.text3, opacity: idx===0 ? .45 : 1,
+              borderRadius:RADIUS.sm, width:30, height:30, cursor: idx===0 ? 'default' : 'pointer',
+              display:'flex', alignItems:'center', justifyContent:'center' }}>
+              <IconChevronLeft size={13} />
+            </button>
+            <span style={{ fontSize:FONT.size.sm, color:t.text3, fontWeight:FONT.weight.medium, padding:'0 2px' }}>{idx + 1} / {total}</span>
+            <button className="mb-rq-btn" onClick={pauseSession} title="Pause session" aria-label="Pause session" style={{
+              fontSize:FONT.size.xs, background:t.surface2, border:`1px solid ${t.border}`, color:t.text3,
+              borderRadius:RADIUS.sm, width:30, height:30, cursor:'pointer',
+              display:'flex', alignItems:'center', justifyContent:'center' }}>
+              <IconPause size={12} />
+            </button>
+          </div>
+        </div>
+
+        {/* Progress bar — the single source of "how far am I", instead of a
+            bar plus a "%done" pill saying the same thing two ways. */}
+        <div style={{ height:4, background:t.surface3, borderRadius:RADIUS.sm }}>
+          <div style={{ height:'100%', background:t.accent, borderRadius:RADIUS.sm,
+            width:`${progress}%`, transition:`width ${MOTION.slow} ${MOTION.ease}` }} />
         </div>
       </div>
 
-      {/* Progress bar — the single source of "how far am I", instead of a
-          bar plus a "%done" pill saying the same thing two ways. */}
-      <div style={{ height:5, background:t.surface3, borderRadius:RADIUS.sm, marginBottom:SPACE.xl }}>
-        <div style={{ height:'100%', background:t.accent, borderRadius:RADIUS.sm,
-          width:`${progress}%`, transition:`width ${MOTION.slow} ${MOTION.ease}` }} />
-      </div>
+      {/* Scrollable study surface — the ONLY part of this screen that
+          scrolls. minHeight:0 is load-bearing on a flex child sized by
+          flex:1 — without it this would grow to fit its content instead of
+          scrolling internally. The rating bar lives INSIDE this container
+          as a sticky footer (see below) rather than a flex sibling pinned
+          to the viewport's bottom edge unconditionally — pinning it
+          unconditionally left a large dead gap under a short card; sticky
+          only pulls it down to the bottom edge once there's enough content
+          to scroll, and otherwise it just follows the card normally. */}
+      <div className="mb-rq-scroll" style={{ flex:1, minHeight:0, overflowY:'auto' }}>
+        {/* Card column + supporting info column — the column only appears
+            once there's something real to put in it (images and/or AI key
+            points, revealed state only); otherwise the card column alone
+            takes a comfortably wide, centred measure instead of stretching
+            edge to edge with nothing beside it. */}
+        <div className={`mb-rq-content${showSide ? ' has-side' : ''}`} style={{ paddingBottom:SPACE.md }}>
+          <div className="mb-rq-card-col" style={showSide ? undefined : { maxWidth:760, margin:'0 auto', width:'100%' }}>
 
-      {/* Card — the visual focus, minimal chrome around it */}
-      <div key={idx} className="mb-rq-fade" style={{ background:t.surface, border:`1px solid ${t.border}`, borderRadius:RADIUS.lg,
-        borderTop:`4px solid ${color}`, padding:SPACE.xl2, marginBottom:SPACE.md,
-        boxShadow:elevation(t,'sm'), minHeight:220 }}>
+            {/* Card — a soft colour-tinted wash fading into the surface plus
+                a colour-matched glow shadow (the same "coloured glow"
+                language the Add Entry CTA elsewhere in the app uses) reads
+                as a lifted, deliberate surface instead of a flat bordered
+                rectangle. */}
+            <div key={idx} className="mb-rq-fade mb-rq-card" style={{
+              background:`linear-gradient(180deg, ${color}12 0%, ${t.surface} 220px)`,
+              border:`1px solid ${t.border}`, borderRadius:RADIUS.xl2, padding:SPACE.xl2,
+              boxShadow:`0 24px 48px -20px ${color}45, ${elevation(t,'sm')}`, minHeight:260 }}>
 
-        {/* System + review count — difficulty tag intentionally omitted,
-            same call made for entries throughout the app (DetailView/
-            EntryCard). */}
-        <div style={{ display:'flex', gap:8, marginBottom:SPACE.lg, flexWrap:'wrap', alignItems:'center' }}>
-          <span style={{ fontSize:FONT.size.xs, fontWeight:FONT.weight.medium, background:`${color}12`, color,
-            borderRadius:RADIUS.sm-2, padding:'2px 8px', border:`1px solid ${color}25` }}>
-            {card.system}
-          </span>
-          {card.review_count > 0 && (
-            <span style={{ fontSize:FONT.size.xs, color:t.text4 }}>Reviewed {card.review_count}×</span>
+              {/* System + review count — a dot + small-caps label instead of
+                  a boxed pill, lighter and quieter than another bordered
+                  rectangle competing with the card's own border. */}
+              <div style={{ display:'flex', gap:8, marginBottom:SPACE.lg, flexWrap:'wrap', alignItems:'center' }}>
+                <span style={{ width:7, height:7, borderRadius:RADIUS.circle, background:color, flexShrink:0 }} />
+                <span style={{ fontSize:FONT.size.xs, fontWeight:FONT.weight.bold, letterSpacing:.6,
+                  textTransform:'uppercase', color }}>{card.system}</span>
+                {card.review_count > 0 && (
+                  <span style={{ fontSize:FONT.size.xs, color:t.text4 }}>· Reviewed {card.review_count}×</span>
+                )}
+              </div>
+
+              {/* Title — always visible */}
+              <div style={{ fontSize:FONT.size.xl, fontWeight:FONT.weight.bold, color:t.text, lineHeight:1.4, marginBottom:SPACE.xl }}>
+                {card.title}
+              </div>
+
+              {/* Answer */}
+              {!flipped ? (
+                <button className="mb-rq-btn" onClick={()=>setFlipped(true)} style={{
+                  width:'100%', background:t.surface2, border:`2px dashed ${t.borderStrong}`,
+                  borderRadius:RADIUS.md, padding:16, fontSize:FONT.size.md, color:t.text3,
+                  cursor:'pointer', fontWeight:FONT.weight.semibold, fontFamily:'Inter,sans-serif' }}>
+                  Tap to reveal <span style={{ opacity:.7, fontWeight:FONT.weight.regular }}>· Space</span>
+                </button>
+              ) : (
+                <div className="mb-rq-fade">
+                  <div style={{ height:1, background:t.border, marginBottom:SPACE.lg }} />
+                  {card.notes ? (
+                    // No maxHeight/scroll clamp here — this card sits inside
+                    // the shared study-surface scroll area above, so a long
+                    // answer gets real room instead of a small inner
+                    // scrollbox. maxWidth keeps the LINE LENGTH readable
+                    // even though the card column itself can be wide.
+                    <div style={{ fontSize:FONT.size.lg, color:t.text2, lineHeight:1.75,
+                      whiteSpace:'pre-wrap', marginBottom:SPACE.lg, maxWidth:700 }}>
+                      <RenderedNotes text={card.notes} highlights={card.highlights} isDark={isDark} />
+                    </div>
+                  ) : (
+                    <div style={{ fontSize:FONT.size.sm, color:t.text4, marginBottom:SPACE.lg }}>No notes for this entry.</div>
+                  )}
+                  {/* Images move to the supporting column once there's room
+                      for one (see below); on narrow screens where that
+                      column stacks underneath instead, they still end up
+                      directly below the answer. */}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Supporting column — real images at a size worth looking at
+              (replacing the old cramped horizontal-scroll thumbnail strip),
+              then the entry's existing AI key points, if any. Reuses the
+              recovered space beside the card rather than leaving it empty. */}
+          {showSide && (
+            <div className="mb-rq-side-col mb-rq-fade">
+              {cardHasImages && (
+                <div style={{ marginBottom: cardHasKeyPoints ? SPACE.xl : 0 }}>
+                  <div style={{ fontSize:FONT.size.xs, color:t.text4, letterSpacing:.8, fontWeight:FONT.weight.bold,
+                    textTransform:'uppercase', marginBottom:10 }}>
+                    Images
+                  </div>
+                  <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+                    {card.images.map((url, i) => (
+                      <img key={i} src={url} alt="" onClick={()=>setLightboxIdx(i)} className="mb-rq-img"
+                        style={{ width:'100%', maxHeight:280, objectFit:'contain', borderRadius:RADIUS.xl,
+                          cursor:'zoom-in', background:t.surface2, display:'block', boxShadow:elevation(t,'sm') }} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              {cardHasKeyPoints && <ReviewKeyPoints sections={cardAiSections} />}
+            </div>
           )}
         </div>
 
-        {/* Title — always visible */}
-        <div style={{ fontSize:FONT.size.xl, fontWeight:FONT.weight.bold, color:t.text, lineHeight:1.4, marginBottom:SPACE.xl }}>
-          {card.title}
-        </div>
-
-        {/* Answer */}
-        {!flipped ? (
-          <button className="mb-rq-btn" onClick={()=>setFlipped(true)} style={{
-            width:'100%', background:t.surface2, border:`2px dashed ${t.borderStrong}`,
-            borderRadius:RADIUS.md, padding:16, fontSize:FONT.size.md, color:t.text3,
-            cursor:'pointer', fontWeight:FONT.weight.semibold, fontFamily:'Inter,sans-serif' }}>
-            Tap to reveal <span style={{ opacity:.7, fontWeight:FONT.weight.regular }}>· Space</span>
-          </button>
+        {/* Rating bar — sticky to the BOTTOM OF THIS SCROLL CONTAINER, not
+            the viewport: with a short card it simply sits right after the
+            content (no dead gap stretching it down to the screen's edge);
+            with a long revealed answer it clings to the bottom of the
+            visible area as you scroll, so it's always reachable without
+            hunting for it. A top divider + upward shadow reads as an
+            anchored action bar rather than content that happens to trail
+            the card. */}
+        {flipped ? (
+          <div className="mb-rq-fade mb-rq-ratingbar" style={{ position:'sticky', bottom:0, background:t.bg }}>
+            <div style={{ fontSize:FONT.size.xs, color:t.text4, fontWeight:FONT.weight.semibold,
+              textAlign:'center', marginBottom:SPACE.sm+2, letterSpacing:.4 }}>
+              How well did you know this?
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10 }}>
+              {RATINGS.map(r => (
+                <button key={r.key} className="mb-rq-rate mb-rq-btn" onClick={()=>rate(r.key)} style={{
+                  background:toneBg[r.tone], border:'none',
+                  borderRadius:RADIUS.lg, padding:'14px 4px', minHeight:64, cursor:'pointer',
+                  fontFamily:'Inter,sans-serif', display:'flex', flexDirection:'column',
+                  alignItems:'center', justifyContent:'center', gap:3,
+                  boxShadow:`0 2px 10px -4px ${toneColor[r.tone]}50` }}>
+                  <div style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.bold, color:toneColor[r.tone] }}>{r.label}</div>
+                  <div style={{ fontSize:FONT.size.micro, color:toneColor[r.tone], opacity:.8 }}>{previews[r.key]}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize:FONT.size.micro, color:t.text4, textAlign:'center', marginTop:8 }}>
+              a · h · g · enter
+            </div>
+          </div>
         ) : (
-          <div className="mb-rq-fade">
-            <div style={{ height:1, background:t.border, marginBottom:SPACE.lg }} />
-            {card.notes ? (
-              <div style={{ fontSize:FONT.size.md, color:t.text2, lineHeight:1.8,
-                whiteSpace:'pre-wrap', marginBottom:SPACE.lg, maxHeight:260, overflowY:'auto' }}>
-                <RenderedNotes text={card.notes} highlights={card.highlights} isDark={isDark} />
-              </div>
-            ) : (
-              <div style={{ fontSize:FONT.size.sm, color:t.text4, marginBottom:SPACE.lg }}>No notes for this entry.</div>
-            )}
-            {card.images?.length > 0 && (
-              <div style={{ display:'flex', gap:8, overflowX:'auto',
-                WebkitOverflowScrolling:'touch', paddingBottom:4, scrollSnapType:'x mandatory' }}>
-                {card.images.map((url, i) => (
-                  <img key={i} src={url} alt="" onClick={()=>setLightboxIdx(i)}
-                    style={{ height:80, width:'auto', borderRadius:RADIUS.sm,
-                      border:`1px solid ${t.border}`, cursor:'zoom-in', flexShrink:0,
-                      scrollSnapAlign:'start' }} />
-                ))}
-              </div>
-            )}
+          <div style={{ textAlign:'center', padding:'14px 0 2px' }}>
+            <button className="mb-rq-btn" onClick={skip} style={{ background:'none', border:'none',
+              color:t.text4, fontSize:FONT.size.xs, cursor:'pointer',
+              textDecoration:'underline', fontFamily:'Inter,sans-serif' }}>
+              Skip this card
+            </button>
           </div>
         )}
       </div>
-
-      {/* Rating buttons — large, touch-friendly, real interval previews */}
-      {flipped && (
-        <div className="mb-rq-fade">
-          <div style={{ fontSize:FONT.size.xs, color:t.text4, fontWeight:FONT.weight.semibold,
-            textAlign:'center', marginBottom:SPACE.sm+2, letterSpacing:.4 }}>
-            How well did you know this?
-          </div>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8 }}>
-            {RATINGS.map(r => (
-              <button key={r.key} className="mb-rq-rate mb-rq-btn" onClick={()=>rate(r.key)} style={{
-                background:toneBg[r.tone], border:`1px solid ${toneColor[r.tone]}40`,
-                borderRadius:RADIUS.md, padding:'14px 4px', minHeight:64, cursor:'pointer',
-                fontFamily:'Inter,sans-serif', display:'flex', flexDirection:'column',
-                alignItems:'center', justifyContent:'center', gap:3 }}>
-                <div style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.bold, color:toneColor[r.tone] }}>{r.label}</div>
-                <div style={{ fontSize:FONT.size.micro, color:toneColor[r.tone], opacity:.8 }}>{previews[r.key]}</div>
-              </button>
-            ))}
-          </div>
-          <div style={{ fontSize:FONT.size.micro, color:t.text4, textAlign:'center', marginTop:8 }}>
-            a · h · g · enter
-          </div>
-        </div>
-      )}
-
-      {/* Skip */}
-      {!flipped && (
-        <div style={{ textAlign:'center', marginTop:SPACE.md }}>
-          <button className="mb-rq-btn" onClick={skip} style={{ background:'none', border:'none',
-            color:t.text4, fontSize:FONT.size.xs, cursor:'pointer',
-            textDecoration:'underline', fontFamily:'Inter,sans-serif' }}>
-            Skip this card
-          </button>
-        </div>
-      )}
     </div>
   );
 }
