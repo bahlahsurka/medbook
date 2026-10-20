@@ -582,7 +582,7 @@ export default function App() {
       {showOnboard && <Onboarding onDone={()=>{localStorage.setItem(ONBOARD_KEY,'1');setOnboard(false);}} />}
       {showManage  && <ManageSystems systems={userSystems} onSave={handleSaveSystems} onClose={()=>setManage(false)} userId={session.user.id} />}
       {showQuickAdd && <QuickAdd userId={session.user.id} activeSystem={activeSystem} userSystems={userSystems} color={color} onSaved={onSaved} onClose={()=>setQuickAdd(false)} />}
-      {showSysReview && <SystemReview system={activeSystem} entries={entries[activeSystem]||[]} color={color} onReviewed={onReviewed} onClose={()=>setSysReview(false)} />}
+      {showSysReview && <SystemReview system={activeSystem} entries={entries[activeSystem]||[]} color={color} onReviewed={onReviewed} onClose={()=>setSysReview(false)} userId={session.user.id} />}
 
       {isMobile && sidebarOpen && (
         <div onClick={()=>setSB(false)} style={{position:'fixed',inset:0,background:t.overlay,zIndex:Z.mobileScrim,
@@ -776,7 +776,7 @@ export default function App() {
                 initialFilterSystem={reviewFilterSystem} userId={session.user.id} />}
               {view==='cards'  && <FlashCards userId={session.user.id} userSystems={userSystems} />}
               {view==='stats'  && (
-                <Dashboard entries={entries} userSystems={userSystems}
+                <Dashboard entries={entries} userSystems={userSystems} userId={session.user.id}
                   onOpenEntry={e=>{ setAS(e.system); openEntry(e); }}
                   onNavigateSystem={sys=>navigate(sys,'list')}
                   onStartReview={()=>switchView('review')}

@@ -621,7 +621,23 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
       ease_factor: entry.ease_factor || 2.5,
       next_review: next.toISOString(),
     });
-    if (ok) fireReviewedFlash();
+    if (ok) {
+      fireReviewedFlash();
+      // Same fire-and-forget review_log write ReviewQueue.js/SystemReview.js
+      // make on a rating — "Mark reviewed" has no rating UI, so it's logged
+      // as 'good', keeping review_log complete across every path an entry
+      // can be marked reviewed from.
+      if (userId) {
+        supabase.from('review_log').insert({
+          user_id: userId, entry_id: entry.id, system: entry.system, rating: 'good',
+        }).then(({ error: logError }) => {
+          if (logError && process.env.NODE_ENV !== 'production') {
+            // eslint-disable-next-line no-console
+            console.warn('[DetailView] review_log insert failed — has SUPABASE_MIGRATION_INSIGHTS.sql been run?', logError.message);
+          }
+        });
+      }
+    }
     return ok;
   };
   const togglePin = () => updateDB({ pinned:!entry.pinned });
