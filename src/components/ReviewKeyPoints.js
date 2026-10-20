@@ -1,4 +1,4 @@
-import { useTheme } from '../lib/theme';
+import { useTheme, RADIUS, elevation } from '../lib/theme';
 
 // Deliberately a SUBSET of AISections.js's six sections — relatedTopics and
 // flashcards aren't "key points to glance at while studying", they're a
@@ -24,6 +24,11 @@ export function hasKeyPoints(sections) {
  * itself — Review Queue must not trigger new AI requests — and renders
  * nothing at all (not an empty placeholder) when the entry has no analysis,
  * or the analysis has nothing in these four sections.
+ *
+ * ONE elevated panel, not a stack of separately-bordered boxes — each
+ * section is just a colour-coded left rule + heading inside it, so this
+ * reads as a single coherent surface (matching the answer card beside it)
+ * instead of a pile of small cards.
  */
 export default function ReviewKeyPoints({ sections }) {
   const { t } = useTheme();
@@ -34,21 +39,22 @@ export default function ReviewKeyPoints({ sections }) {
   if (visible.length === 0) return null;
 
   return (
-    <div style={{ fontFamily:'Inter,sans-serif' }}>
+    <div style={{ fontFamily:'Inter,sans-serif', background:t.surface, border:`1px solid ${t.border}`,
+      borderRadius:RADIUS.xl2, boxShadow:elevation(t,'sm'), padding:'18px 20px' }}>
       <div style={{ fontSize:11, color:t.text4, letterSpacing:.8, fontWeight:700,
-        textTransform:'uppercase', marginBottom:10 }}>
+        textTransform:'uppercase', marginBottom:16 }}>
         Key Points
       </div>
-      {visible.map(s => (
-        <div key={s.key} style={{ background:t.surface2, border:`1px solid ${t.border}`,
-          borderLeft:`3px solid ${s.accent}`, borderRadius:10, padding:'10px 12px 11px', marginBottom:8 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:6 }}>
+      {visible.map((s, i) => (
+        <div key={s.key} style={{ borderLeft:`3px solid ${s.accent}`, paddingLeft:14,
+          marginBottom: i < visible.length - 1 ? 18 : 0 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:7 }}>
             <span style={{ fontSize:13 }}>{s.icon}</span>
-            <span style={{ fontSize:12, fontWeight:700, color:t.text }}>{s.label}</span>
+            <span style={{ fontSize:12.5, fontWeight:700, color:t.text }}>{s.label}</span>
           </div>
           <ul style={{ margin:0, paddingLeft:16 }}>
-            {s.items.map((item, i) => (
-              <li key={i} style={{ fontSize:12.5, color:t.text2, lineHeight:1.6, marginBottom:3 }}>{item}</li>
+            {s.items.map((item, j) => (
+              <li key={j} style={{ fontSize:12.5, color:t.text2, lineHeight:1.65, marginBottom:4 }}>{item}</li>
             ))}
           </ul>
         </div>
