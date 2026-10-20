@@ -89,6 +89,25 @@ const RATINGS = [
 // out unless asked for.
 const REVIEW_DIFFICULTIES = ['Easy', 'Medium', 'Hard'];
 
+// Quick-pick block sizes for the Card Count selector — 'all' (the existing,
+// unchanged behaviour: cycle through everything due+new) plus a few common
+// exact counts. A custom number input sits alongside these for "an exact
+// block" beyond these presets.
+const CARD_COUNT_PRESETS = [10, 20, 30, 50];
+
+// mm:ss (or h:mm:ss past an hour) for the live header timer — deliberately
+// a different shape from Insights' own formatDuration (seconds → "2m"/"1h
+// 5m"): this one is a ticking readout mid-session, that one's a finished
+// summary, and conflating the two formats would make neither read right.
+function formatElapsed(totalSeconds) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const ss = String(s).padStart(2, '0');
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${ss}`;
+  return `${m}:${ss}`;
+}
+
 // Same scheduling math as before this batch — UNCHANGED. This is the "Review
 // Queue data logic" the brief explicitly says not to touch.
 function calcNext(entry, rating) {
@@ -159,6 +178,85 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   const [done, setDone]         = useState(false);
   const [ended, setEnded]       = useState(false); // user paused midway
   const [lightboxIdx, setLightboxIdx] = useState(null); // index into card.images, or null
+  const [cardLimit, setCardLimit] = useState('all'); // 'all' | exact card count for this session
+
+  // Count-up session timer — elapsedSec is the authoritative displayed/
+  // persisted value, ticking via timerRunning rather than a raw Date.now()
+  // diff so pausing genuinely freezes it (no "paused time" counted) and
+  // resuming continues from exactly where it left off.
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [timerRunning, setTimerRunning] = useState(false);
+  useEffect(() => {
+    if (!timerRunning) return;
+    const id = setInterval(() => setElapsedSec(s => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [timerRunning]);
+
+  // One review_sessions row per session (see SUPABASE_MIGRATION_REVIEW_
+  // SESSIONS.sql), written once it ends — loggedRef guards against writing
+  // it twice (e.g. reaching "done" and then also unmounting). sessionMetaRef
+  // holds the system/target-count this session started with, captured once
+  // at the start since filterSystem/cardLimit can change again afterward
+  // (picking new filters for the NEXT session shouldn't retroactively alter
+  // what gets logged for this one).
+  const loggedRef = useRef(true); // true = nothing pending (no session started yet)
+  const sessionMetaRef = useRef(null);
+
+  // Persist this session's result exactly once, whenever it ends — reaching
+  // "done", exiting to the overview, or starting a fresh session before this
+  // one got anywhere (abandoning it). Never logged if nothing was actually
+  // rated (sessionDone===0, or the override passed from rate() below is 0)
+  // — opening Review Queue and immediately leaving isn't "a study session".
+  // Fire-and-forget, same as review_log/study_sessions: a missing table or
+  // transient failure here must never affect the review itself.
+  // `countOverride` exists because rate() calls this in the same tick as
+  // setSess(sessionDone+1) — state setters don't apply until the next
+  // render, so reading `sessionDone` here would undercount the very last
+  // card by one without it.
+  const flushSessionLog = (countOverride) => {
+    if (loggedRef.current) return;
+    loggedRef.current = true;
+    const count = countOverride ?? sessionDone;
+    if (count === 0 || !userId) return;
+    const meta = sessionMetaRef.current || {};
+    supabase.from('review_sessions').insert({
+      user_id: userId,
+      system: meta.system || null,
+      card_count: count,
+      target_count: meta.targetCount ?? null,
+      duration_seconds: elapsedSec,
+      started_at: new Date(Date.now() - elapsedSec * 1000).toISOString(),
+    }).then(({ error }) => {
+      if (error && process.env.NODE_ENV !== 'production') {
+        // eslint-disable-next-line no-console
+        console.warn('[ReviewQueue] review_sessions insert failed — has SUPABASE_MIGRATION_REVIEW_SESSIONS.sql been run?', error.message);
+      }
+    });
+  };
+
+  // Unmount safety net — navigating away from Review Queue entirely (e.g.
+  // to Dashboard) unmounts this component; without this, a session
+  // abandoned that way (as opposed to via "Back to Overview") would never
+  // get logged. flushRef always holds the LATEST flushSessionLog closure
+  // (reassigned every render), so this cleanup — fixed at effect-setup
+  // time — still sees current sessionDone/elapsedSec/userId when it
+  // actually runs, instead of whatever they were on first mount.
+  const flushRef = useRef(flushSessionLog);
+  flushRef.current = flushSessionLog;
+  useEffect(() => () => flushRef.current(), []);
+
+  // Shared by startNewSession and the initialFilterSystem effect below
+  // (which can't call startNewSession directly — see its own comment) so
+  // both reset the timer/log bookkeeping identically.
+  const beginSession = (builtQueue, meta) => {
+    flushSessionLog(); // in case a previous unfinished session is being abandoned
+    setQueue(builtQueue);
+    setIdx(0); setFlipped(false); setDone(false); setEnded(false); setSess(0);
+    setSessionStarted(true);
+    setElapsedSec(0); setTimerRunning(true);
+    loggedRef.current = false;
+    sessionMetaRef.current = meta;
+  };
 
   // Same due/fresh definitions used everywhere else in the app (Dashboard,
   // reviewQueue.js's own buildCycledQueue) — filtering just chooses which
@@ -173,26 +271,34 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     return list;
   }, []);
 
-  const startNewSession = useCallback((mode = filterMode, system = filterSystem, difficulty = filterDifficulty) => {
-    setQueue(buildCycledQueue(filterEntries(mode, system, difficulty)));
-    setIdx(0); setFlipped(false); setDone(false); setEnded(false); setSess(0);
-    setSessionStarted(true);
-  }, [filterMode, filterSystem, filterDifficulty, filterEntries]);
+  // Deliberately NOT a useCallback — it closes over flushSessionLog, which
+  // in turn closes over sessionDone/elapsedSec/userId; memoizing this on a
+  // narrower dep list (filters only) would let it silently call a STALE
+  // flushSessionLog whenever those hadn't changed but the session's own
+  // progress had. Nothing depends on this function's referential identity
+  // (see the initialFilterSystem effect's own comment on why IT avoids
+  // that dependency), so there's no cost to leaving it unmemoized.
+  const startNewSession = (mode = filterMode, system = filterSystem, difficulty = filterDifficulty, limit = cardLimit) => {
+    let built = buildCycledQueue(filterEntries(mode, system, difficulty));
+    if (limit !== 'all') built = built.slice(0, limit);
+    beginSession(built, { system: system || null, targetCount: limit === 'all' ? null : limit });
+  };
 
-  const backToOverview = () => setSessionStarted(false);
+  const backToOverview = () => { flushSessionLog(); setSessionStarted(false); };
 
   // Arriving from Insights' "Needs attention" — jump straight into a due
   // session for that system, exactly like clicking a priority row on this
   // screen's own overview already does.
   //
-  // Inlines startNewSession's body instead of calling it directly: calling
-  // setFilterSystem below changes startNewSession's own identity (it's a
-  // useCallback that depends on filterSystem), which would make an
-  // [initialFilterSystem, startNewSession] dependency array fire this
-  // effect a second time right after the first — reshuffling the queue
-  // twice on landing. Depending on `filterEntries` instead (stable —  it's
-  // a useCallback with no deps) keeps this effect genuinely single-fire per
-  // navigation without needing an exhaustive-deps suppression.
+  // Calls beginSession directly instead of startNewSession: depending on
+  // `filterEntries` (stable — a useCallback with no deps) instead of
+  // startNewSession itself keeps this effect genuinely single-fire per
+  // navigation, since setFilterSystem below would otherwise combine with a
+  // startNewSession dependency to fire this effect a second time right
+  // after the first, reshuffling the queue twice on landing. A "Needs
+  // attention" jump always means every due card in that system, so it
+  // bypasses the Card Count limit entirely (targetCount: null) rather than
+  // inheriting whatever was last picked on this screen's own overview.
   useEffect(() => {
     if (!initialFilterSystem) return;
     setFilterSystem(initialFilterSystem);
@@ -200,9 +306,8 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     // silently narrow this one too — arriving from "Needs attention" means
     // every due card in this system, not whatever was last selected here.
     setFilterDifficulty('All');
-    setQueue(buildCycledQueue(filterEntries('due', initialFilterSystem, 'All')));
-    setIdx(0); setFlipped(false); setDone(false); setEnded(false); setSess(0);
-    setSessionStarted(true);
+    beginSession(buildCycledQueue(filterEntries('due', initialFilterSystem, 'All')),
+      { system: initialFilterSystem, targetCount: null });
   }, [initialFilterSystem, filterEntries]);
 
   const card = queue[idx];
@@ -344,9 +449,13 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
         }
       });
     }
-    setSess(p => p + 1);
-    if (idx + 1 >= total) setDone(true);
-    else { setIdx(p => p + 1); setFlipped(false); }
+    const newSessionDone = sessionDone + 1;
+    setSess(newSessionDone);
+    if (idx + 1 >= total) {
+      setDone(true);
+      setTimerRunning(false);
+      flushSessionLog(newSessionDone);
+    } else { setIdx(p => p + 1); setFlipped(false); }
   };
 
   const skip = () => {
@@ -366,7 +475,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     setFlipped(false);
   };
 
-  const pauseSession = () => setEnded(true);
+  const pauseSession = () => { setEnded(true); setTimerRunning(false); };
 
   const localCss = `
     .mb-rq-btn { transition: filter ${MOTION.fast} ${MOTION.ease}, transform ${MOTION.fast} ${MOTION.ease}; }
@@ -525,13 +634,54 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                   );
                 })}
               </div>
+
+              {/* Card Count — an exact block size for the session about to
+                  start, not a filter (unlike mode/system/difficulty above,
+                  it doesn't change dueCount/newCount). 'All' (default)
+                  reproduces the exact previous behaviour: cycle through
+                  everything due+new. Picking a number just slices the same
+                  built queue to that length — buildCycledQueue's own
+                  due/new composition and shuffling is untouched. */}
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center', marginTop:8 }}>
+                <button className="mb-rq-filter" onClick={()=>setCardLimit('all')} style={{
+                  fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:'Inter,sans-serif',
+                  background: cardLimit==='all' ? t.navActiveBg : t.surface2,
+                  color: cardLimit==='all' ? t.navActiveText : t.text3,
+                  border:`1px solid ${cardLimit==='all' ? t.navActiveBorder : t.border}`,
+                  borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer',
+                  transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}` }}>
+                  All
+                </button>
+                {CARD_COUNT_PRESETS.map(n => (
+                  <button key={n} className="mb-rq-filter" onClick={()=>setCardLimit(n)} style={{
+                    fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:'Inter,sans-serif',
+                    background: cardLimit===n ? t.navActiveBg : t.surface2,
+                    color: cardLimit===n ? t.navActiveText : t.text3,
+                    border:`1px solid ${cardLimit===n ? t.navActiveBorder : t.border}`,
+                    borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer',
+                    transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}` }}>
+                    {n}
+                  </button>
+                ))}
+                <input type="number" min="1" placeholder="Custom"
+                  value={typeof cardLimit === 'number' && !CARD_COUNT_PRESETS.includes(cardLimit) ? cardLimit : ''}
+                  onChange={e => {
+                    const v = parseInt(e.target.value, 10);
+                    setCardLimit(v > 0 ? v : 'all');
+                  }}
+                  style={{ width:88, fontSize:FONT.size.sm, fontWeight:FONT.weight.medium, fontFamily:'Inter,sans-serif',
+                    background:t.surface2, color:t.text2, border:`1px solid ${t.border}`,
+                    borderRadius:RADIUS.pill, padding:'8px 12px', outline:'none' }} />
+              </div>
             </div>
 
             <button className="mb-rq-btn" onClick={()=>startNewSession()} style={{
               width:'100%', background:t.accent, color:'#fff', border:'none', borderRadius:RADIUS.md,
               padding:'14px 20px', fontSize:FONT.size.base, fontWeight:FONT.weight.bold, cursor:'pointer',
               display:'flex', alignItems:'center', justifyContent:'center', gap:8, fontFamily:'Inter,sans-serif' }}>
-              <IconPlay size={14} /> {dueCount>0 ? 'Start Review' : 'Review New Cards'}
+              <IconPlay size={14} />
+              {dueCount>0 ? 'Start Review' : 'Review New Cards'}
+              {cardLimit !== 'all' ? ` · ${Math.min(cardLimit, dueCount+newCount)} cards` : ''}
             </button>
           </>
         )}
@@ -570,7 +720,8 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
           {done ? 'Session complete' : 'Paused'}
         </div>
         <div style={{ fontSize:FONT.size.base, color:t.text3, marginBottom:6 }}>
-          Reviewed <strong style={{ color:t.text2 }}>{sessionDone}</strong> of <strong style={{ color:t.text2 }}>{total}</strong> cards this session.
+          Reviewed <strong style={{ color:t.text2 }}>{sessionDone}</strong> of <strong style={{ color:t.text2 }}>{total}</strong> cards this session
+          {elapsedSec > 0 && <> in <strong style={{ color:t.text2 }}>{formatElapsed(elapsedSec)}</strong></>}.
         </div>
         {!done && (
           <div style={{ fontSize:FONT.size.xs, color:t.text4, marginBottom:26 }}>
@@ -581,7 +732,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
 
         <div style={{ display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap' }}>
           {!done && (
-            <button className="mb-rq-btn" onClick={() => { setFlipped(false); setEnded(false); }} style={{
+            <button className="mb-rq-btn" onClick={() => { setFlipped(false); setEnded(false); setTimerRunning(true); }} style={{
               background:t.accent, color:'#fff', border:'none', borderRadius:RADIUS.sm+1,
               padding:'11px 22px', fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, cursor:'pointer',
               display:'flex', alignItems:'center', gap:7, fontFamily:'Inter,sans-serif' }}>
@@ -654,6 +805,14 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
             <IconChevronLeft size={14} />
           </button>
           <span style={{ fontSize:FONT.size.sm, color:t.text3, fontWeight:FONT.weight.medium, padding:'0 2px' }}>{idx + 1} / {total}</span>
+          {/* Count-up session timer — ticks via timerRunning (see its own
+              effect above), so it genuinely freezes while paused instead of
+              just visually looking frozen. tabular-nums keeps the digits
+              from jittering the whole cluster's width as seconds roll over. */}
+          <span style={{ fontSize:FONT.size.xs, color:t.text4, fontVariantNumeric:'tabular-nums', padding:'0 2px' }}
+            title="Session time">
+            {formatElapsed(elapsedSec)}
+          </span>
           <button className="mb-headerbtn" onClick={pauseSession} title="Pause session" aria-label="Pause session" style={{
             background:'none', border:'none', color:t.text3, padding:6, width:28, height:28,
             borderRadius:RADIUS.sm, cursor:'pointer',
