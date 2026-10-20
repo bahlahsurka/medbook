@@ -600,3 +600,38 @@ export function handleRichPaste(e, textColor) {
   e.preventDefault();
   document.execCommand && document.execCommand('insertHTML', false, richMarkersToHtml(block, textColor));
 }
+
+// "Paste as plain text" — the opt-in escape hatch from handleRichPaste's
+// auto-formatting, for a source whose structure/markdown-like punctuation
+// you don't want carried over (e.g. a PDF/slide export full of stray
+// asterisks or odd line breaks). Takes only the clipboard's plain-text
+// flavour and inserts it completely literally — no HTML-structure
+// reconstruction, no markdown-marker detection, no bullet auto-conversion
+// — so it lands exactly like the old plain-textarea editor's paste did,
+// leaving the user to format/bullet it manually afterward if they want to.
+export function handlePlainPaste(e) {
+  const plain = e.clipboardData && e.clipboardData.getData('text/plain');
+  if (!plain) return;
+  e.preventDefault();
+  document.execCommand && document.execCommand('insertText', false, plain);
+}
+
+// Strips the two things that make Supabase/PostgREST reject an otherwise-
+// fine insert/update with "unsupported Unicode escape sequence": a literal
+// NUL character (Postgres text columns reject it outright, in any
+// encoding) and a lone/unpaired UTF-16 surrogate (common fallout from
+// copy-pasting out of a PDF whose text layer was built with a broken
+// font/ligature mapping — the pasted string ends up with half of a
+// surrogate pair with no partner). Call this on any free-text field
+// (title/notes) right before it's sent to Supabase, regardless of how it
+// got into that field (typed, rich-pasted, plain-pasted) — this is the
+// backstop, not a replacement for sanitizing at paste time.
+// Each alternative is zero-width outside the single surrogate char itself
+// (lookahead/lookbehind, never consumed), so adjacent lone surrogates are
+// each matched independently — no cross-match consumption bugs from a
+// naive "consume the neighbour too" approach.
+const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+export function sanitizeForStorage(str) {
+  if (!str) return str;
+  return str.replace(/\u0000/g, '').replace(LONE_SURROGATE_RE, '');
+}

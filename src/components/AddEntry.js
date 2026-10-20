@@ -7,7 +7,8 @@ import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
 import { IconEdit, IconImages, IconUpload, IconX, IconCheck, IconSparkle, IconListBullet } from '../lib/icons';
 import HLToolbar from './HLToolbar';
 import AIService from '../services/ai';
-import { handleBulletKeyDown, toggleBulletLines, handleRichPaste, inlineTextWithMarks } from '../lib/bulletList';
+import { handleBulletKeyDown, toggleBulletLines, handleRichPaste, handlePlainPaste,
+  sanitizeForStorage, inlineTextWithMarks } from '../lib/bulletList';
 
 const DRAFT_KEY = 'medbook_draft_v2';
 const loadDraft = sys => { try { return JSON.parse(localStorage.getItem(DRAFT_KEY)||'{}')[sys]||null; } catch { return null; } };
@@ -41,6 +42,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
   const [sysOpen,   setSysOpen] = useState(false);
   const [dragOver,  setDrag]    = useState(false);
   const [hlMode,    setHlMode]  = useState(false);
+  const [plainPaste,setPP]      = useState(false);
 
   const fileRef = useRef(); const galRef = useRef(); const taRef = useRef();
   // Synchronous duplicate-submit guard (setSaving is async; two fast clicks can race).
@@ -108,8 +110,16 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
       // drifts by however many characters trim() removed from the front.
       const trimmedNotes = notes.trim();
       const adjustedHighlights = adjustHighlights(notes, trimmedNotes, hl.highlights);
+      // A literal NUL character or an unpaired UTF-16 surrogate (both real
+      // fallout from pasting out of some PDFs) makes Supabase/PostgREST
+      // reject the whole insert with "unsupported Unicode escape sequence"
+      // — sanitize right before the payload is built, after highlight
+      // offsets are already computed against the untouched text, so this
+      // can't shift any highlight position.
+      const cleanTitle = sanitizeForStorage(title.trim());
+      const cleanNotes = sanitizeForStorage(trimmedNotes);
       const rows = systems.map(sys => ({
-        user_id:userId, system:sys, title:title.trim(), notes:trimmedNotes,
+        user_id:userId, system:sys, title:cleanTitle, notes:cleanNotes,
         difficulty, images:urls, highlights:adjustedHighlights,
         pinned:false, review_count:0, last_reviewed:null
       }));
@@ -122,7 +132,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
         // simply report it — notes are never at risk.
         setSS('Analyzing…');
         try {
-          const sections = await AIService.analyzeReview(trimmedNotes);
+          const sections = await AIService.analyzeReview(cleanNotes);
           const payload = {
             ai_sections: sections,
             ai_generated_at: new Date().toISOString(),
@@ -273,6 +283,19 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
                   color:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
                   display:'flex',alignItems:'center',gap:5
                 }}><IconListBullet size={11} /> Bullets</button>
+              <button
+                className="mb-ae-btn"
+                onMouseDown={e=>e.preventDefault()}
+                onTouchStart={e=>e.preventDefault()}
+                onClick={()=>setPP(p=>!p)}
+                title="While on, pasted text is inserted exactly as copied — no auto bold/italic/bullets — so you can format it yourself"
+                style={{
+                  fontSize:FONT.size.xs,background:plainPaste?t.hlBtnBg:t.surface3,
+                  border:`1px solid ${plainPaste?t.hlBtnBorder:t.border}`,
+                  borderRadius:RADIUS.sm-1,padding:'4px 10px',cursor:'pointer',
+                  color:plainPaste?t.hlBtnText:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
+                  display:'flex',alignItems:'center',gap:5
+                }}>{plainPaste?'Plain paste on':'Plain Paste'}</button>
               {hl.highlights.length>0 && (
                 <span style={{fontSize:FONT.size.xs,color:t.text4}}>
                   {hl.highlights.length} highlight{hl.highlights.length!==1?'s':''}
@@ -317,7 +340,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
                 onKeyUp={hl.onSelChange}
                 onTouchEnd={hl.onSelChange}
                 onKeyDown={e => { handleBulletKeyDown(e); if (!e.defaultPrevented) hl.handleShortcut(e); }}
-                onPaste={e => handleRichPaste(e, t.text)}
+                onPaste={e => plainPaste ? handlePlainPaste(e) : handleRichPaste(e, t.text)}
                 data-placeholder="Key concepts, mnemonics, clinical pearls…"
                 style={{
                   ...inp, minHeight:168, lineHeight:'1.7', marginTop:0,
