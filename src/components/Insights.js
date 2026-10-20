@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
 import { computeSystemStats } from '../lib/systemStats';
+import { timeAgo } from '../lib/timeAgo';
 import { IconRepeat } from '../lib/icons';
 
 // ============================================================================
@@ -50,6 +51,7 @@ function SampleTag({ t }) {
 function useInsightsData(userId) {
   const [studySessions, setStudySessions] = useState(undefined); // undefined=loading, null=unavailable, []=real
   const [reviewLogs, setReviewLogs] = useState(undefined);
+  const [reviewSessions, setReviewSessions] = useState(undefined);
 
   useEffect(() => {
     if (!userId) return;
@@ -87,10 +89,29 @@ function useInsightsData(userId) {
         setReviewLogs(data || []);
       });
 
+    // Recent Study Sessions — one row per Review Queue session (see
+    // SUPABASE_MIGRATION_REVIEW_SESSIONS.sql), written by ReviewQueue.js
+    // when a session ends. A handful is plenty for "recent"; no date
+    // window needed since it's already ordered newest-first and capped.
+    supabase.from('review_sessions').select('system,card_count,target_count,duration_seconds,started_at')
+      .eq('user_id', userId).order('started_at', { ascending: false }).limit(5)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          if (process.env.NODE_ENV !== 'production') {
+            // eslint-disable-next-line no-console
+            console.warn('[Insights] review_sessions unavailable — has SUPABASE_MIGRATION_REVIEW_SESSIONS.sql been run?', error.message);
+          }
+          setReviewSessions(null);
+          return;
+        }
+        setReviewSessions(data || []);
+      });
+
     return () => { cancelled = true; };
   }, [userId]);
 
-  return { studySessions, reviewLogs };
+  return { studySessions, reviewLogs, reviewSessions };
 }
 
 function formatHourRange(hour) {
@@ -121,6 +142,14 @@ function formatMinutes(mins) {
   if (mins < 60) return `${mins}m`;
   const h = Math.floor(mins / 60), m = mins % 60;
   return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+// Same shape as formatMinutes but takes raw seconds (review_sessions'
+// duration_seconds) and handles the sub-minute case — a quick 10-card
+// block can finish in well under a minute.
+function formatDuration(totalSeconds) {
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  return formatMinutes(Math.round(totalSeconds / 60));
 }
 
 // Deliberately minimal: no axis lines, no gridlines, no permanent per-point
@@ -221,7 +250,7 @@ function RetentionRing({ t, pct, size = 84, stroke = 7 }) {
 
 export default function Insights({ entries, userSystems, userId, onNavigateSystem, onReviewSystem }) {
   const { t } = useTheme();
-  const { studySessions, reviewLogs } = useInsightsData(userId);
+  const { studySessions, reviewLogs, reviewSessions } = useInsightsData(userId);
 
   // Shared by both the Study Time chart and Review Consistency's strip —
   // one real definition of "the last 7 days", oldest to newest.
@@ -488,6 +517,43 @@ export default function Insights({ entries, userSystems, userId, onNavigateSyste
         </div>
 
       </div>
+
+      {/* Recent Study Sessions — one row per Review Queue session (see
+          ReviewQueue.js's Card Count selector + session timer, and
+          SUPABASE_MIGRATION_REVIEW_SESSIONS.sql). Omitted entirely rather
+          than shown empty when there's nothing real to show yet — no mock/
+          sample variant exists for this card (unlike Study time/Retention
+          above), since it's a brand-new feature with no "what it'll look
+          like" placeholder worth fabricating. */}
+      {Array.isArray(reviewSessions) && reviewSessions.length > 0 && (
+        <div style={{ ...card, marginBottom:SPACE.xl2 }}>
+          <div style={{ ...capLabel, marginBottom:SPACE.md }}>Recent study sessions</div>
+          <div>
+            {reviewSessions.map((s, i) => (
+              <div key={i} style={{ display:'flex', alignItems:'center', gap:SPACE.md, padding:'10px 2px',
+                borderBottom: i < reviewSessions.length - 1 ? `1px solid ${t.border}` : 'none' }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, color:t.text,
+                    overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    {s.system || 'All systems'}
+                  </div>
+                  <div style={{ fontSize:FONT.size.xs, color:t.text4, marginTop:2 }}>
+                    {timeAgo(new Date(s.started_at))}
+                  </div>
+                </div>
+                <div style={{ textAlign:'right', flexShrink:0 }}>
+                  <div style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, color:t.text2 }}>
+                    {s.card_count}{s.target_count ? ` / ${s.target_count}` : ''} cards
+                  </div>
+                  <div style={{ fontSize:FONT.size.xs, color:t.text4, marginTop:2 }}>
+                    {formatDuration(s.duration_seconds)}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Needs attention */}
       <div>
