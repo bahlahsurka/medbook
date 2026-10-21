@@ -59,9 +59,15 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
   const [initialNotesHtml] = useState(() =>
     markedTextToHtml(draft?.notes || '', draft?.highlights || [], t.text, isDark));
 
+  // "Fieldless until active" — a soft recessed surface2 fill with no
+  // visible border at rest, instead of a permanent hard 1px line. The
+  // border only appears (as the active system's colour, with a soft glow
+  // ring) once the field is actually focused — see .mb-ae-input below —
+  // which is what makes a form built from these read as considered rather
+  // than a stack of identical grey boxes.
   const inp = {
-    display:'block', width:'100%', marginTop:8, background:t.surface,
-    border:`1px solid ${t.borderStrong}`, borderRadius:RADIUS.md, color:t.text,
+    display:'block', width:'100%', marginTop:8, background:t.surface2,
+    border:'1px solid transparent', borderRadius:RADIUS.md, color:t.text,
     padding:'10px 12px', fontSize:FONT.size.md, outline:'none', boxSizing:'border-box',
     fontFamily:'Inter,sans-serif'
   };
@@ -166,13 +172,19 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
     .mb-ae-btn:hover:not(:disabled) { filter: brightness(0.97); }
     body.medbook-dark .mb-ae-btn:hover:not(:disabled) { filter: brightness(1.15); }
     .mb-ae-btn:active:not(:disabled) { transform: scale(0.96); }
-    .mb-ae-drop { transition: border-color ${MOTION.fast} ${MOTION.ease}, background ${MOTION.fast} ${MOTION.ease}; }
-    .mb-ae-drop:hover { border-color: ${color}; }
+    .mb-ae-drop { transition: border-color ${MOTION.fast} ${MOTION.ease}, background ${MOTION.fast} ${MOTION.ease}, box-shadow ${MOTION.fast} ${MOTION.ease}; }
+    .mb-ae-drop:hover { border-color: ${color}; box-shadow: 0 6px 20px -10px ${color}50; }
     .mb-ae-chip { transition: filter ${MOTION.fast} ${MOTION.ease}; }
     .mb-ae-chip:hover { filter: brightness(0.96); }
     .mb-ae-fade { animation: medbook-fade-in ${MOTION.normal} ${MOTION.ease}; }
     .mb-ae-thumb-x { transition: transform ${MOTION.fast} ${MOTION.ease}; }
     .mb-ae-thumb-x:hover { transform: scale(1.12); }
+    /* The one "field becomes active" treatment shared by the title input
+       and the notes editor — a colour-matched border + soft glow ring on
+       focus, instead of a permanent hard grey line sitting there unused
+       95% of the time. */
+    .mb-ae-input { transition: border-color ${MOTION.fast} ${MOTION.ease}, box-shadow ${MOTION.fast} ${MOTION.ease}; }
+    .mb-ae-input:focus { border-color: ${color}; box-shadow: 0 0 0 3px ${color}1f; outline: none; }
     /* contentEditable has no native placeholder attribute — :empty only
        matches when it truly has zero child nodes, which is exactly what
        dangerouslySetInnerHTML leaves it with for an empty note. */
@@ -184,21 +196,29 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
       <style>{localCss}</style>
 
       <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:SPACE.xl}}>
+        <span style={{width:8,height:8,borderRadius:RADIUS.circle,background:color,flexShrink:0}} />
         <div style={{fontSize:FONT.size.xl,fontWeight:FONT.weight.bold,color:t.text}}>New Entry</div>
         {hasDraft && <span style={{fontSize:FONT.size.xs,background:t.hlBtnBg,color:t.hlBtnText,
           borderRadius:RADIUS.sm-1,padding:'2px 9px',fontWeight:FONT.weight.semibold,border:`1px solid ${t.hlBtnBorder}`}}>
           Draft restored</span>}
       </div>
 
-      {/* One lightly-contained card for the whole form — same "reading pane"
-          treatment as the entry detail screen, instead of fields floating
-          loose on the page background. */}
-      <div style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
-        boxShadow:elevation(t,'sm'),padding:SPACE.xl2}}>
+      {/* One premium-feeling shell for the whole form — a colour-tinted
+          wash fading into the surface plus a colour-matched glow shadow
+          (the same language the Review Queue card and the Add Entry CTA
+          elsewhere in the app already use), instead of a flat bordered
+          rectangle. Inner fields are deliberately simpler (a recessed
+          surface2 fill, see .mb-ae-input) so this one shell reads as the
+          premium surface rather than every element piling on its own
+          gradient. */}
+      <div style={{background:`linear-gradient(180deg, ${color}10 0%, ${t.surface} 240px)`,
+        border:`1px solid ${t.border}`,borderRadius:RADIUS.xl2,
+        boxShadow:`0 24px 56px -30px ${color}40, ${elevation(t,'sm')}`,padding:SPACE.xl2}}>
         <div style={{display:'flex',flexDirection:'column',gap:SPACE.xl}}>
 
           <F label="TITLE *">
             <input value={title} onChange={e=>setTitle(e.target.value)}
+              className="mb-ae-input"
               placeholder="e.g. Digoxin toxicity: ECG changes"
               style={inp} autoFocus disabled={saving} />
           </F>
@@ -247,11 +267,12 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
             <div style={{display:'flex',gap:8,marginTop:8,flexWrap:'wrap'}}>
               {DIFFICULTY.map(d => (
                 <button key={d} className="mb-ae-btn" onClick={()=>!saving&&setDiff(d)} style={{
-                  padding:'7px 16px',borderRadius:RADIUS.sm,
-                  border:`1px solid ${difficulty===d?DIFF_COLOR[d]:t.border}`,
+                  padding:'7px 16px',borderRadius:RADIUS.pill,
+                  border:'none',
                   cursor:saving?'default':'pointer',fontSize:FONT.size.base,fontWeight:FONT.weight.semibold,
-                  background:difficulty===d?`${DIFF_COLOR[d]}1f`:t.surface,
-                  color:difficulty===d?DIFF_COLOR[d]:t.text3,fontFamily:'Inter,sans-serif'
+                  background:difficulty===d?`${DIFF_COLOR[d]}1f`:t.surface2,
+                  color:difficulty===d?DIFF_COLOR[d]:t.text3,fontFamily:'Inter,sans-serif',
+                  boxShadow:difficulty===d?`0 2px 10px -4px ${DIFF_COLOR[d]}60`:'none'
                 }}>{d}</button>
               ))}
             </div>
@@ -265,9 +286,9 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
                 onTouchStart={e=>e.preventDefault()}
                 onClick={()=>setHlMode(p=>!p)}
                 style={{
-                  fontSize:FONT.size.xs,background:hlMode?t.hlBtnBg:t.surface3,
-                  border:`1px solid ${hlMode?t.hlBtnBorder:t.border}`,
-                  borderRadius:RADIUS.sm-1,padding:'4px 10px',cursor:'pointer',
+                  fontSize:FONT.size.xs,background:hlMode?t.hlBtnBg:t.surface2,
+                  border:'none',
+                  borderRadius:RADIUS.pill,padding:'5px 11px',cursor:'pointer',
                   color:hlMode?t.hlBtnText:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
                   display:'flex',alignItems:'center',gap:5
                 }}><IconEdit size={11} /> {hlMode?'Highlighting on':'Highlight'}</button>
@@ -278,8 +299,8 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
                 onClick={()=>toggleBulletLines(taRef.current)}
                 title="Turn the current line (or selected lines) into bullet points"
                 style={{
-                  fontSize:FONT.size.xs,background:t.surface3,border:`1px solid ${t.border}`,
-                  borderRadius:RADIUS.sm-1,padding:'4px 10px',cursor:'pointer',
+                  fontSize:FONT.size.xs,background:t.surface2,border:'none',
+                  borderRadius:RADIUS.pill,padding:'5px 11px',cursor:'pointer',
                   color:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
                   display:'flex',alignItems:'center',gap:5
                 }}><IconListBullet size={11} /> Bullets</button>
@@ -290,9 +311,9 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
                 onClick={()=>setPP(p=>!p)}
                 title="While on, pasted text is inserted exactly as copied — no auto bold/italic/bullets — so you can format it yourself"
                 style={{
-                  fontSize:FONT.size.xs,background:plainPaste?t.hlBtnBg:t.surface3,
-                  border:`1px solid ${plainPaste?t.hlBtnBorder:t.border}`,
-                  borderRadius:RADIUS.sm-1,padding:'4px 10px',cursor:'pointer',
+                  fontSize:FONT.size.xs,background:plainPaste?t.hlBtnBg:t.surface2,
+                  border:'none',
+                  borderRadius:RADIUS.pill,padding:'5px 11px',cursor:'pointer',
                   color:plainPaste?t.hlBtnText:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
                   display:'flex',alignItems:'center',gap:5
                 }}>{plainPaste?'Plain paste on':'Plain Paste'}</button>
@@ -327,7 +348,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
                   character typed. */}
               <div
                 ref={taRef}
-                className="mb-ae-notes"
+                className="mb-ae-notes mb-ae-input"
                 contentEditable={!saving}
                 suppressContentEditableWarning
                 dangerouslySetInnerHTML={{ __html: initialNotesHtml }}
@@ -343,11 +364,11 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
                 onPaste={e => plainPaste ? handlePlainPaste(e) : handleRichPaste(e, t.text)}
                 data-placeholder="Key concepts, mnemonics, clinical pearls…"
                 style={{
-                  ...inp, minHeight:168, lineHeight:'1.7', marginTop:0,
+                  ...inp, minHeight:200, lineHeight:'1.7', marginTop:0,
                   fontSize:FONT.size.lg, whiteSpace:'pre-wrap', overflowWrap:'break-word',
                   fontWeight:400, letterSpacing:'normal',
                   WebkitTextSizeAdjust:'100%', textSizeAdjust:'100%',
-                  background: t.surface,
+                  borderRadius:RADIUS.xl,
                   caretColor: t.text,
                   color: t.text,
                 }}
@@ -362,13 +383,13 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
                 onDrop={e=>{e.preventDefault();setDrag(false);loadFiles(e.dataTransfer.files);}}
                 onClick={()=>!saving&&fileRef.current?.click()}
                 style={{flex:1,minWidth:120,border:`2px dashed ${dragOver?color:t.borderStrong}`,
-                  borderRadius:RADIUS.md,padding:'20px 14px',textAlign:'center',
+                  borderRadius:RADIUS.xl,padding:'20px 14px',textAlign:'center',
                   cursor:saving?'default':'pointer',background:dragOver?`${color}12`:t.surface2}}>
                 <IconImages size={20} style={{color:t.text3,marginBottom:6}} />
                 <div style={{fontSize:FONT.size.sm,color:t.text3}}>Drag & Drop</div>
               </div>
               <div className="mb-ae-drop" onClick={()=>!saving&&galRef.current?.click()}
-                style={{flex:1,minWidth:120,border:`2px dashed ${t.borderStrong}`,borderRadius:RADIUS.md,
+                style={{flex:1,minWidth:120,border:`2px dashed ${t.borderStrong}`,borderRadius:RADIUS.xl,
                   padding:'20px 14px',textAlign:'center',cursor:saving?'default':'pointer',background:t.surface2}}>
                 <IconUpload size={20} style={{color:t.text3,marginBottom:6}} />
                 <div style={{fontSize:FONT.size.sm,color:t.text3}}>From Gallery</div>
@@ -383,7 +404,7 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
                 {images.map((img,i) => (
                   <div key={i} style={{position:'relative'}}>
                     <img src={img.preview} alt="" style={{width:100,height:76,objectFit:'cover',
-                      borderRadius:RADIUS.sm+1,border:`1px solid ${t.border}`}} />
+                      borderRadius:RADIUS.lg,boxShadow:elevation(t,'sm')}} />
                     {!saving && <button className="mb-ae-thumb-x" onClick={()=>setImages(p=>p.filter((_,j)=>j!==i))} style={{
                       position:'absolute',top:-7,right:-7,background:t.danger,border:'none',
                       borderRadius:RADIUS.circle,width:20,height:20,color:'#fff',
@@ -412,7 +433,8 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
               background:saving?'#93c5fd':color, color:'#fff', border:'none',
               borderRadius:RADIUS.md, padding:'12px 28px', fontSize:FONT.size.md, fontWeight:FONT.weight.semibold,
               cursor:saving?'not-allowed':'pointer', fontFamily:'Inter,sans-serif',
-              minWidth:180, display:'flex', alignItems:'center', justifyContent:'center', gap:8
+              minWidth:180, display:'flex', alignItems:'center', justifyContent:'center', gap:8,
+              boxShadow:saving?'none':`0 4px 14px -2px ${color}55`
             }}>
               {saving ? <>
                 <span style={{display:'inline-block',width:14,height:14,
@@ -431,7 +453,8 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
                   border:`1px solid ${t.navActiveBorder}`,
                   borderRadius:RADIUS.md, padding:'12px 20px', fontSize:FONT.size.md, fontWeight:FONT.weight.semibold,
                   cursor:'pointer', fontFamily:'Inter,sans-serif',
-                  display:'flex', alignItems:'center', gap:7
+                  display:'flex', alignItems:'center', gap:7,
+                  boxShadow:`0 4px 14px -4px ${t.navActiveText}40`
                 }}>
                 <IconSparkle size={13} /> Save + Analyze
               </button>
