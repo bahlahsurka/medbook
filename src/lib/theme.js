@@ -7,13 +7,18 @@ const STORAGE_KEY = 'medbook_theme';
 // they carry meaning and read fine on either background.
 export const LIGHT = {
   name:'light',
-  bg:'#f3f4f6',            // app shell
-  appBg:'#f9fafb',         // scroll/content area + body
-  surface:'#ffffff',       // cards, header, sidebar, modals
-  surface2:'#f9fafb',      // insets, subtle inputs, hover
-  surface3:'#f3f4f6',      // muted buttons
-  border:'#e5e7eb',
-  borderStrong:'#d1d5db',
+  // A deliberately dimmer, greyer light palette — a pure-white surface
+  // against near-black text was simply too much contrast/glare for long
+  // study sessions. Every neutral below is ~5-10% darker than before; text
+  // colours are untouched, so legibility/contrast ratios aren't weakened,
+  // only the raw brightness of the large background areas is.
+  bg:'#e8eaed',            // app shell
+  appBg:'#eef0f3',         // scroll/content area + body
+  surface:'#f7f8fa',       // cards, header, sidebar, modals — soft off-white, not pure #fff
+  surface2:'#eef0f3',      // insets, subtle inputs, hover
+  surface3:'#e4e7eb',      // muted buttons
+  border:'#d8dbe0',
+  borderStrong:'#c3c7ce',
   text:'#111827',
   text2:'#374151',
   text3:'#6b7280',

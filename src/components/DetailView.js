@@ -4,7 +4,7 @@ import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
 import { buildHighlightParts, resolveHL, adjustHighlights, matchHighlightShortcutView, richMarkersToHtml, markedTextToHtml } from '../lib/highlights';
 import RichRuns from '../lib/RichRuns';
 import { useHighlight, clearRange } from '../lib/useHighlight';
-import { useTheme, SPACE, RADIUS, FONT, Z, elevation } from '../lib/theme';
+import { useTheme, SPACE, RADIUS, FONT, Z, MOTION, elevation } from '../lib/theme';
 import { IconChevronLeft, IconChevronRight, IconEdit, IconCheck, IconTrash, IconPin,
   IconImages, IconSparkle, IconX, IconDownload, IconChart, IconListBullet } from '../lib/icons';
 import HLToolbar from './HLToolbar';
@@ -287,8 +287,8 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   onPrev, onNext, hasPrev, hasNext }) {
   const { t, isDark } = useTheme();
 
-  const inp={display:'block',width:'100%',marginTop:8,background:t.surface,
-    border:`1px solid ${t.borderStrong}`,borderRadius:RADIUS.md,color:t.text,padding:'10px 12px',
+  const inp={display:'block',width:'100%',marginTop:8,background:t.surface2,
+    border:'1px solid transparent',borderRadius:RADIUS.md,color:t.text,padding:'10px 12px',
     fontSize:FONT.size.md,outline:'none',boxSizing:'border-box',fontFamily:'Inter,sans-serif'};
   const [lb,      setLb]      = useState(null);
   const [editing, setEditing] = useState(false);
@@ -807,8 +807,14 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   // ── EDIT MODE ──────────────────────────────────────────────────────────
   // A narrower cap than view mode even on desktop — a form of stacked
   // fields reads worse stretched to full width than a moderate column does.
+  const editLocalCss = `
+    .mb-dv-input { transition: border-color ${MOTION.fast} ${MOTION.ease}, box-shadow ${MOTION.fast} ${MOTION.ease}; }
+    .mb-dv-input:focus { border-color: ${color}; box-shadow: 0 0 0 3px ${color}1f; outline: none; }
+  `;
+
   if (editing) return (
     <div className="mb-detail-shell-narrow" style={{fontFamily:'Inter,sans-serif'}}>
+      <style>{editLocalCss}</style>
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:SPACE.lg+2}}>
         <IconEdit size={15} style={{color:t.text3,flexShrink:0}} />
         <div style={{fontSize:FONT.size.md,fontWeight:FONT.weight.bold,color:t.text}}>
@@ -816,22 +822,25 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         </div>
       </div>
 
-      {/* Same card treatment as view mode below — editing reads as a
-          workspace panel rather than bare fields floating on the page. */}
-      <div style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
-        padding:SPACE.xl,boxShadow:elevation(t,'sm')}}>
-        <div style={{display:'flex',flexDirection:'column',gap:SPACE.lg+2}}>
+      {/* Same gradient-wash + glow treatment as the Add Entry form — one
+          premium shell for the whole form, with inner fields staying
+          simple (recessed surface2 fill, see .mb-dv-input) rather than
+          every element piling on its own gradient. */}
+      <div style={{background:`linear-gradient(180deg, ${color}10 0%, ${t.surface} 240px)`,
+        border:`1px solid ${t.border}`,borderRadius:RADIUS.xl2,
+        boxShadow:`0 24px 56px -30px ${color}40, ${elevation(t,'sm')}`,padding:SPACE.xl2}}>
+        <div style={{display:'flex',flexDirection:'column',gap:SPACE.xl}}>
           <F label="TITLE *">
-            <input value={editTitle} onChange={e=>setET(e.target.value)} style={inp} autoFocus />
+            <input value={editTitle} onChange={e=>setET(e.target.value)} className="mb-dv-input" style={inp} autoFocus />
           </F>
           <F label="DIFFICULTY">
             <div style={{display:'flex',gap:8,marginTop:8,flexWrap:'wrap'}}>
               {DIFFICULTY.map(d=>(
                 <button key={d} className="mb-detailbtn" onClick={()=>setED(d)} style={{
-                  padding:'7px 16px',borderRadius:RADIUS.sm,
-                  border:`1px solid ${editDiff===d?DIFF_COLOR[d]:t.border}`,
+                  padding:'7px 16px',borderRadius:RADIUS.pill,border:'none',
                   cursor:'pointer',fontSize:FONT.size.base,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
-                  background:editDiff===d?`${DIFF_COLOR[d]}1f`:t.surface,
+                  background:editDiff===d?`${DIFF_COLOR[d]}1f`:t.surface2,
+                  boxShadow:editDiff===d?`0 2px 10px -4px ${DIFF_COLOR[d]}60`:'none',
                   color:editDiff===d?DIFF_COLOR[d]:t.text3}}>{d}</button>
               ))}
             </div>
@@ -841,9 +850,9 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
               <button className="mb-detailbtn"
                 onMouseDown={e=>e.preventDefault()} onTouchStart={e=>e.preventDefault()}
                 onClick={()=>setHEOn(p=>!p)}
-                style={{fontSize:FONT.size.xs,background:hlEditOn?t.hlBtnBg:t.surface3,
-                  border:`1px solid ${hlEditOn?t.hlBtnBorder:t.border}`,
-                  borderRadius:RADIUS.sm-1,padding:'4px 10px',cursor:'pointer',display:'flex',
+                style={{fontSize:FONT.size.xs,background:hlEditOn?t.hlBtnBg:t.surface2,
+                  border:'none',
+                  borderRadius:RADIUS.pill,padding:'5px 11px',cursor:'pointer',display:'flex',
                   alignItems:'center',gap:5,
                   color:hlEditOn?t.hlBtnText:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif'}}>
                 <IconEdit size={11} /> {hlEditOn?'On':'Highlight'}
@@ -852,8 +861,8 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                 onMouseDown={e=>e.preventDefault()} onTouchStart={e=>e.preventDefault()}
                 onClick={()=>toggleBulletLines(editTaRef.current)}
                 title="Turn the current line (or selected lines) into bullet points"
-                style={{fontSize:FONT.size.xs,background:t.surface3,border:`1px solid ${t.border}`,
-                  borderRadius:RADIUS.sm-1,padding:'4px 10px',cursor:'pointer',display:'flex',
+                style={{fontSize:FONT.size.xs,background:t.surface2,border:'none',
+                  borderRadius:RADIUS.pill,padding:'5px 11px',cursor:'pointer',display:'flex',
                   alignItems:'center',gap:5,
                   color:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif'}}>
                 <IconListBullet size={11} /> Bullets
@@ -862,9 +871,9 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                 onMouseDown={e=>e.preventDefault()} onTouchStart={e=>e.preventDefault()}
                 onClick={()=>setPP(p=>!p)}
                 title="While on, pasted text is inserted exactly as copied — no auto bold/italic/bullets — so you can format it yourself"
-                style={{fontSize:FONT.size.xs,background:plainPaste?t.hlBtnBg:t.surface3,
-                  border:`1px solid ${plainPaste?t.hlBtnBorder:t.border}`,
-                  borderRadius:RADIUS.sm-1,padding:'4px 10px',cursor:'pointer',display:'flex',
+                style={{fontSize:FONT.size.xs,background:plainPaste?t.hlBtnBg:t.surface2,
+                  border:'none',
+                  borderRadius:RADIUS.pill,padding:'5px 11px',cursor:'pointer',display:'flex',
                   alignItems:'center',gap:5,
                   color:plainPaste?t.hlBtnText:t.text3,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif'}}>
                 {plainPaste?'Plain paste on':'Plain Paste'}
@@ -896,12 +905,12 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                 onMouseUp={editHl.onSelChange} onKeyUp={editHl.onSelChange} onTouchEnd={editHl.onSelChange}
                 onKeyDown={e => { handleBulletKeyDown(e); if (!e.defaultPrevented) editHl.handleShortcut(e); }}
                 onPaste={e => plainPaste ? handlePlainPaste(e) : handleRichPaste(e, t.text)}
-                style={{...inp, minHeight:168, lineHeight:'1.7',
-                  marginTop:0,
+                className="mb-dv-input"
+                style={{...inp, minHeight:200, lineHeight:'1.7',
+                  marginTop:0, borderRadius:RADIUS.xl,
                   fontSize:FONT.size.lg, whiteSpace:'pre-wrap', overflowWrap:'break-word',
                   fontWeight:400, letterSpacing:'normal',
                   WebkitTextSizeAdjust:'100%', textSizeAdjust:'100%',
-                  background: t.surface,
                   caretColor:t.text, color:t.text}} />
             </div>
           </F>
@@ -911,7 +920,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                 {editImgs.map((url,i)=>(
                   <div key={i} style={{position:'relative'}}>
                     <img src={url} alt="" className="mb-detailimg"
-                      style={{width:100,height:76,objectFit:'cover',borderRadius:RADIUS.sm+1,border:`1px solid ${t.border}`}} />
+                      style={{width:100,height:76,objectFit:'cover',borderRadius:RADIUS.lg,boxShadow:elevation(t,'sm')}} />
                     <button className="mb-detailbtn" onClick={()=>setEI(p=>p.filter((_,j)=>j!==i))} style={{
                       position:'absolute',top:-7,right:-7,background:t.danger,border:'none',
                       borderRadius:RADIUS.circle,width:20,height:20,fontSize:10,color:'#fff',
@@ -924,8 +933,8 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             </F>
           )}
           <F label="ADD MORE IMAGES">
-            <label style={{display:'inline-block',marginTop:8,background:t.surface3,
-              border:`1px solid ${t.border}`,borderRadius:RADIUS.sm+1,padding:'8px 16px',
+            <label style={{display:'inline-block',marginTop:8,background:t.surface2,
+              border:'none',borderRadius:RADIUS.pill,padding:'8px 16px',
               fontSize:FONT.size.base,cursor:'pointer',fontWeight:FONT.weight.medium,color:t.text2,fontFamily:'Inter,sans-serif',
               display:'inline-flex',alignItems:'center',gap:7}}>
               <IconImages size={13} /> Choose images
@@ -937,7 +946,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                 {newImgs.map((img,i)=>(
                   <div key={i} style={{position:'relative'}}>
                     <img src={img.preview} alt="" className="mb-detailimg"
-                      style={{width:100,height:76,objectFit:'cover',borderRadius:RADIUS.sm+1,border:`1px solid ${t.border}`}} />
+                      style={{width:100,height:76,objectFit:'cover',borderRadius:RADIUS.lg,boxShadow:elevation(t,'sm')}} />
                     <button className="mb-detailbtn" onClick={()=>setNI(p=>p.filter((_,j)=>j!==i))} style={{
                       position:'absolute',top:-7,right:-7,background:t.danger,border:'none',
                       borderRadius:RADIUS.circle,width:20,height:20,fontSize:10,color:'#fff',
@@ -955,7 +964,8 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
               background:color,color:'#fff',border:'none',borderRadius:RADIUS.md,padding:'11px 24px',
               fontSize:FONT.size.md,fontWeight:FONT.weight.semibold,cursor:saving?'not-allowed':'pointer',
               opacity:saving?.7:1,fontFamily:'Inter,sans-serif',
-              display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+              display:'flex',alignItems:'center',justifyContent:'center',gap:8,
+              boxShadow:saving?'none':`0 4px 14px -2px ${color}55`}}>
               {saving ? <>
                 <span style={{display:'inline-block',width:14,height:14,
                   border:'2px solid rgba(255,255,255,.4)',borderTop:'2px solid #fff',
