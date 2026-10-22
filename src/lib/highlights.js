@@ -2,21 +2,23 @@
 // lib/bulletList.js's rich-paste handler, never by hand-typed notes unless
 // the user types the markers themselves — which renders the same way, same
 // as any markdown tool) into runs of {t, bold, italic, size, start}. size is
-// null or one of 'sm'/'lg'/'xl'. Callers render each run as plain text or
-// <strong>/<em>/a resized <span>, independently of whatever else (e.g. a
-// highlight colour) is also being applied to that same stretch of text —
-// see RenderedNotes in DetailView.js/ReviewQueue.js/SystemReview.js, which
-// call this per buildHighlightParts slice so formatting and highlight
-// colour compose correctly together.
+// null or one of 'sm'/'lg'/'xl'. This is the ONE place that parses markers —
+// buildFormattedParts below (used everywhere formatting and a highlight
+// colour need to compose together — see RichRuns.js and markedTextToHtml)
+// always calls this on the FULL text first, then slices its runs by
+// highlight boundaries, never the other way around (slicing text by
+// highlight boundary BEFORE parsing markers can cut a **bold**/{{i}}…{{/i}}
+// run's opening and closing tokens into two independently-parsed strings —
+// see that function's own comment for the corruption that caused).
 //
 // `start` is the run's own offset into the exact string passed in — not a
 // separately-recomputed position, just `last` (where the previous token
 // left off) at the moment each run is pushed, which is already,
 // unavoidably, that run's position in the untouched input. DetailView.js's
 // view-mode highlight capture (readSelection) uses this (added to the
-// enclosing buildHighlightParts slice's own `start`) to map a selection
+// enclosing buildFormattedParts part's own `start`) to map a selection
 // in the RENDERED, marker-stripped DOM back to the matching offset in the
-// RAW stored string — see the data-raw-start annotation in BoldRuns below.
+// RAW stored string — see the data-raw-start annotation in RichRuns.js.
 // Reusing this file's own parse position, rather than a second pass that
 // re-derives "where markers were" by walking the rendered DOM, is what
 // keeps that mapping structurally unable to drift from this parser: there
@@ -98,36 +100,80 @@ export function resolveHL(color, isDark) {
   return { bg: color.bg, text: color.text };
 }
 
-// Each returned part also carries `start` — its own offset into `text`
-// (the raw, marker-included string) — for the same reason splitRich's runs
-// do: so DetailView.js's view-mode highlight capture can map a rendered
-// selection back to a raw-string offset by adding a run's own `start`
-// (relative to its enclosing part) to that part's `start` here, without a
-// second parser having to re-derive either position.
-export function buildHighlightParts(text, highlights) {
-  if (!text) return [];
-  if (!highlights || highlights.length === 0) return [{ t: text, hl: null, start: 0 }];
-
-  // Defensive clamp — never let a stale/out-of-range highlight crash the render
-  const sorted = highlights
+// Defensive clamp/sort shared by buildFormattedParts below — never let a
+// stale/out-of-range highlight (e.g. one saved against a since-shortened
+// note) crash a render.
+function cleanHighlights(highlights, textLength) {
+  if (!highlights || highlights.length === 0) return [];
+  return highlights
     .filter(h => h && Number.isFinite(h.start) && Number.isFinite(h.end) && h.end > h.start)
-    .map(h => ({ ...h, start: Math.max(0, h.start), end: Math.min(text.length, h.end) }))
+    .map(h => ({ ...h, start: Math.max(0, h.start), end: Math.min(textLength, h.end) }))
     .filter(h => h.end > h.start)
     .sort((a, b) => a.start - b.start);
+}
 
-  if (sorted.length === 0) return [{ t: text, hl: null, start: 0 }];
+// Splits `text` into atomic runs that are each a SINGLE, definite
+// combination of (bold, italic, size) formatting AND highlight colour (or
+// none) — the join of splitRich's marker parsing and a highlight-colour
+// slice, instead of doing them as two independent passes.
+//
+// That used to be exactly two passes — slice the raw marker string by
+// highlight start/end first (the old buildHighlightParts), then run each
+// resulting slice through its own fresh splitRich/richMarkersToHtml call —
+// and it was wrong whenever a highlight's boundary fell INSIDE a
+// **bold**/{{i}}…{{/i}}/{{lg}}…{{/lg}} run rather than exactly on one of
+// its edges (completely ordinary — selecting "bold wor" out of "a **bold
+// word**" for a highlight, say). The run's own opening and closing marker
+// tokens end up in DIFFERENT slices, each parsed independently with no
+// memory of the other: splitRich on a slice with only a closing (or only
+// an opening) token has no partner to pair it with, so depending on exactly
+// where the cut fell, the formatting either vanishes from the text it
+// belonged to, or "leaks" onto whatever unrelated text follows within that
+// same slice (a dangling unmatched token one slice treats as its own
+// opening toggle) — which is exactly the reported bug: bold jumping onto
+// adjacent words, or a bold run losing its own styling, around wherever a
+// highlight happened to end.
+//
+// The fix: parse the FULL text for markers ONCE (splitRich already does
+// this correctly end-to-end, since it's a single scan with no artificial
+// cut points) — then, for each resulting run, slice ONLY that run's own
+// plain content by whatever highlight(s) overlap it. A run's raw-offset
+// span is exactly [run.start, run.start + run.t.length) — no markers can
+// fall inside it (that's what makes it a "run") — so intersecting it
+// against highlight offsets (also raw-string offsets) is a plain, correct
+// substring op with no risk of ever separating a marker from its partner.
+export function buildFormattedParts(text, highlights) {
+  if (!text) return [];
+  const runs = splitRich(text);
+  const sorted = cleanHighlights(highlights, text.length);
+  if (sorted.length === 0) return runs.map(r => ({ ...r, hl: null }));
 
   const parts = [];
-  let cursor = 0;
-  sorted.forEach(h => {
-    const start = Math.max(h.start, cursor);
-    if (start > cursor) parts.push({ t: text.slice(cursor, start), hl: null, start: cursor });
-    if (start < h.end) {
-      parts.push({ t: text.slice(start, h.end), hl: h.color, start });
-      cursor = h.end;
+  for (const run of runs) {
+    const runStart = run.start;
+    const runEnd = run.start + run.t.length;
+    // Every highlight boundary that falls strictly inside this run becomes
+    // an extra cut point, alongside the run's own start/end — so this run
+    // gets split only where a highlight genuinely starts/ends within it,
+    // never anywhere a marker could have been.
+    const cuts = new Set([runStart, runEnd]);
+    for (const h of sorted) {
+      if (h.start > runStart && h.start < runEnd) cuts.add(h.start);
+      if (h.end > runStart && h.end < runEnd) cuts.add(h.end);
     }
-  });
-  if (cursor < text.length) parts.push({ t: text.slice(cursor), hl: null, start: cursor });
+    const points = Array.from(cuts).sort((a, b) => a - b);
+    for (let i = 0; i < points.length - 1; i++) {
+      const segStart = points[i], segEnd = points[i + 1];
+      if (segEnd <= segStart) continue;
+      const covering = sorted.find(h => h.start <= segStart && h.end > segStart);
+      parts.push({
+        t: run.t.slice(segStart - runStart, segEnd - runStart),
+        bold: run.bold, italic: run.italic, size: run.size,
+        start: segStart,
+        hl: covering ? covering.color : null,
+      });
+    }
+  }
   return parts;
 }
 
@@ -165,15 +211,40 @@ export function richMarkersToHtml(text, textColor) {
   return s;
 }
 
+// A single atomic part (from buildFormattedParts — already a definite
+// bold/italic/size combination, never literal marker text) to an HTML
+// string. Same attribute/colour precedence richMarkersToHtml used to apply
+// via its sequential regex replacements (size innermost... no — size
+// carries its own colour attr, italic plain, bold outermost gets the
+// colour when no size is present) — see RICH_SIZE_STYLE's own comment for
+// why sm never gets a colour bump.
+function formattedPartToHtml(p, textColor) {
+  let inner = escHtml(p.t);
+  if (p.size) {
+    const colorAttr = (textColor && p.size !== 'sm') ? `;color:${textColor}` : '';
+    inner = `<span style="${sizeStyleAttr(p.size)}${colorAttr}">${inner}</span>`;
+  }
+  if (p.italic) inner = `<em>${inner}</em>`;
+  if (p.bold) inner = textColor ? `<strong style="color:${textColor}">${inner}</strong>` : `<strong>${inner}</strong>`;
+  return inner;
+}
+
 // Full HTML for a marker-string PLUS highlight colour bands — the rich
 // editor's initial render and its paste-insertion both use this, so a note
 // (and any highlights already on it) shows up in edit mode looking exactly
 // like RenderedNotes already renders it everywhere else. `isDark` resolves
 // each highlight's colour the same way RenderedNotes does (resolveHL).
+//
+// Built from buildFormattedParts (never buildHighlightParts+richMarkersToHtml
+// independently per slice — see buildFormattedParts' own comment for why
+// that used to corrupt bold/italic/size runs a highlight boundary cut
+// through), so a highlight landing anywhere inside a **bold**/{{i}}…{{/i}}/
+// {{lg}}…{{/lg}} run can never separate that run's own opening and closing
+// markers into two independently-parsed strings.
 export function markedTextToHtml(text, highlights, textColor, isDark) {
-  const parts = buildHighlightParts(text, highlights);
+  const parts = buildFormattedParts(text, highlights);
   return parts.map(p => {
-    const inner = richMarkersToHtml(p.t, textColor);
+    const inner = formattedPartToHtml(p, textColor);
     if (!p.hl) return inner;
     const c = resolveHL(p.hl, isDark);
     return `<mark style="background:${c.bg};color:${c.text};border-radius:2px;padding:0 2px">${inner}</mark>`;

@@ -1,7 +1,6 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { DIFF_COLOR } from '../lib/constants';
-import { buildHighlightParts, resolveHL } from '../lib/highlights';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue, buildCycledQueueWithScheduled } from '../lib/reviewQueue';
@@ -11,16 +10,15 @@ import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
 import { IconX } from '../lib/icons';
 import RichRuns from '../lib/RichRuns';
 
-// Renders notes with the same highlight colours the entry has in its system view
+// Renders notes with the same highlight colours the entry has in its
+// system view. Formatting and highlight colour are composed in ONE pass
+// inside RichRuns (buildFormattedParts) — never by slicing `text` at
+// highlight boundaries before handing it to RichRuns, which is what used to
+// corrupt a **bold** run whenever a highlight landed partway through it.
 function RenderedNotes({ text, highlights, isDark }) {
-  const parts = buildHighlightParts(text, highlights);
   return (
     <span style={{whiteSpace:'pre-wrap'}}>
-      {parts.map((p,i) => {
-        if (!p.hl) return <span key={i}><RichRuns text={p.t} /></span>;
-        const c = resolveHL(p.hl, isDark);
-        return <mark key={i} style={{background:c.bg,color:c.text,borderRadius:2,padding:'0 2px'}}><RichRuns text={p.t} /></mark>;
-      })}
+      <RichRuns text={text} highlights={highlights} isDark={isDark} />
     </span>
   );
 }
