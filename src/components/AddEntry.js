@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { DIFFICULTY, DIFF_COLOR } from '../lib/constants';
+import { toTitleCase } from '../lib/titleCase';
 import { adjustHighlights, markedTextToHtml } from '../lib/highlights';
 import { useHighlight } from '../lib/useHighlight';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
@@ -122,7 +123,11 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
       // — sanitize right before the payload is built, after highlight
       // offsets are already computed against the untouched text, so this
       // can't shift any highlight position.
-      const cleanTitle = sanitizeForStorage(title.trim());
+      // Belt-and-suspenders alongside the title field's own onBlur: guarantees
+      // the SAVED title is title-cased even if Save is clicked in the same
+      // tick the field blurs (its state update should already have landed by
+      // then, but this makes correctness independent of that timing).
+      const cleanTitle = sanitizeForStorage(toTitleCase(title.trim()));
       const cleanNotes = sanitizeForStorage(trimmedNotes);
       const rows = systems.map(sys => ({
         user_id:userId, system:sys, title:cleanTitle, notes:cleanNotes,
@@ -218,6 +223,8 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
 
           <F label="TITLE *">
             <input value={title} onChange={e=>setTitle(e.target.value)}
+              onBlur={()=>setTitle(tt=>toTitleCase(tt))}
+              onKeyDown={e=>{ if (e.key==='Enter') e.target.blur(); }}
               className="mb-ae-input"
               placeholder="e.g. Digoxin toxicity: ECG changes"
               style={inp} autoFocus disabled={saving} />
