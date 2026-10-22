@@ -244,18 +244,30 @@ function detectSize(el) {
 // (collectLines' BLOCK_TAGS branch) — a block tag's own formatting
 // (e.g. a plain <h2>, with no nested <strong> inside it) would otherwise
 // never be captured, since nothing else ever looks at that element itself.
+//
+// Collapses internal whitespace RUNS to a single space (cleans up messy
+// pasted HTML — e.g. a Google-Docs-style <strong>\n  text  \n</strong>) but
+// deliberately does NOT trim a single leading/trailing space. A `<strong>`
+// (etc) can legitimately have one of those at an edge and mean it: a
+// highlight whose boundary falls partway through a bold run splits that
+// run into adjacent <strong> elements at exactly that boundary (see
+// buildFormattedParts in lib/highlights.js), and whichever side's own text
+// happens to start or end on a space depends only on where the highlight
+// was drawn — trimming it here used to silently eat the space between two
+// now-adjacent words the moment that bold run was next re-serialized
+// (e.g. on the very next keystroke, or the next highlight action).
 function wrapMarks(el, inner) {
   const tag = el.tagName.toLowerCase();
   if (BOLD_TAGS.test(tag)) {
-    const t = inner.replace(/\s+/g, ' ').trim();
+    const t = inner.replace(/\s+/g, ' ');
     if (t) inner = `**${t}**`;
   } else if (ITALIC_TAGS.test(tag)) {
-    const t = inner.replace(/\s+/g, ' ').trim();
+    const t = inner.replace(/\s+/g, ' ');
     if (t) inner = `{{i}}${t}{{/i}}`;
   }
   const size = detectSize(el);
   if (size) {
-    const t = inner.replace(/\s+/g, ' ').trim();
+    const t = inner.replace(/\s+/g, ' ');
     if (t) inner = `{{${size}}}${t}{{/${size}}}`;
   }
   return inner;

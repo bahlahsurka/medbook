@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
-import { buildHighlightParts, resolveHL, adjustHighlights, matchHighlightShortcutView, richMarkersToHtml, markedTextToHtml } from '../lib/highlights';
+import { adjustHighlights, matchHighlightShortcutView, richMarkersToHtml, markedTextToHtml } from '../lib/highlights';
 import RichRuns from '../lib/RichRuns';
 import { useHighlight, clearRange } from '../lib/useHighlight';
 import { useTheme, SPACE, RADIUS, FONT, Z, MOTION, elevation } from '../lib/theme';
@@ -101,21 +101,22 @@ export function rawOffsetAt(container, offset) {
 // readSelection() below reads each run's data-raw-start (written by the
 // shared RichRuns component — see lib/RichRuns.js) to translate a
 // selection made in this RENDERED (marker-stripped) view into the same
-// raw-string coordinates everything else (storage, buildHighlightParts,
+// raw-string coordinates everything else (storage, buildFormattedParts,
 // edit-mode's own capture) already uses. Without it, a highlight created
 // by selecting text here lands at the wrong offset the moment it's
 // replayed against the raw string — every marker before the selection
 // (a **bold** pair, a {{lg}}…{{/lg}}) shifts it further out.
+//
+// Formatting and highlight colour are composed in ONE pass inside RichRuns
+// (buildFormattedParts) — never by slicing `text` at highlight boundaries
+// before handing it to RichRuns, which is what used to corrupt a **bold**
+// run (lost styling, or styling leaking onto adjacent text) whenever a
+// highlight landed partway through it.
 export function RenderedNotes({ text, highlights }) {
   const { isDark } = useTheme();
-  const parts = buildHighlightParts(text, highlights);
   return (
     <span style={{whiteSpace:'pre-wrap'}}>
-      {parts.map((p,i) => {
-        if (!p.hl) return <span key={i}><RichRuns text={p.t} rawStart={p.start} /></span>;
-        const c = resolveHL(p.hl, isDark);
-        return <mark key={i} style={{background:c.bg,color:c.text,borderRadius:2,padding:'0 2px'}}><RichRuns text={p.t} rawStart={p.start} /></mark>;
-      })}
+      <RichRuns text={text} highlights={highlights} isDark={isDark} />
     </span>
   );
 }
@@ -360,7 +361,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   // counting in rendered coordinates and using that as a raw-string offset
   // (the previous approach) silently drifted the highlight forward into
   // the wrong word by exactly that many characters once replayed against
-  // entry.notes, which is the one and only string buildHighlightParts (and
+  // entry.notes, which is the one and only string buildFormattedParts (and
   // every other render of this entry) ever slices against.
   const readSelection = useCallback(() => {
     const sel = window.getSelection();
