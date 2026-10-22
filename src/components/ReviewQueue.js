@@ -8,6 +8,7 @@ import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue } from '../lib/reviewQueue';
 import { computeSystemStats } from '../lib/systemStats';
 import { normalizeSections } from '../services/ai';
+import { loadSession, saveSession, clearSession, newSessionId } from '../lib/reviewSessionStore';
 import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
 import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
   IconX, IconZap } from '../lib/icons';
@@ -37,24 +38,21 @@ function LbBtn({ onClick, title, style, children }) {
   );
 }
 
-// Swipeable / arrow-navigable lightbox — matches DetailView.js's, restyled
-// in the same pass (batch 6) this file wasn't part of at the time.
+// Arrow-navigable lightbox — matches DetailView.js's, restyled in the same
+// pass (batch 6) this file wasn't part of at the time. Swipe-to-navigate is
+// deliberately NOT wired up here (unlike DetailView.js's): in review mode
+// people routinely pinch-zoom into an image and then pan around it, and a
+// horizontal pan of more than 50px was being read as a swipe and yanking
+// them to the next/previous image mid-pan. Prev/Next stay available via
+// the on-screen buttons.
 function Lightbox({ images, start, onClose }) {
   const [idx, setIdx] = useState(start);
-  const tx = useRef(null);
   const prev = () => setIdx(i => (i - 1 + images.length) % images.length);
   const next = () => setIdx(i => (i + 1) % images.length);
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.92)', zIndex:Z.lightbox,
-      display:'flex', alignItems:'center', justifyContent:'center', animation:'medbook-scrim-in 180ms ease' }}
-      onTouchStart={e => { tx.current = e.touches[0].clientX; }}
-      onTouchEnd={e => {
-        if (!tx.current) return;
-        const dx = e.changedTouches[0].clientX - tx.current;
-        if (dx < -50) next(); else if (dx > 50) prev();
-        tx.current = null;
-      }}>
+      display:'flex', alignItems:'center', justifyContent:'center', animation:'medbook-scrim-in 180ms ease' }}>
       <LbBtn onClick={onClose} title="Close" style={{ position:'absolute', top:16, right:20,
         width:40, height:40, borderRadius:RADIUS.circle }}><IconX size={18} /></LbBtn>
       {images.length > 1 && <>
@@ -88,6 +86,12 @@ const RATINGS = [
 // about how hard an entry is to review, not about flagging; Flagged stays
 // out unless asked for.
 const REVIEW_DIFFICULTIES = ['Easy', 'Medium', 'Hard'];
+
+// One global, fixed scope — unlike System Review (one modal per system),
+// there's only ever one Review Queue screen, so one saved session is all
+// it needs. See reviewSessionStore.js's own header comment for why this
+// exists and how resuming works.
+const SESSION_SCOPE = 'queue';
 
 // Quick-pick block sizes for the Card Count selector — 'all' (the existing,
 // unchanged behaviour: cycle through everything due+new) plus a few common
@@ -192,6 +196,24 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     return () => clearInterval(id);
   }, [timerRunning]);
 
+  // Resumable sessions — see reviewSessionStore.js's own header comment for
+  // the full "why": switching apps / backgrounding on mobile can discard and
+  // recreate this whole tab's JS context, which used to throw away an
+  // in-progress session with no way back except starting over.
+  //
+  // `pendingResume` is read fresh from localStorage any time the overview
+  // screen is about to render (recomputed whenever `sessionStarted` flips
+  // back to false, or `resumeVersion` is bumped by an explicit Discard) —
+  // deliberately NOT a one-time mount-only read, since a session saved
+  // mid-mount (e.g. the user reviews a few cards, then clicks Back to
+  // Overview) needs to show up as resumable without requiring an actual
+  // component remount.
+  const [resumeVersion, setResumeVersion] = useState(0);
+  const pendingResume = useMemo(() => loadSession(userId, SESSION_SCOPE),
+    [userId, sessionStarted, resumeVersion]);
+  const sessionIdRef = useRef(null);
+  const createdAtRef = useRef(null);
+
   // One review_sessions row per session (see SUPABASE_MIGRATION_REVIEW_
   // SESSIONS.sql), written once it ends — loggedRef guards against writing
   // it twice (e.g. reaching "done" and then also unmounting). sessionMetaRef
@@ -250,12 +272,65 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   // both reset the timer/log bookkeeping identically.
   const beginSession = (builtQueue, meta) => {
     flushSessionLog(); // in case a previous unfinished session is being abandoned
+    clearSession(userId, SESSION_SCOPE); // a brand-new session obsoletes any saved one
+    sessionIdRef.current = newSessionId();
+    createdAtRef.current = new Date().toISOString();
     setQueue(builtQueue);
     setIdx(0); setFlipped(false); setDone(false); setEnded(false); setSess(0);
     setSessionStarted(true);
     setElapsedSec(0); setTimerRunning(true);
     loggedRef.current = false;
     sessionMetaRef.current = meta;
+  };
+
+  // Reconstruct a saved session by re-mapping its frozen, ordered entry-id
+  // list back onto the CURRENT allEntries (never a second fetch — see
+  // reviewSessionStore.js's own header comment on why that's safe/correct
+  // here) — dropping any id that's since been deleted.
+  //
+  // Guards against the same race studySessionStore's imported-deck resume
+  // does: if the app was interrupted while a rating's Supabase write was
+  // in flight, the write can still have reached the server even though
+  // `idx` never advanced locally before the interruption. Detected the same
+  // way — comparing the resumed card's own `last_reviewed` against this
+  // session's last confirmed activity — and, if so, stepping one card
+  // forward instead of replaying an already-saved rating.
+  const resumeSession = (saved) => {
+    flushSessionLog();
+    const byId = new Map(Object.values(entriesRef.current).flat().map(e => [e.id, e]));
+    const ordered = (saved.entryIds || []).map(id => byId.get(id)).filter(Boolean);
+    if (ordered.length === 0) {
+      clearSession(userId, SESSION_SCOPE);
+      alert("That session's cards no longer exist — starting a new session instead.");
+      startNewSession();
+      return;
+    }
+    let restoredIdx = Math.min(saved.idx || 0, ordered.length - 1);
+    const atSavedIdx = ordered[restoredIdx];
+    if (atSavedIdx?.last_reviewed && saved.lastActiveAt
+        && new Date(atSavedIdx.last_reviewed) > new Date(saved.lastActiveAt)) {
+      restoredIdx = Math.min(restoredIdx + 1, ordered.length - 1);
+    }
+    sessionIdRef.current = saved.sessionId || newSessionId();
+    createdAtRef.current = saved.createdAt || saved.lastActiveAt || new Date().toISOString();
+    setQueue(ordered);
+    setIdx(restoredIdx);
+    setFlipped(false); setDone(false); setEnded(false);
+    setSess(saved.sessionDone || 0);
+    setSessionStarted(true);
+    setElapsedSec(saved.elapsedSec || 0);
+    setTimerRunning(true);
+    loggedRef.current = false;
+    sessionMetaRef.current = saved.meta || null;
+    if (saved.filterMode) setFilterMode(saved.filterMode);
+    if (saved.filterSystem !== undefined) setFilterSystem(saved.filterSystem);
+    if (saved.filterDifficulty) setFilterDifficulty(saved.filterDifficulty);
+    if (saved.cardLimit !== undefined) setCardLimit(saved.cardLimit);
+  };
+
+  const discardResume = () => {
+    clearSession(userId, SESSION_SCOPE);
+    setResumeVersion(v => v + 1);
   };
 
   // Same due/fresh definitions used everywhere else in the app (Dashboard,
@@ -285,6 +360,51 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   };
 
   const backToOverview = () => { flushSessionLog(); setSessionStarted(false); };
+
+  // Persist proactively on every meaningful change — card advances, a
+  // rating lands, pause/resume, elapsed time ticking — rather than trying
+  // to catch a single "leaving" event, which mobile browsers don't
+  // reliably fire at all. Pure localStorage writes — no network request
+  // here, so there's no backend "request storm" risk from writing this
+  // often. Stops writing once `done` (a completed session has nothing left
+  // worth resuming into — cleared explicitly below instead).
+  const sessionSnapshotRef = useRef(null);
+  useEffect(() => {
+    if (!sessionStarted || done || !queue.length || !sessionIdRef.current) {
+      sessionSnapshotRef.current = null;
+      return;
+    }
+    const snapshot = {
+      sessionId: sessionIdRef.current,
+      entryIds: queue.map(e => e.id),
+      idx, sessionDone, elapsedSec,
+      status: 'active',
+      createdAt: createdAtRef.current || new Date().toISOString(),
+      filterMode, filterSystem, filterDifficulty, cardLimit,
+      meta: sessionMetaRef.current,
+    };
+    sessionSnapshotRef.current = snapshot;
+    saveSession(userId, SESSION_SCOPE, snapshot);
+  }, [userId, sessionStarted, done, queue, idx, sessionDone, elapsedSec,
+      filterMode, filterSystem, filterDifficulty, cardLimit]);
+
+  // Belt-and-suspenders flush for exactly the mobile lifecycle events this
+  // exists for — pagehide fires more reliably than visibilitychange on some
+  // mobile browsers when a PWA is backgrounded/swiped away (same reasoning
+  // lib/useStudySession.js's own heartbeat already documents). In practice
+  // the effect above already writes on every relevant state change before
+  // any of these can fire — this is defensive insurance against a delayed/
+  // batched write racing an interruption, not the primary mechanism.
+  useEffect(() => {
+    const flush = () => { if (sessionSnapshotRef.current) saveSession(userId, SESSION_SCOPE, sessionSnapshotRef.current); };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flush(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', flush);
+    };
+  }, [userId]);
 
   // Arriving from Insights' "Needs attention" — jump straight into a due
   // session for that system, exactly like clicking a priority row on this
@@ -455,11 +575,12 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
       setDone(true);
       setTimerRunning(false);
       flushSessionLog(newSessionDone);
+      clearSession(userId, SESSION_SCOPE); // completed — nothing left worth resuming into
     } else { setIdx(p => p + 1); setFlipped(false); }
   };
 
   const skip = () => {
-    if (idx + 1 >= total) setDone(true);
+    if (idx + 1 >= total) { setDone(true); clearSession(userId, SESSION_SCOPE); }
     else { setIdx(p => p + 1); setFlipped(false); }
   };
 
@@ -526,6 +647,37 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
           <div style={{ fontSize:FONT.size.xl2, fontWeight:FONT.weight.bold, color:t.text }}>Review Queue</div>
           <div style={{ fontSize:FONT.size.sm, color:t.text3, marginTop:3 }}>What should you review right now?</div>
         </div>
+
+        {/* Resumable session — only shown once there's actual progress worth
+            offering a choice about (see reviewSessionStore.js). Sits above
+            everything else, including the "you're caught up" screen: the
+            saved session's cards are frozen regardless of what's due right
+            now, so it's always the first thing offered. */}
+        {pendingResume && (pendingResume.sessionDone > 0 || pendingResume.idx > 0) && Array.isArray(pendingResume.entryIds) && pendingResume.entryIds.length > 0 && (
+          <div style={{ background:t.navActiveBg, border:`1px solid ${t.navActiveBorder}`, borderRadius:RADIUS.lg,
+            padding:SPACE.lg, marginBottom:SPACE.xl, display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+            <div style={{ flex:1, minWidth:180 }}>
+              <div style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.bold, color:t.navActiveText }}>
+                Resume your last session
+              </div>
+              <div style={{ fontSize:FONT.size.xs, color:t.text3, marginTop:2 }}>
+                {pendingResume.sessionDone || 0} of {pendingResume.entryIds.length} cards reviewed
+                {pendingResume.elapsedSec > 0 ? ` · ${formatElapsed(pendingResume.elapsedSec)}` : ''}
+              </div>
+            </div>
+            <button className="mb-rq-btn" onClick={() => resumeSession(pendingResume)} style={{
+              background:t.accent, color:'#fff', border:'none', borderRadius:RADIUS.sm+1,
+              padding:'9px 18px', fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, cursor:'pointer',
+              fontFamily:'Inter,sans-serif' }}>
+              Resume
+            </button>
+            <button className="mb-rq-btn" onClick={discardResume} style={{
+              background:'none', color:t.text4, border:`1px solid ${t.border}`, borderRadius:RADIUS.sm+1,
+              padding:'9px 14px', fontSize:FONT.size.sm, cursor:'pointer', fontFamily:'Inter,sans-serif' }}>
+              Discard
+            </button>
+          </div>
+        )}
 
         {nothingAtAll ? (
           // Rewarding, intentional — not "No data."
