@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
+import { toTitleCase } from '../lib/titleCase';
 import { adjustHighlights, matchHighlightShortcutView, richMarkersToHtml, markedTextToHtml } from '../lib/highlights';
 import RichRuns from '../lib/RichRuns';
 import { useHighlight, clearRange } from '../lib/useHighlight';
@@ -767,8 +768,12 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
       // — sanitize right before the payload is built, after highlight
       // offsets are already computed against the untouched text, so this
       // can't shift any highlight position.
+      // Belt-and-suspenders alongside the title field's own onBlur: guarantees
+      // the SAVED title is title-cased even if Save is clicked in the same
+      // tick the field blurs (its state update should already have landed by
+      // then, but this makes correctness independent of that timing).
       const ok = await updateDB({
-        title:sanitizeForStorage(editTitle.trim()), notes:sanitizeForStorage(trimmedNotes),
+        title:sanitizeForStorage(toTitleCase(editTitle.trim())), notes:sanitizeForStorage(trimmedNotes),
         difficulty:editDiff, images:allImgs, highlights:adjustedHighlights
       });
       if (ok) { setVHL(adjustedHighlights); setEditing(false); setNI([]); fireSavedFlash(); }
@@ -832,7 +837,10 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         boxShadow:`0 24px 56px -30px ${color}40, ${elevation(t,'sm')}`,padding:SPACE.xl2}}>
         <div style={{display:'flex',flexDirection:'column',gap:SPACE.xl}}>
           <F label="TITLE *">
-            <input value={editTitle} onChange={e=>setET(e.target.value)} className="mb-dv-input" style={inp} autoFocus />
+            <input value={editTitle} onChange={e=>setET(e.target.value)}
+              onBlur={()=>setET(tt=>toTitleCase(tt))}
+              onKeyDown={e=>{ if (e.key==='Enter') e.target.blur(); }}
+              className="mb-dv-input" style={inp} autoFocus />
           </F>
           <F label="DIFFICULTY">
             <div style={{display:'flex',gap:8,marginTop:8,flexWrap:'wrap'}}>
