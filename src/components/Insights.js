@@ -85,6 +85,52 @@ export async function fetchAllRows(buildQuery) {
   return { data: all, error: null };
 }
 
+// Today/yesterday are just minutesByDay's own last two buckets —
+// `last7Days` (built by the component, below) runs oldest-to-newest ending
+// on today, so reading them off the SAME per-day array the chart renders
+// means there's no second day-boundary computation that could ever drift
+// from what the chart itself shows. Shared by both real and mock data so
+// "Today" never needs a separate sample-mode case.
+function todayAndDowPct(minutesByDay) {
+  const todayMinutes = minutesByDay[minutesByDay.length - 1] ?? 0;
+  const yesterdayMinutes = minutesByDay[minutesByDay.length - 2] ?? 0;
+  const dowPct = yesterdayMinutes > 0
+    ? Math.round(((todayMinutes - yesterdayMinutes) / yesterdayMinutes) * 100) : null;
+  return { todayMinutes, dowPct };
+}
+
+// Pure aggregation over real study_sessions rows — exported (like
+// fetchAllRows above) so a test can verify the day-bucketing and today/
+// week/trend math directly against known input, without rendering the
+// full Insights component.
+export function computeStudyTime(studySessions, last7Days) {
+  const minutesByDay = last7Days.map(day => {
+    const dayEnd = new Date(day); dayEnd.setDate(dayEnd.getDate() + 1);
+    const secs = studySessions
+      .filter(s => { const d = new Date(s.started_at); return d >= day && d < dayEnd; })
+      .reduce((sum, s) => sum + s.duration_seconds, 0);
+    return Math.round(secs / 60);
+  });
+  const { todayMinutes, dowPct } = todayAndDowPct(minutesByDay);
+
+  const thisWeekStart = last7Days[0];
+  const prevWeekStart = new Date(thisWeekStart); prevWeekStart.setDate(prevWeekStart.getDate() - 7);
+  const thisWeekTotal = studySessions.filter(s => new Date(s.started_at) >= thisWeekStart)
+    .reduce((sum, s) => sum + s.duration_seconds, 0);
+  const prevWeekTotal = studySessions.filter(s => { const d = new Date(s.started_at); return d >= prevWeekStart && d < thisWeekStart; })
+    .reduce((sum, s) => sum + s.duration_seconds, 0);
+  const wowPct = prevWeekTotal > 0 ? Math.round(((thisWeekTotal - prevWeekTotal) / prevWeekTotal) * 100) : null;
+
+  // Most studious hour — real signal, needs actual session timestamps (not
+  // just daily totals), so it's only ever computed for real data.
+  const byHour = new Array(24).fill(0);
+  studySessions.forEach(s => { byHour[new Date(s.started_at).getHours()] += s.duration_seconds; });
+  let studiousHour = null, bestSecs = 0;
+  byHour.forEach((secs, h) => { if (secs > bestSecs) { bestSecs = secs; studiousHour = h; } });
+
+  return { minutesByDay, wowPct, studiousHour, todayMinutes, dowPct };
+}
+
 function useInsightsData(userId) {
   const [studySessions, setStudySessions] = useState(undefined); // undefined=loading, null=unavailable, []=real
   const [reviewLogs, setReviewLogs] = useState(undefined);
@@ -308,36 +354,14 @@ export default function Insights({ entries, userSystems, userId, onNavigateSyste
   // ── Study time ──────────────────────────────────────────────────────────
   const studyTime = useMemo(() => {
     if (studySessions == null) {
-      return { real:false, minutesByDay:MOCK_STUDY_MINUTES_BY_DAY, wowPct:MOCK_STUDY_WOW_PCT, studiousHour:null };
+      const minutesByDay = MOCK_STUDY_MINUTES_BY_DAY;
+      const { todayMinutes, dowPct } = todayAndDowPct(minutesByDay);
+      return { real:false, minutesByDay, wowPct:MOCK_STUDY_WOW_PCT, studiousHour:null, todayMinutes, dowPct };
     }
-    const minutesByDay = last7Days.map(day => {
-      const dayEnd = new Date(day); dayEnd.setDate(dayEnd.getDate() + 1);
-      const secs = studySessions
-        .filter(s => { const d = new Date(s.started_at); return d >= day && d < dayEnd; })
-        .reduce((sum, s) => sum + s.duration_seconds, 0);
-      return Math.round(secs / 60);
-    });
-    const thisWeekStart = last7Days[0];
-    const prevWeekStart = new Date(thisWeekStart); prevWeekStart.setDate(prevWeekStart.getDate() - 7);
-    const thisWeekTotal = studySessions.filter(s => new Date(s.started_at) >= thisWeekStart)
-      .reduce((sum, s) => sum + s.duration_seconds, 0);
-    const prevWeekTotal = studySessions.filter(s => { const d = new Date(s.started_at); return d >= prevWeekStart && d < thisWeekStart; })
-      .reduce((sum, s) => sum + s.duration_seconds, 0);
-    const wowPct = prevWeekTotal > 0 ? Math.round(((thisWeekTotal - prevWeekTotal) / prevWeekTotal) * 100) : null;
-
-    // Most studious hour — real signal, needs actual session timestamps
-    // (not just daily totals), so it's only ever shown for real data.
-    const byHour = new Array(24).fill(0);
-    studySessions.forEach(s => { byHour[new Date(s.started_at).getHours()] += s.duration_seconds; });
-    let bestHour = null, bestSecs = 0;
-    byHour.forEach((secs, h) => { if (secs > bestSecs) { bestSecs = secs; bestHour = h; } });
-
-    return { real:true, minutesByDay, wowPct, studiousHour:bestHour, hasAnyData: studySessions.length > 0 };
+    return { real:true, hasAnyData: studySessions.length > 0, ...computeStudyTime(studySessions, last7Days) };
   }, [studySessions, last7Days]);
 
   const totalMinutes = studyTime.minutesByDay.reduce((a, b) => a + b, 0);
-  const studyHours = Math.floor(totalMinutes / 60);
-  const studyMins = totalMinutes % 60;
 
   // ── Retention ───────────────────────────────────────────────────────────
   const retention = useMemo(() => {
@@ -465,12 +489,27 @@ export default function Insights({ entries, userSystems, userId, onNavigateSyste
           <span>Study time</span>
           {!studyTime.real && <SampleTag t={t} />}
         </div>
-        <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between',
-          flexWrap:'wrap', gap:8, marginBottom:SPACE.lg }}>
-          <div style={{ fontSize:FONT.size.xl3, fontWeight:FONT.weight.bold, color:t.text, lineHeight:1.1 }}>
-            {studyTime.real && !studyTime.hasAnyData ? '-' : `${studyHours}h ${studyMins}m`}
+        <div style={{ display:'flex', flexWrap:'wrap', gap:SPACE.xl2, marginBottom:SPACE.lg }}>
+          <div>
+            <div style={{ fontSize:FONT.size.xl3, fontWeight:FONT.weight.bold, color:t.text, lineHeight:1.1 }}>
+              {studyTime.real && !studyTime.hasAnyData ? '-' : formatMinutes(studyTime.todayMinutes)}
+            </div>
+            <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:4, flexWrap:'wrap' }}>
+              <span style={{ fontSize:FONT.size.xs, color:t.text4, fontWeight:FONT.weight.semibold,
+                textTransform:'uppercase', letterSpacing:.6 }}>Today</span>
+              {trendLabel(studyTime.dowPct, 'vs yesterday')}
+            </div>
           </div>
-          {trendLabel(studyTime.wowPct, 'vs last week')}
+          <div>
+            <div style={{ fontSize:FONT.size.xl3, fontWeight:FONT.weight.bold, color:t.text, lineHeight:1.1 }}>
+              {studyTime.real && !studyTime.hasAnyData ? '-' : formatMinutes(totalMinutes)}
+            </div>
+            <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:4, flexWrap:'wrap' }}>
+              <span style={{ fontSize:FONT.size.xs, color:t.text4, fontWeight:FONT.weight.semibold,
+                textTransform:'uppercase', letterSpacing:.6 }}>This week</span>
+              {trendLabel(studyTime.wowPct, 'vs last week')}
+            </div>
+          </div>
         </div>
 
         {studyTime.real && !studyTime.hasAnyData ? (
