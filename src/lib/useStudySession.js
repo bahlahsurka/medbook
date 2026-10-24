@@ -44,18 +44,30 @@ const HEARTBEAT_MS = 60000;
  *     if the tab comes back while still `active`.
  *   - actual unmount — same flush, via the effect's cleanup.
  *
+ * A brief interruption — switching away to reply to a notification, a
+ * quick app-switch — often elapses less than MIN_SECONDS_TO_LOG on its own.
+ * That used to mean it was thrown away outright the instant the tab hid,
+ * even though the user came straight back and kept studying: real regular
+ * usage made of many such short hops could lose a meaningful amount of its
+ * own total time this way, never reaching the floor each individual gap
+ * was measured against. `pendingRef` carries an under-the-floor fragment
+ * forward into the NEXT segment instead, so only the running TOTAL across a
+ * string of brief interruptions has to clear the floor, not each one on its
+ * own.
+ *
  * Insert failures are swallowed (dev-only console.warn) — analytics must
  * never break or block the screen the user is actually trying to use.
  */
 export function useStudySession(active, userId, context) {
   const startRef = useRef(null);
+  const pendingRef = useRef(0); // seconds carried over from a too-short-to-log gap
 
   useEffect(() => {
     if (!active || !userId) return;
     startRef.current = Date.now();
+    pendingRef.current = 0;
 
     const persist = (elapsedSeconds, endedAt) => {
-      if (elapsedSeconds < MIN_SECONDS_TO_LOG) return;
       supabase.from('study_sessions').insert({
         user_id: userId,
         started_at: new Date(endedAt - elapsedSeconds * 1000).toISOString(),
@@ -69,19 +81,30 @@ export function useStudySession(active, userId, context) {
       });
     };
 
-    // Final flush — session is ending (hidden/unmounting). Stops the clock.
+    // Session is pausing (hidden/unmounting). Stops the clock and rolls
+    // whatever just elapsed into pendingRef, persisting only once the
+    // carried-over TOTAL clears MIN_SECONDS_TO_LOG — see the doc comment
+    // above for why this accumulates rather than each gap being judged
+    // against the floor on its own.
     const flush = () => {
       if (!startRef.current) return;
       const now = Date.now();
-      const elapsedSeconds = Math.round((now - startRef.current) / 1000);
+      pendingRef.current += Math.round((now - startRef.current) / 1000);
       startRef.current = null;
-      persist(elapsedSeconds, now);
+      if (pendingRef.current >= MIN_SECONDS_TO_LOG) {
+        persist(pendingRef.current, now);
+        pendingRef.current = 0;
+      }
     };
 
     const heartbeat = setInterval(() => {
       if (!startRef.current) return;
       const now = Date.now();
-      const elapsedSeconds = Math.round((now - startRef.current) / 1000);
+      // Always above the floor by construction (a full HEARTBEAT_MS has
+      // elapsed), so this persists unconditionally and also sweeps up any
+      // still-pending fragment from an earlier short gap.
+      const elapsedSeconds = pendingRef.current + Math.round((now - startRef.current) / 1000);
+      pendingRef.current = 0;
       persist(elapsedSeconds, now);
       startRef.current = now; // restart the clock, don't double-count next tick
     }, HEARTBEAT_MS);

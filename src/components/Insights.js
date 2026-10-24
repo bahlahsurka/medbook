@@ -48,6 +48,43 @@ function SampleTag({ t }) {
 // table missing" — the signal this component uses to fall back to mock data,
 // distinct from a real empty result (migration run, just no rows logged yet).
 // ============================================================================
+// Supabase/PostgREST caps how many rows a single request can return (a
+// project-level "max rows" setting — 1000 by default, and NOT something an
+// API caller can override by just asking for more). A query with no
+// explicit pagination doesn't error past that ceiling, it silently
+// truncates — so a genuinely regular user, whose study_sessions window can
+// easily hold more than 1000 rows (a 60-second heartbeat adds up fast over
+// weeks of real daily use), would quietly lose their MOST RECENT activity
+// off the end of an ascending-ordered fetch. That's exactly the "I've been
+// using the app regularly but it's not reflected" bug this fixes: Study
+// Time and its 7-day chart only ever saw however much of the 30-day window
+// fit in the first 1000 rows, which — for a heavy user — can be entirely
+// used up by OLDER sessions, leaving nothing for the days that actually
+// matter to the chart.
+//
+// `buildQuery(from, to)` must build and return a FRESH PostgrestFilterBuilder
+// each call (a builder can't be re-awaited/re-ranged after use) with every
+// filter/order already applied except `.range()`, which this appends itself.
+// Pages through with `.range()` until a page comes back shorter than
+// requested, accumulating every row regardless of how many there turn out
+// to be — never silently dropping the tail of a large result again.
+// Exported (like DetailView.js's RenderedNotes/rawOffsetAt) purely so a
+// test can exercise this exact pagination logic directly against a mocked
+// paginated response, without a parallel reimplementation of it.
+const PAGE_SIZE = 1000;
+export async function fetchAllRows(buildQuery) {
+  let all = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await buildQuery(from, from + PAGE_SIZE - 1);
+    if (error) return { data: null, error };
+    if (data) all = all.concat(data);
+    if (!data || data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return { data: all, error: null };
+}
+
 function useInsightsData(userId) {
   const [studySessions, setStudySessions] = useState(undefined); // undefined=loading, null=unavailable, []=real
   const [reviewLogs, setReviewLogs] = useState(undefined);
@@ -58,9 +95,11 @@ function useInsightsData(userId) {
     let cancelled = false;
 
     const sinceStudy = new Date(Date.now() - 30 * 86400000).toISOString();
-    supabase.from('study_sessions').select('started_at,duration_seconds')
-      .eq('user_id', userId).gte('started_at', sinceStudy).order('started_at', { ascending: true })
-      .then(({ data, error }) => {
+    fetchAllRows((from, to) =>
+      supabase.from('study_sessions').select('started_at,duration_seconds')
+        .eq('user_id', userId).gte('started_at', sinceStudy)
+        .order('started_at', { ascending: true }).range(from, to)
+    ).then(({ data, error }) => {
         if (cancelled) return;
         if (error) {
           if (process.env.NODE_ENV !== 'production') {
@@ -74,9 +113,11 @@ function useInsightsData(userId) {
       });
 
     const sinceReview = new Date(Date.now() - 14 * 86400000).toISOString();
-    supabase.from('review_log').select('rating,system,reviewed_at')
-      .eq('user_id', userId).gte('reviewed_at', sinceReview).order('reviewed_at', { ascending: true })
-      .then(({ data, error }) => {
+    fetchAllRows((from, to) =>
+      supabase.from('review_log').select('rating,system,reviewed_at')
+        .eq('user_id', userId).gte('reviewed_at', sinceReview)
+        .order('reviewed_at', { ascending: true }).range(from, to)
+    ).then(({ data, error }) => {
         if (cancelled) return;
         if (error) {
           if (process.env.NODE_ENV !== 'production') {
