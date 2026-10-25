@@ -23,9 +23,18 @@
 //      torn down" mechanism. These tests mock `global.fetch` (not
 //      `supabase.from`, which this hook no longer calls) and assert every
 //      persisted request carries `keepalive: true`.
+//   4. In-app navigation away from a finished Review Queue session never
+//      triggers visibilitychange/pagehide (the tab itself never hides), so
+//      that session's elapsed time sat correctly tracked but uncommitted —
+//      not reflected in the Study Time total until the next heartbeat tick
+//      (up to HEARTBEAT_MS away) or an actual tab hide, which read as "not
+//      counted at all" even though nothing was lost. flushStudySessionNow
+//      lets a meaningful boundary (ReviewQueue.js's flushSessionLog) commit
+//      the running timer immediately, WITHOUT stopping it the way the
+//      internal hide/pagehide flush() does.
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { useStudySession } from '../lib/useStudySession';
+import { useStudySession, flushStudySessionNow } from '../lib/useStudySession';
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -160,4 +169,60 @@ test('nothing is persisted when there is no access token (would fail RLS anyway)
   await act(async () => { setHidden(true); });
 
   expect(calls.length).toBe(0);
+});
+
+test('flushStudySessionNow commits elapsed time immediately without waiting for the heartbeat', async () => {
+  const calls = mockFetch();
+  act(() => { root.render(<Harness active={true} userId="u1" />); });
+
+  act(() => { jest.advanceTimersByTime(12000); }); // 12s — well under the 30s heartbeat
+  await act(async () => { flushStudySessionNow(); });
+
+  expect(calls.length).toBe(1);
+  expect(calls[0].row.duration_seconds).toBe(12);
+});
+
+test('flushStudySessionNow keeps the clock running — the next checkpoint only counts time since it fired', async () => {
+  const calls = mockFetch();
+  act(() => { root.render(<Harness active={true} userId="u1" />); });
+
+  act(() => { jest.advanceTimersByTime(10000); });
+  await act(async () => { flushStudySessionNow(); }); // commits 10s, clock keeps running
+  act(() => { jest.advanceTimersByTime(8000); });
+  await act(async () => { flushStudySessionNow(); }); // commits a fresh 8s, not 18s
+
+  expect(calls.length).toBe(2);
+  expect(calls[0].row.duration_seconds).toBe(10);
+  expect(calls[1].row.duration_seconds).toBe(8);
+});
+
+test('flushStudySessionNow below the floor carries forward instead of writing a noise row', async () => {
+  const calls = mockFetch();
+  act(() => { root.render(<Harness active={true} userId="u1" />); });
+
+  act(() => { jest.advanceTimersByTime(2000); }); // 2s — under the 5s floor
+  await act(async () => { flushStudySessionNow(); });
+  expect(calls.length).toBe(0); // not lost — just not written as its own row yet
+
+  // The carried-forward 2s shows up in the NEXT commit, same carry-forward
+  // behavior the hide/pagehide flush() already has.
+  act(() => { jest.advanceTimersByTime(4000); }); // +4s = 6s total, clears the floor
+  await act(async () => { setHidden(true); });
+
+  expect(calls.length).toBe(1);
+  expect(calls[0].row.duration_seconds).toBe(6);
+});
+
+test('flushStudySessionNow is a safe no-op when no session is running', async () => {
+  const calls = mockFetch();
+  // Nothing rendered yet — no live useStudySession instance.
+  expect(() => flushStudySessionNow()).not.toThrow();
+  expect(calls.length).toBe(0);
+
+  act(() => { root.render(<Harness active={true} userId="u1" />); });
+  await act(async () => { root.unmount(); });
+  unmounted = true;
+
+  // Unmounted — the hook's own cleanup clears the live checkpoint reference.
+  expect(() => flushStudySessionNow()).not.toThrow();
 });
