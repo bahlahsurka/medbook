@@ -139,7 +139,7 @@ export default function App() {
   // means "active" is just "signed in and the tab is in front of you" —
   // the hook's own visibilitychange/pagehide/heartbeat handling already
   // takes care of pausing while backgrounded and persisting periodically.
-  useStudySession(!!session && !isRecovery, session?.user?.id, 'app');
+  useStudySession(!!session && !isRecovery, session?.user?.id, 'app', session?.access_token);
 
   // Resize
   useEffect(() => {

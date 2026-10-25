@@ -174,4 +174,51 @@ describe('view-mode highlight offset mapping (rawOffsetAt)', () => {
 
     expect(strippedSlice(raw, start, end)).toBe(needle);
   });
+
+  // Reported bug: dragging a selection all the way to the end of an entry's
+  // last line silently failed to highlight anything. Root cause: with
+  // nothing after the final character, the browser commonly resolves the
+  // Range's endContainer to a common ANCESTOR element (offset ===
+  // childNodes.length) rather than the last text node itself — a boundary
+  // `rawOffsetAt` used to only handle when `container` was already a text
+  // node (or an element already inside an annotated run), so
+  // closest('[data-raw-start]') found nothing and the whole selection read
+  // as null. Exercises that exact end-container shape directly, rather than
+  // relying on selectRenderedText (which always resolves into a text node).
+  test('a Range boundary landing on an ancestor element, past the last run, still maps to the true end', () => {
+    const raw = 'Leading plain text then **a final bold word** right here.';
+    renderNotes(raw);
+
+    const range = document.createRange();
+    range.selectNodeContents(container);
+    range.collapse(false); // end boundary: container, offset === childNodes.length
+
+    const end = rawOffsetAt(range.endContainer, range.endOffset);
+    expect(end).toBe(raw.length);
+  });
+
+  // The raw string's own trailing "**" is never itself selectable rendered
+  // content (markers are stripped), so when the notes end RIGHT at the
+  // close of a bold run, the furthest a real selection can reach is just
+  // before that marker — not raw.length. Confirms the ancestor-boundary fix
+  // resolves there correctly (not null) rather than assuming every entry's
+  // raw string ends in plain text.
+  test('a Range boundary past the last run still resolves correctly when notes end exactly on a marker', () => {
+    const raw = 'Some text and then **the final bold phrase**';
+    renderNotes(raw);
+
+    const entries = mapRenderedPositions(container);
+    const full = entries.map(e => e.node.textContent).join('');
+    const idx = full.indexOf('the final bold phrase');
+    const startEntry = entries.find(e => idx >= e.start && idx <= e.end);
+    const start = rawOffsetAt(startEntry.node, idx - startEntry.start);
+
+    const endRange = document.createRange();
+    endRange.selectNodeContents(container);
+    endRange.collapse(false);
+    const end = rawOffsetAt(endRange.endContainer, endRange.endOffset);
+
+    expect(end).not.toBeNull();
+    expect(strippedSlice(raw, start, end)).toBe('the final bold phrase');
+  });
 });

@@ -83,19 +83,38 @@ function isTypingTarget(el) {
 // boundary outside any annotated run (shouldn't happen for a selection
 // readSelection has already confirmed is inside notesRef, but checked
 // rather than assumed).
-// Exported (alongside RenderedNotes below) purely so a test can exercise
-// this exact mapping against this exact renderer's real DOM output, without
-// a parallel implementation of either — see
-// src/__tests__/highlightOffsetMapping.test.js. Not used by any other
-// module; DetailView's own default export is still the component.
+//
+// A Range boundary isn't always inside a text node — dragging a selection
+// past the very last character of the notes (there's nothing after it to
+// "attach" the endpoint to) commonly lands the browser's endContainer on a
+// common ANCESTOR element instead, with offset === that element's
+// childNodes.length. `container` there is never itself inside an annotated
+// run — it's an ancestor of every run — so `closest('[data-raw-start]')`
+// found nothing and this returned null, which readSelection treats as "no
+// selection": selecting to the end of an entry's last line silently failed
+// to highlight anything. Resolving the boundary down through childNodes
+// first (same rule the DOM itself uses: the boundary sits between
+// childNodes[offset-1] and childNodes[offset]) until it reaches an actual
+// leaf fixes that, while leaving every already-working in-text-node
+// boundary untouched (the loop never runs for those).
 export function rawOffsetAt(container, offset) {
-  const el = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
+  let node = container, off = offset;
+  while (node.nodeType !== Node.TEXT_NODE && node.childNodes.length > 0) {
+    if (off >= node.childNodes.length) {
+      node = node.childNodes[node.childNodes.length - 1];
+      off = node.nodeType === Node.TEXT_NODE ? node.textContent.length : node.childNodes.length;
+    } else {
+      node = node.childNodes[off];
+      off = 0;
+    }
+  }
+  const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
   const runEl = el && el.closest('[data-raw-start]');
   if (!runEl) return null;
   const rawStart = parseInt(runEl.getAttribute('data-raw-start'), 10);
   const pre = document.createRange();
   pre.selectNodeContents(runEl);
-  pre.setEnd(container, offset);
+  pre.setEnd(node, off);
   return rawStart + pre.toString().length;
 }
 
