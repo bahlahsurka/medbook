@@ -43,7 +43,13 @@ export const LIMITS = {
   clinicalPearls:    3,   // max 3
   redFlags:          5,
   relatedTopics:     8,
-  flashcards:        6,
+  // No cap — a thorough Review can legitimately support more than 6
+  // question/answer pairs, and arbitrarily truncating a longer, well-
+  // supported set discarded real study material for no reason tied to the
+  // actual content. Array#slice(0, Infinity) returns the full array, so
+  // this stays a plain "cap" everywhere it's used below rather than
+  // needing a separate uncapped code path.
+  flashcards:        Infinity,
 };
 
 /**
