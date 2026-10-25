@@ -275,4 +275,33 @@ describe('view-mode rendering of a stored highlight that cuts through a bold run
 
     document.body.removeChild(el);
   });
+
+  // Reported bug: highlighting a sentence that mixes bold and plain words
+  // visually inserted an extra space right at the bold/plain boundary.
+  // Root cause: buildFormattedParts correctly splits one highlighted phrase
+  // into separate runs wherever it crosses a bold boundary (so the bold
+  // styling itself stays correct — the two tests above) — but RichRuns used
+  // to render EACH of those runs as its own <mark>, and every <mark> carries
+  // its own `padding: 0 2px`. Two adjacent padded marks at that boundary
+  // read as a gap — an extra space that was never in the text. Fixed by
+  // grouping consecutive runs covered by the same highlight into one <mark>
+  // (see RichRuns.js's groupByHighlight) — this checks there is exactly ONE
+  // <mark> here, not two side by side, for a highlight crossing a bold
+  // boundary mid-sentence.
+  test('a highlight spanning a bold/plain boundary renders as ONE mark, not two adjacent ones', () => {
+    const raw = 'Please review the **critical values** carefully before signing off.';
+    // Highlight "critical values carefully" — starts inside the bold run,
+    // ends in the following plain text, same shape as the reported bug.
+    const start = raw.indexOf('critical');
+    const end = raw.indexOf('carefully') + 'carefully'.length;
+    const el = renderNotes(raw, [{ start, end, color: { bg: '#fef08a', text: '#713f12', label: 'Yellow' } }]);
+
+    const marks = el.querySelectorAll('mark');
+    expect(marks.length).toBe(1);
+    expect(marks[0].textContent).toBe('critical values carefully');
+    // The bold word is still bold, nested inside that single mark.
+    expect(marks[0].querySelector('strong').textContent).toBe('critical values');
+
+    document.body.removeChild(el);
+  });
 });

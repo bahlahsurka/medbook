@@ -1,5 +1,10 @@
 import { useEffect, useRef } from 'react';
-import { supabase } from './supabase';
+
+// Read directly (not via lib/supabase.js's client) — persist() below talks
+// to PostgREST with a raw `fetch` instead of the supabase-js client, so it
+// can pass `keepalive: true`. See persist()'s own comment for why.
+const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY;
 
 // Ignore accidental near-instant opens/navigations — someone tapping into
 // an entry and immediately backing out shouldn't count as "studying".
@@ -12,9 +17,10 @@ const MIN_SECONDS_TO_LOG = 5;
 // all, even though real time elapsed. Confirmed via Supabase's own request
 // logs: real usage produced zero insert attempts because nothing had
 // unmounted or backgrounded yet to trigger the old flush-only-at-the-end
-// behavior. 60s keeps the extra requests infrequent while still making
-// "I'm using it right now" show up well within a normal study session.
-const HEARTBEAT_MS = 60000;
+// behavior. 30s bounds how much a genuinely instant kill (no visibilitychange
+// or pagehide at all — an OS force-quit, a crash) can ever lose to half of
+// what it used to be, while still keeping the extra requests infrequent.
+const HEARTBEAT_MS = 30000;
 
 /**
  * useStudySession — records real study-session duration for the Insights
@@ -32,7 +38,10 @@ const HEARTBEAT_MS = 60000;
  *
  * `active` toggles the timer on/off without unmounting the caller, so
  * Pause-equivalent conditions (e.g. tab hidden) stop the clock and coming
- * back resumes it, all within the same component instance.
+ * back resumes it, all within the same component instance. `accessToken`
+ * is the signed-in user's current JWT (`session.access_token` from App.js) —
+ * kept in a ref rather than an effect dependency (see tokenRef below) so a
+ * routine token refresh never tears down and rebuilds the running timer.
  *
  * Three ways progress gets saved, so a session's time is never all-or-
  * nothing on one fragile event:
@@ -58,9 +67,16 @@ const HEARTBEAT_MS = 60000;
  * Insert failures are swallowed (dev-only console.warn) — analytics must
  * never break or block the screen the user is actually trying to use.
  */
-export function useStudySession(active, userId, context) {
+export function useStudySession(active, userId, context, accessToken) {
   const startRef = useRef(null);
   const pendingRef = useRef(0); // seconds carried over from a too-short-to-log gap
+  // Always the LATEST token, read synchronously by persist() at call time —
+  // not an effect dependency, so a routine token refresh (Supabase re-mints
+  // the JWT roughly hourly, and again on every tab/app foreground — see
+  // App.js's own comment on this) never tears down and restarts the running
+  // timer the way including it in the effect's dependency array would.
+  const tokenRef = useRef(accessToken);
+  tokenRef.current = accessToken;
 
   useEffect(() => {
     if (!active || !userId) return;
@@ -68,13 +84,47 @@ export function useStudySession(active, userId, context) {
     pendingRef.current = 0;
 
     const persist = (elapsedSeconds, endedAt) => {
-      supabase.from('study_sessions').insert({
+      if (!tokenRef.current) return; // not actually signed in — RLS would reject this anyway
+      const row = {
         user_id: userId,
         started_at: new Date(endedAt - elapsedSeconds * 1000).toISOString(),
         duration_seconds: elapsedSeconds,
         context,
-      }).then(({ error }) => {
-        if (error && process.env.NODE_ENV !== 'production') {
+      };
+      // Raw `fetch` with `keepalive: true` instead of the supabase-js
+      // client — `keepalive` is the browser's own mechanism for "finish
+      // sending this small request even though the page is being torn down
+      // right now", which is exactly the situation every flush() path below
+      // is triggered by (tab backgrounded/closed, pagehide, unmount). A
+      // plain fetch (what the supabase-js client issues internally) racing
+      // an actual navigation/close can get silently cancelled mid-flight
+      // before it reaches the server — a real session's final seconds never
+      // arriving even though the app computed and attempted to send them.
+      // The pagination/heartbeat fixes elsewhere fixed WHAT gets counted and
+      // WHEN; this fixes whether the write for a closing tab survives long
+      // enough to land. Applied to every persist, not just teardown-
+      // triggered ones, to keep one code path — the payload here is a few
+      // dozen bytes, nowhere near keepalive's ~64KB combined-request cap, so
+      // there's no downside while the tab stays open either.
+      fetch(`${SUPABASE_URL}/rest/v1/study_sessions`, {
+        method: 'POST',
+        keepalive: true,
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${tokenRef.current}`,
+          Prefer: 'return=minimal',
+        },
+        body: JSON.stringify([row]),
+      }).then((res) => {
+        if (!res.ok && process.env.NODE_ENV !== 'production') {
+          res.text().then((msg) => {
+            // eslint-disable-next-line no-console
+            console.warn('[useStudySession] insert failed — has SUPABASE_MIGRATION_INSIGHTS.sql been run?', res.status, msg);
+          }).catch(() => {});
+        }
+      }).catch((error) => {
+        if (process.env.NODE_ENV !== 'production') {
           // eslint-disable-next-line no-console
           console.warn('[useStudySession] insert failed — has SUPABASE_MIGRATION_INSIGHTS.sql been run?', error.message);
         }

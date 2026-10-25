@@ -243,10 +243,25 @@ function formattedPartToHtml(p, textColor) {
 // markers into two independently-parsed strings.
 export function markedTextToHtml(text, highlights, textColor, isDark) {
   const parts = buildFormattedParts(text, highlights);
-  return parts.map(p => {
-    const inner = formattedPartToHtml(p, textColor);
-    if (!p.hl) return inner;
-    const c = resolveHL(p.hl, isDark);
+  // Group consecutive parts that share the same highlight (same `color`
+  // object — buildFormattedParts reuses it across every part one highlight
+  // covers) into a single <mark>, instead of one per part. A highlight
+  // crossing a bold/plain (or italic/size) boundary legitimately produces
+  // separate parts for each side (see buildFormattedParts' own comment),
+  // but each is still visually ONE highlighted phrase — one <mark> per part
+  // put a visible gap (each mark's own `padding: 0 2px`) exactly at that
+  // boundary, reading as an extra inserted space. See RichRuns.js's
+  // groupByHighlight for the read-only-render half of this same fix.
+  const groups = [];
+  for (const p of parts) {
+    const prev = groups[groups.length - 1];
+    if (prev && p.hl && prev.hl === p.hl) prev.parts.push(p);
+    else groups.push({ hl: p.hl, parts: [p] });
+  }
+  return groups.map(g => {
+    const inner = g.parts.map(p => formattedPartToHtml(p, textColor)).join('');
+    if (!g.hl) return inner;
+    const c = resolveHL(g.hl, isDark);
     return `<mark style="background:${c.bg};color:${c.text};border-radius:2px;padding:0 2px">${inner}</mark>`;
   }).join('');
 }

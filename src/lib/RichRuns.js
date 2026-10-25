@@ -33,26 +33,56 @@
 // marker-stripped DOM into the same raw-string coordinates storage and
 // every other render already use. Harmless, and free, for every other
 // caller that never queries it.
+import { Fragment } from 'react';
 import { useTheme } from './theme';
 import { splitRich, buildFormattedParts, resolveHL, RICH_SIZE_STYLE } from './highlights';
+
+// buildFormattedParts correctly splits ONE highlighted phrase into separate
+// runs wherever it crosses a bold/italic/size boundary (so the bold/italic
+// styling itself never leaks or vanishes — see highlights.js). But each of
+// those runs sharing the SAME highlight is still visually one continuous
+// highlighted phrase, not several — rendering every run as its own <mark>
+// (each carrying its own `padding: 0 2px`) put a visible gap at every such
+// boundary, e.g. highlighting "**bold** word" rendered as two adjacent
+// padded marks with a gap between them, reading as an extra inserted space.
+// Grouping consecutive runs that share the same highlight (buildFormattedParts
+// reuses the same highlight's own `color` object across every run it covers,
+// so reference equality is exactly "same highlight") into one <mark> keeps
+// the correct underlying run split while rendering it as the single
+// contiguous mark it visually is.
+function groupByHighlight(runs) {
+  const groups = [];
+  for (const r of runs) {
+    const prev = groups[groups.length - 1];
+    if (prev && r.hl && prev.hl === r.hl) prev.runs.push(r);
+    else groups.push({ hl: r.hl, runs: [r] });
+  }
+  return groups;
+}
 
 export default function RichRuns({ text, rawStart = 0, highlights, isDark }) {
   const { t } = useTheme();
   const runs = (highlights && highlights.length)
     ? buildFormattedParts(text, highlights)
     : splitRich(text).map(r => ({ ...r, hl: null }));
-  return runs.map((r, j) => {
-    let el = r.t;
-    if (r.bold) el = <strong style={{ color: t.text }}>{el}</strong>;
-    if (r.italic) el = <em>{el}</em>;
-    if (r.size) {
-      const strong = r.size === 'lg' || r.size === 'xl';
-      el = <span style={{ ...RICH_SIZE_STYLE[r.size], color: strong ? t.text : undefined }}>{el}</span>;
-    }
-    if (r.hl) {
-      const c = resolveHL(r.hl, isDark);
-      el = <mark style={{ background: c.bg, color: c.text, borderRadius: 2, padding: '0 2px' }}>{el}</mark>;
-    }
-    return <span key={j} data-raw-start={rawStart + r.start}>{el}</span>;
+  const groups = groupByHighlight(runs);
+  return groups.map((g, gi) => {
+    const children = g.runs.map((r, j) => {
+      let el = r.t;
+      if (r.bold) el = <strong style={{ color: t.text }}>{el}</strong>;
+      if (r.italic) el = <em>{el}</em>;
+      if (r.size) {
+        const strong = r.size === 'lg' || r.size === 'xl';
+        el = <span style={{ ...RICH_SIZE_STYLE[r.size], color: strong ? t.text : undefined }}>{el}</span>;
+      }
+      return <span key={j} data-raw-start={rawStart + r.start}>{el}</span>;
+    });
+    if (!g.hl) return <Fragment key={gi}>{children}</Fragment>;
+    const c = resolveHL(g.hl, isDark);
+    return (
+      <mark key={gi} style={{ background: c.bg, color: c.text, borderRadius: 2, padding: '0 2px' }}>
+        {children}
+      </mark>
+    );
   });
 }
