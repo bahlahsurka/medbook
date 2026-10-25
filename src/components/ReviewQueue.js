@@ -8,6 +8,7 @@ import { buildCycledQueue } from '../lib/reviewQueue';
 import { computeSystemStats } from '../lib/systemStats';
 import { normalizeSections } from '../services/ai';
 import { loadSession, saveSession, clearSession, newSessionId } from '../lib/reviewSessionStore';
+import { flushStudySessionNow } from '../lib/useStudySession';
 import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
 import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
   IconX, IconZap } from '../lib/icons';
@@ -236,6 +237,18 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   const flushSessionLog = (countOverride) => {
     if (loggedRef.current) return;
     loggedRef.current = true;
+    // Commit the app-wide Study Time timer's elapsed-so-far right now,
+    // instead of leaving it to the next heartbeat tick (up to 30s away) or
+    // a tab hide that might not come for a while — in-app navigation away
+    // from Review Queue (e.g. "Back to Overview") never triggers either of
+    // those on its own, since the tab itself never actually hides. Without
+    // this, a finished review session showed up in "Recent study sessions"
+    // immediately but its time could sit uncommitted in Study Time for a
+    // while, reading as "not counted" even though it hadn't been lost.
+    // Unconditional (not inside the count/userId guards below) — the user
+    // was actively using the app for this whole stretch regardless of
+    // whether any cards ended up rated.
+    flushStudySessionNow();
     const count = countOverride ?? sessionDone;
     if (count === 0 || !userId) return;
     const meta = sessionMetaRef.current || {};
