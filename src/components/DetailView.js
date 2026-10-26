@@ -470,13 +470,30 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   useEffect(() => {
     if (!hlViewOn) { clearSelState(); return; }
 
+    // selRange (what the static toolbar's "Apply:"/"Select text:" state is
+    // driven by) is ALWAYS kept in sync with the real selection on every
+    // selectionchange — never gated on pointerDown. selRect (the floating
+    // popover's position) is gated: while the user is still actively
+    // pressing/dragging, repositioning it would pop it up and jump it
+    // around under their finger.
+    //
+    // These used to be set together, both gated on pointerDown — which
+    // broke a specific, common mobile gesture: double-tap a word to select
+    // it, then drag the native OS selection HANDLE to extend it further
+    // (e.g. onward to the end of the paragraph). The handle itself is
+    // browser-chrome UI, not a page element — dragging it frequently never
+    // fires a matching touchend back to this page's `document` listener,
+    // so pointerDown.current (set true by the double-tap's own touchstart)
+    // could stay stuck true for the rest of that interaction. With
+    // selRange gated the same way, the toolbar then never recognized the
+    // extended selection at all — reading as "I can't highlight this",
+    // most noticeably when extending onto an entry's LAST line, the
+    // natural end point of that exact gesture.
     const sync = () => {
-      // While the user is still dragging, don't pop the bar up under their finger.
-      if (pointerDown.current) return;
       const s = readSelection();
       if (!s) { clearSelState(); return; }
       setSelRange({ start: s.start, end: s.end });
-      setSelRect(s.rect);
+      if (!pointerDown.current) setSelRect(s.rect);
     };
 
     const onDown = () => { pointerDown.current = true; };
