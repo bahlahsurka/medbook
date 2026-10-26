@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { compressImage } from '../lib/imageCompress';
 import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
 import { toTitleCase } from '../lib/titleCase';
 import { adjustHighlights, matchHighlightShortcutView, richMarkersToHtml, markedTextToHtml } from '../lib/highlights';
@@ -833,9 +834,13 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   };
 
   const uploadImg = async img => {
-    const ext = img.file.name.split('.').pop()||'jpg';
+    // Downscale/compress BEFORE upload — see imageCompress.js's own header
+    // comment for why (this same file gets reused everywhere the entry's
+    // images are displayed, including small list/edit-mode thumbnails).
+    const uploadFile = await compressImage(img.file);
+    const ext = uploadFile.name.split('.').pop()||'jpg';
     const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-    const {error} = await supabase.storage.from('entry-images').upload(path,img.file,{contentType:img.file.type});
+    const {error} = await supabase.storage.from('entry-images').upload(path,uploadFile,{contentType:uploadFile.type});
     if (error) throw error;
     return supabase.storage.from('entry-images').getPublicUrl(path).data.publicUrl;
   };

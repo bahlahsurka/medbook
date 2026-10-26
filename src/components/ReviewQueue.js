@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR } from '../lib/constants';
@@ -26,6 +26,48 @@ function RenderedNotes({ text, highlights, isDark }) {
     </span>
   );
 }
+
+// The supporting column (images + AI key points) extracted into its own
+// memoized component — performance fix: ReviewQueue's session timer
+// re-renders the whole screen every second (elapsedSec ticking), and this
+// column, once revealed, is the single most expensive thing on it to
+// re-paint (decoded images, laid out again every tick). None of its props
+// change on a timer tick — only when the card itself changes — so wrapping
+// it here lets React skip re-rendering it on every elapsedSec update while
+// changing nothing about what it actually does.
+//
+// Deliberately NOT extended to the main card/notes/rating area in the same
+// way: that content's handlers (rate/skip) close over several pieces of
+// fast-changing session state (sessionDone, idx, total), and this file's
+// ESLint setup doesn't enforce react-hooks/exhaustive-deps — memoizing
+// those without that safety net risks a stale-closure bug silently
+// corrupting what gets submitted to spaced-repetition scheduling, which is
+// a far worse outcome than the re-render cost it would save. `onImageClick`
+// below is a plain useState setter (setLightboxIdx), which React guarantees
+// is always referentially stable — no such risk here.
+const SideColumn = memo(function SideColumn({ t, images, aiSections, hasKeyPoints, onImageClick }) {
+  const hasImages = images?.length > 0;
+  return (
+    <div className="mb-rq-side-col mb-rq-fade">
+      {hasImages && (
+        <div style={{ marginBottom: hasKeyPoints ? SPACE.xl : 0 }}>
+          <div style={{ fontSize:FONT.size.xs, color:t.text4, letterSpacing:.8, fontWeight:FONT.weight.bold,
+            textTransform:'uppercase', marginBottom:10 }}>
+            Images
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+            {images.map((url, i) => (
+              <img key={i} src={url} alt="" onClick={()=>onImageClick(i)} className="mb-rq-img"
+                style={{ width:'100%', maxHeight:280, objectFit:'contain', borderRadius:RADIUS.xl,
+                  cursor:'zoom-in', background:t.surface2, display:'block', boxShadow:elevation(t,'sm') }} />
+            ))}
+          </div>
+        </div>
+      )}
+      {hasKeyPoints && <ReviewKeyPoints sections={aiSections} />}
+    </div>
+  );
+});
 
 function LbBtn({ onClick, title, style, children }) {
   return (
@@ -1081,24 +1123,8 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
               then the entry's existing AI key points, if any. Reuses the
               recovered space beside the card rather than leaving it empty. */}
           {showSide && (
-            <div className="mb-rq-side-col mb-rq-fade">
-              {cardHasImages && (
-                <div style={{ marginBottom: cardHasKeyPoints ? SPACE.xl : 0 }}>
-                  <div style={{ fontSize:FONT.size.xs, color:t.text4, letterSpacing:.8, fontWeight:FONT.weight.bold,
-                    textTransform:'uppercase', marginBottom:10 }}>
-                    Images
-                  </div>
-                  <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-                    {card.images.map((url, i) => (
-                      <img key={i} src={url} alt="" onClick={()=>setLightboxIdx(i)} className="mb-rq-img"
-                        style={{ width:'100%', maxHeight:280, objectFit:'contain', borderRadius:RADIUS.xl,
-                          cursor:'zoom-in', background:t.surface2, display:'block', boxShadow:elevation(t,'sm') }} />
-                    ))}
-                  </div>
-                </div>
-              )}
-              {cardHasKeyPoints && <ReviewKeyPoints sections={cardAiSections} />}
-            </div>
+            <SideColumn t={t} images={card.images} aiSections={cardAiSections}
+              hasKeyPoints={cardHasKeyPoints} onImageClick={setLightboxIdx} />
           )}
         </div>
 
