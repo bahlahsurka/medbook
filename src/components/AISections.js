@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useTheme, MOTION } from '../lib/theme';
+import { useTheme, MOTION, RADIUS } from '../lib/theme';
 import { STUDY_SCOPE_CLASS, suppressContextMenu } from '../lib/studyInteraction';
 
 // Animated collapse/expand (batch 6) — a CSS-grid-rows trick rather than a
@@ -101,7 +101,7 @@ export default function AISections({
                       rows={Math.max(3, list.length + 1)}
                       placeholder="One point per line…"
                       style={{ width:'100%', background:t.surface2,
-                        border:`1px solid ${t.borderStrong}`, borderRadius:7,
+                        border:`1px solid ${t.borderStrong}`, borderRadius:RADIUS.sm,
                         color:t.text, padding:'8px 10px', fontSize:13, lineHeight:1.6,
                         outline:'none', boxSizing:'border-box', resize:'vertical',
                         fontFamily:'Inter,sans-serif' }} />

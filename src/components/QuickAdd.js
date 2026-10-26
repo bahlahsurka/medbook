@@ -1,10 +1,21 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { DIFFICULTY, DIFF_COLOR } from '../lib/constants';
 import { useTheme } from '../lib/theme';
 
 export default function QuickAdd({ userId, activeSystem, userSystems, color, onSaved, onClose }) {
   const { t } = useTheme();
+
+  // Escape-to-close — DetailView's lightbox, ManageSystems' inline edit,
+  // and ImportedDecks/StudySession's lightbox/flag-popover/Focus Mode all
+  // support it; this sheet didn't, so a user reaching for the key they'd
+  // just used to dismiss another overlay would find it silently did
+  // nothing here.
+  useEffect(() => {
+    const onKeyDown = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
   const [title, setTitle]   = useState('');
   const [notes, setNotes]   = useState('');
   const [system, setSystem] = useState(activeSystem);

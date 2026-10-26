@@ -45,7 +45,7 @@ export default function Sidebar({ open, width=240, entries, activeSystem, setAct
   // as an abrupt pop instead of a slide. Closing looked fine by contrast
   // because shrinking *away* from full-width content is naturally legible;
   // growing *from* a clipped sliver isn't, without the fade.
-  const collapseMs = 260;
+  const collapseMs = 250; // MOTION.slow — was a one-off 260ms, off the app's 120/180/250 scale
   return (
     // No min-width here — THAT was the actual root cause of "no animation
     // while opening" (found via a vanilla-CSS repro, not just tuning): with

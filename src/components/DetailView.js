@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { compressImage } from '../lib/imageCompress';
 import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
 import { toTitleCase } from '../lib/titleCase';
 import { adjustHighlights, matchHighlightShortcutView, richMarkersToHtml, markedTextToHtml } from '../lib/highlights';
@@ -305,7 +306,7 @@ function F({label,children}) {
 }
 
 export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId, color: colorProp,
-  onPrev, onNext, hasPrev, hasNext }) {
+  onPrev, onNext, hasPrev, hasNext, onDirtyChange }) {
   const { t, isDark } = useTheme();
 
   const inp={display:'block',width:'100%',marginTop:8,background:t.surface2,
@@ -715,6 +716,38 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   // Highlight hooks
   const editHl = useHighlight(editTaRef, entry.highlights||[], { textColor: t.text, isDark });
 
+  // Reports unsaved-edit state up to App.js, which guards its sidebar/
+  // system-switch navigation on it (App.js's `navigate`/`switchView`) —
+  // unlike AddEntry.js (which auto-persists a draft to localStorage on
+  // every change, so navigating away never loses anything there), editing
+  // an EXISTING entry has no such persistence: the sidebar is always
+  // rendered and clickable regardless of `editing`, so without this,
+  // clicking a different system/screen mid-edit silently discarded every
+  // change with zero warning. A partial check (not a deep highlight-array
+  // diff) — good enough to catch the common cases without the cost of a
+  // real diff on every render while editing.
+  const isDirty = editing && (
+    editTitle !== entry.title ||
+    editNotes !== (entry.notes || '') ||
+    editDiff !== (entry.difficulty || 'Medium') ||
+    newImgs.length > 0 ||
+    editImgs.length !== (entry.images || []).length ||
+    editHl.highlights.length !== (entry.highlights || []).length
+  );
+  useEffect(() => { onDirtyChange?.(isDirty); }, [isDirty, onDirtyChange]);
+  // Clear the flag on unmount too — leaving the entry entirely (prev/next,
+  // delete) must not leave a stale "unsaved changes" guard armed for
+  // whatever gets rendered next.
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+  // Covers the one navigation path the App.js guard above can't reach:
+  // an actual tab close/refresh, not an in-app view change.
+  useEffect(() => {
+    if (!isDirty) return;
+    const onBeforeUnload = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [isDirty]);
+
   // colorProp comes from App (knows user's custom systems); SYS_COLOR is only a fallback.
   const color = colorProp || SYS_COLOR[entry.system] || '#2563eb';
   const fmt   = iso => new Date(iso).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
@@ -801,9 +834,13 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   };
 
   const uploadImg = async img => {
-    const ext = img.file.name.split('.').pop()||'jpg';
+    // Downscale/compress BEFORE upload — see imageCompress.js's own header
+    // comment for why (this same file gets reused everywhere the entry's
+    // images are displayed, including small list/edit-mode thumbnails).
+    const uploadFile = await compressImage(img.file);
+    const ext = uploadFile.name.split('.').pop()||'jpg';
     const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-    const {error} = await supabase.storage.from('entry-images').upload(path,img.file,{contentType:img.file.type});
+    const {error} = await supabase.storage.from('entry-images').upload(path,uploadFile,{contentType:uploadFile.type});
     if (error) throw error;
     return supabase.storage.from('entry-images').getPublicUrl(path).data.publicUrl;
   };
@@ -1042,7 +1079,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
               <div style={{display:'flex',flexWrap:'wrap',gap:10,marginTop:8}}>
                 {editImgs.map((url,i)=>(
                   <div key={i} style={{position:'relative'}}>
-                    <img src={url} alt="" className="mb-detailimg"
+                    <img src={url} alt="" className="mb-detailimg" loading="lazy"
                       style={{width:100,height:76,objectFit:'cover',borderRadius:RADIUS.lg,boxShadow:elevation(t,'sm')}} />
                     <button className="mb-detailbtn" onClick={()=>setEI(p=>p.filter((_,j)=>j!==i))} style={{
                       position:'absolute',top:-7,right:-7,background:t.danger,border:'none',

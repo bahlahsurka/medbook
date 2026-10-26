@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { compressImage } from '../lib/imageCompress';
 import { DIFFICULTY, DIFF_COLOR } from '../lib/constants';
 import { toTitleCase } from '../lib/titleCase';
 import { adjustHighlights, markedTextToHtml } from '../lib/highlights';
@@ -89,9 +90,15 @@ export default function AddEntry({ activeSystem, color, userId, onSaved, onCance
   }, []);
 
   const uploadImg = async img => {
-    const ext = img.file.name.split('.').pop()||'jpg';
+    // Downscale/compress BEFORE upload — see imageCompress.js's own header
+    // comment for why (this same file gets reused everywhere the entry's
+    // images are displayed, including small list thumbnails). The local
+    // preview (img.preview, already shown while composing) is untouched;
+    // only what actually gets uploaded and persisted changes.
+    const uploadFile = await compressImage(img.file);
+    const ext = uploadFile.name.split('.').pop()||'jpg';
     const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-    const {error} = await supabase.storage.from('entry-images').upload(path,img.file,{contentType:img.file.type});
+    const {error} = await supabase.storage.from('entry-images').upload(path,uploadFile,{contentType:uploadFile.type});
     if (error) throw new Error(`Upload failed: ${error.message}`);
     return supabase.storage.from('entry-images').getPublicUrl(path).data.publicUrl;
   };

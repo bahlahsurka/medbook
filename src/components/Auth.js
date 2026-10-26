@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { useTheme } from '../lib/theme';
+import { useTheme, RADIUS } from '../lib/theme';
 
 // Google's standard multi-colour "G" mark, permitted for use on
 // "Sign in with Google" buttons.
@@ -111,12 +111,12 @@ export default function Auth() {
       <div className="mb-auth-card" style={{ width:'100%', maxWidth:400 }}>
         <div style={{ textAlign:'center', marginBottom:32 }}>
           <div style={{ display:'inline-flex', alignItems:'center', justifyContent:'center',
-            width:48, height:48, borderRadius:12, background:t.accent,
+            width:48, height:48, borderRadius:RADIUS.lg, background:t.accent,
             marginBottom:14, fontSize:22, color:'#fff' }}>⚕</div>
           <div style={{ fontSize:22, fontWeight:700, color:t.text }}>MedBook</div>
           <div style={{ fontSize:13, color:t.text3, marginTop:4 }}>Your personal USMLE notebook</div>
         </div>
-        <div style={{ background:t.surface, border:`1px solid ${t.border}`, borderRadius:12,
+        <div style={{ background:t.surface, border:`1px solid ${t.border}`, borderRadius:RADIUS.lg,
           padding:'28px 24px', boxShadow:`0 1px 3px ${t.shadow}` }}>
           {children}
         </div>

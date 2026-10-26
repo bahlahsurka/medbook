@@ -52,6 +52,16 @@
       body.medbook-dark ::-webkit-scrollbar-thumb { background: #3a404b; }
       input, textarea, button, select { font-family: inherit; }
 
+      /* The root app shell (App.js) is a fixed-height flex row with
+         overflow:hidden — `100vh` there doesn't account for a mobile
+         browser's dynamic URL bar or the on-screen keyboard showing/hiding,
+         so the shell either leaves a gap at the bottom or clips content the
+         moment a textarea is focused. `100dvh` tracks the ACTUAL visible
+         viewport instead; the 100vh line stays first as the fallback for
+         browsers that don't support dvh (the second declaration simply
+         never parses there, leaving the first one in effect). */
+      .mb-app-shell { height: 100vh; height: 100dvh; }
+
       /* Keyboard-focus ring. Most interactive elements in the app set inline
          outline:none with no replacement (an accessibility gap flagged in the
          UI audit) — an inline style wins over this rule wherever that's still
@@ -296,8 +306,14 @@
       } else if ('serviceWorker' in navigator) {
         // Only register the service worker on the web — inside the native app the
         // assets are bundled, and a SW there just causes stale-cache headaches.
+        // The registration is stashed on `window` so React (see
+        // lib/useServiceWorkerUpdate.js) can watch it for a new version
+        // finishing its install, without this inline script needing to know
+        // anything about React itself.
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').catch(() => {});
+          navigator.serviceWorker.register('/sw.js')
+            .then(reg => { window.__medbookSWReg = reg; })
+            .catch(() => {});
         });
       }
     </script>
