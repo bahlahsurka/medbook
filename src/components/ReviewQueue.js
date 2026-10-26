@@ -213,7 +213,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   // is the exact same session machinery as before.
   const [sessionStarted, setSessionStarted] = useState(false);
   const [filterMode, setFilterMode]     = useState('all');   // 'all' | 'due' | 'new'
-  const [filterSystem, setFilterSystem] = useState('');       // '' = every system
+  const [filterSystem, setFilterSystem] = useState([]);       // [] = every system; else a list of selected system names
   const [filterDifficulty, setFilterDifficulty] = useState('All'); // 'All' | 'Easy' | 'Medium' | 'Hard'
 
   const [queue, setQueue] = useState([]);
@@ -376,7 +376,15 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     loggedRef.current = false;
     sessionMetaRef.current = saved.meta || null;
     if (saved.filterMode) setFilterMode(saved.filterMode);
-    if (saved.filterSystem !== undefined) setFilterSystem(saved.filterSystem);
+    // Older saved sessions stored a single system name as a plain string;
+    // normalize to the array shape so downstream code (the chips' active
+    // state, filterEntries, etc.) never has to care which era a resumed
+    // session came from.
+    if (saved.filterSystem !== undefined) {
+      setFilterSystem(Array.isArray(saved.filterSystem)
+        ? saved.filterSystem
+        : (saved.filterSystem ? [saved.filterSystem] : []));
+    }
     if (saved.filterDifficulty) setFilterDifficulty(saved.filterDifficulty);
     if (saved.cardLimit !== undefined) setCardLimit(saved.cardLimit);
   };
@@ -391,7 +399,12 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   // entries feed the UNCHANGED queue builder, it doesn't reimplement it.
   const filterEntries = useCallback((mode, system, difficulty = 'All') => {
     let list = Object.values(entriesRef.current).flat();
-    if (system) list = list.filter(e => e.system === system);
+    // `system` is normally the filterSystem array (possibly several systems
+    // selected at once, to mix them into one session), but a couple of call
+    // sites (the priority-row quick action, the initialFilterSystem effect)
+    // still pass a single system name as a plain string — accept both.
+    const systems = Array.isArray(system) ? system : (system ? [system] : []);
+    if (systems.length > 0) list = list.filter(e => systems.includes(e.system));
     if (difficulty !== 'All') list = list.filter(e => e.difficulty === difficulty);
     const now = new Date();
     if (mode === 'due') list = list.filter(e => e.next_review && new Date(e.next_review) <= now);
@@ -409,7 +422,12 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   const startNewSession = (mode = filterMode, system = filterSystem, difficulty = filterDifficulty, limit = cardLimit) => {
     let built = buildCycledQueue(filterEntries(mode, system, difficulty));
     if (limit !== 'all') built = built.slice(0, limit);
-    beginSession(built, { system: system || null, targetCount: limit === 'all' ? null : limit });
+    // Logged/displayed (review_sessions.system, Insights' "Recent study
+    // sessions") as a single human-readable label — a plain name for one
+    // system, a comma-joined list for a mixed session, null for "every
+    // system". Never the raw array: that column is just text.
+    const systems = Array.isArray(system) ? system : (system ? [system] : []);
+    beginSession(built, { system: systems.length ? systems.join(', ') : null, targetCount: limit === 'all' ? null : limit });
   };
 
   const backToOverview = () => { flushSessionLog(); setSessionStarted(false); };
@@ -474,7 +492,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   // inheriting whatever was last picked on this screen's own overview.
   useEffect(() => {
     if (!initialFilterSystem) return;
-    setFilterSystem(initialFilterSystem);
+    setFilterSystem([initialFilterSystem]);
     // A difficulty picked in some earlier session on this screen shouldn't
     // silently narrow this one too — arriving from "Needs attention" means
     // every due card in this system, not whatever was last selected here.
@@ -565,7 +583,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   // numbers stale while the others update.
   const scopedEntries = useMemo(() => {
     let list = Object.values(allEntries).flat();
-    if (filterSystem) list = list.filter(e => e.system === filterSystem);
+    if (filterSystem.length > 0) list = list.filter(e => filterSystem.includes(e.system));
     if (filterDifficulty !== 'All') list = list.filter(e => e.difficulty === filterDifficulty);
     return list;
   }, [allEntries, filterSystem, filterDifficulty]);
@@ -771,7 +789,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                 </div>
                 <div style={{ display:'flex', flexDirection:'column' }}>
                   {priority.map((s, i) => (
-                    <button key={s.name} className="mb-rq-row" onClick={() => { setFilterSystem(s.name); setFilterDifficulty('All'); startNewSession('due', s.name, 'All'); }}
+                    <button key={s.name} className="mb-rq-row" onClick={() => { setFilterSystem([s.name]); setFilterDifficulty('All'); startNewSession('due', s.name, 'All'); }}
                       style={{ display:'flex', alignItems:'center', gap:SPACE.sm, padding:'9px 8px',
                         borderRadius:RADIUS.sm, cursor:'pointer', background:'none', border:'none', textAlign:'left',
                         transition:`background ${MOTION.fast} ${MOTION.ease}` }}>
@@ -809,20 +827,48 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                     {f.label}
                   </button>
                 ))}
-                {userSystems?.length > 0 && (
-                  <select value={filterSystem} onChange={e=>setFilterSystem(e.target.value)} style={{
-                    fontSize:FONT.size.sm, fontWeight:FONT.weight.medium, fontFamily:'Inter,sans-serif',
-                    background:t.surface2, color:t.text2, border:`1px solid ${t.border}`,
-                    borderRadius:RADIUS.pill, padding:'8px 14px', cursor:'pointer' }}>
-                    <option value="">All systems</option>
-                    {userSystems.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
-                  </select>
-                )}
               </div>
 
+              {/* Systems — a multi-select, unlike mode/difficulty's single-
+                  choice toggle rows: picking several mixes their due/new
+                  cards into one combined session, which single-select never
+                  allowed. "All systems" is its own exclusive chip (clears
+                  the selection) rather than just "nothing picked", so it's
+                  always visible as a real, clickable choice rather than an
+                  implicit empty state. */}
+              {userSystems?.length > 0 && (
+                <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginTop:8 }}>
+                  <button className="mb-rq-filter" onClick={()=>setFilterSystem([])} style={{
+                    fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:'Inter,sans-serif',
+                    background: filterSystem.length===0 ? t.navActiveBg : t.surface2,
+                    color: filterSystem.length===0 ? t.navActiveText : t.text3,
+                    border:`1px solid ${filterSystem.length===0 ? t.navActiveBorder : t.border}`,
+                    borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer',
+                    transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}` }}>
+                    All systems
+                  </button>
+                  {userSystems.map(s => {
+                    const active = filterSystem.includes(s.name);
+                    return (
+                      <button key={s.name} className="mb-rq-filter"
+                        onClick={() => setFilterSystem(prev => prev.includes(s.name) ? prev.filter(n => n !== s.name) : [...prev, s.name])}
+                        style={{
+                          fontSize:FONT.size.sm, fontWeight:FONT.weight.medium, fontFamily:'Inter,sans-serif',
+                          background: active ? t.navActiveBg : t.surface2,
+                          color: active ? t.navActiveText : t.text2,
+                          border:`1px solid ${active ? t.navActiveBorder : t.border}`,
+                          borderRadius:RADIUS.pill, padding:'8px 14px', cursor:'pointer',
+                          transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}` }}>
+                        {s.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
               {/* Difficulty — narrows the same session, same scoped counts
-                  above update the moment this changes, same as the system
-                  dropdown. */}
+                  above update the moment this changes, same as the systems
+                  row. */}
               <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginTop:8 }}>
                 {['All', ...REVIEW_DIFFICULTIES].map(d => {
                   const active = filterDifficulty === d;
