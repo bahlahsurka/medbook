@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { useTheme } from '../lib/theme';
+import { useTheme, RADIUS } from '../lib/theme';
 
 const PRESET_COLORS = [
   '#2563eb','#dc2626','#16a34a','#d97706','#7c3aed',
@@ -124,12 +124,12 @@ export default function ManageSystems({ systems, onSave, onClose, userId }) {
                   {sys.name}
                   {sys._oldName && sys._oldName !== sys.name && (
                     <span style={{ fontSize:10, color:t.warn, marginLeft:6,
-                      background:t.warnBg, borderRadius:4, padding:'1px 6px',
+                      background:t.warnBg, borderRadius:RADIUS.sm, padding:'1px 6px',
                       border:`1px solid ${t.warnBorder}` }}>renamed, will update entries</span>
                   )}
                   {sys.custom && !sys._oldName && (
                     <span style={{ fontSize:10, color:t.text4, marginLeft:6,
-                      background:t.surface3, borderRadius:4, padding:'1px 5px' }}>custom</span>
+                      background:t.surface3, borderRadius:RADIUS.sm, padding:'1px 5px' }}>custom</span>
                   )}
                 </span>
               )}

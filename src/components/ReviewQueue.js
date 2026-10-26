@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR } from '../lib/constants';
-import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation } from '../lib/theme';
+import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation, BREAKPOINT } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue } from '../lib/reviewQueue';
 import { computeSystemStats } from '../lib/systemStats';
@@ -51,7 +51,7 @@ function Lightbox({ images, start, onClose }) {
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.92)', zIndex:Z.lightbox,
-      display:'flex', alignItems:'center', justifyContent:'center', animation:'medbook-scrim-in 180ms ease' }}>
+      display:'flex', alignItems:'center', justifyContent:'center', animation:`medbook-scrim-in ${MOTION.normal} ${MOTION.ease}` }}>
       <LbBtn onClick={onClose} title="Close" style={{ position:'absolute', top:16, right:20,
         width:40, height:40, borderRadius:RADIUS.circle }}><IconX size={18} /></LbBtn>
       {images.length > 1 && <>
@@ -66,7 +66,7 @@ function Lightbox({ images, start, onClose }) {
       </>}
       <img key={idx} src={images[idx]} alt=""
         style={{ maxWidth:'90vw', maxHeight:'85vh', borderRadius:RADIUS.md, objectFit:'contain', display:'block',
-          animation:'medbook-pop-in 200ms cubic-bezier(0.4,0,0.2,1)' }}
+          animation:`medbook-pop-in ${MOTION.normal} ${MOTION.ease}` }}
         onClick={e => e.stopPropagation()} />
       <div onClick={onClose} style={{ position:'absolute', inset:0, zIndex:-1 }} />
     </div>
@@ -624,7 +624,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
        card then supporting info stacked) until there's real width to work
        with, matching every other responsive grid in this app (Dashboard). */
     .mb-rq-content { display:grid; grid-template-columns:minmax(0,1fr); gap:${SPACE.xl}px; align-items:start; }
-    @media (min-width:900px) {
+    @media (min-width:${BREAKPOINT.tablet}px) {
       .mb-rq-content.has-side { grid-template-columns:minmax(0,1fr) 320px; gap:${SPACE.xl2+4}px; }
     }
 

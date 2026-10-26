@@ -921,7 +921,7 @@ function AreaTabs({ t, area, setArea }) {
   // 375px+ fits without scrolling either way.
   return (
     <div className="mb-area-tabs" style={{ display:'flex', gap:4, marginBottom:18, background:t.surface2,
-      border:`1px solid ${t.border}`, borderRadius:9, padding:3, width:'fit-content', maxWidth:'100%',
+      border:`1px solid ${t.border}`, borderRadius:RADIUS.md, padding:3, width:'fit-content', maxWidth:'100%',
       overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
       <style>{`
         @media (max-width: 480px) {
@@ -932,9 +932,9 @@ function AreaTabs({ t, area, setArea }) {
         <button key={tab.id} onClick={()=>setArea(tab.id)} style={{
           background: area===tab.id ? t.surface : 'transparent',
           color: area===tab.id ? t.text : t.text3,
-          border:'none', borderRadius:7, padding:'7px 16px', fontSize:13,
+          border:'none', borderRadius:RADIUS.sm, padding:'7px 16px', fontSize:13,
           fontWeight:600, cursor:'pointer', fontFamily:'Inter,sans-serif', flexShrink:0,
-          boxShadow: area===tab.id ? `0 1px 2px ${t.shadow}` : 'none' }}>
+          boxShadow: area===tab.id ? elevation(t,'sm') : 'none' }}>
           {tab.label}
         </button>
       ))}

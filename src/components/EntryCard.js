@@ -8,8 +8,19 @@ function EntryCard({ entry, color, onClick, showSystem }) {
   const sc = showSystem ? (SYS_COLOR[entry.system] || color) : color;
   const isDue = entry.next_review && new Date(entry.next_review) <= new Date();
 
+  // `onClick` is called with THIS card's own `entry` — not a per-card
+  // closure the parent has to recreate every render. A stable callback
+  // (built once via useCallback, taking the entry as an argument) is what
+  // actually lets React.memo below skip re-rendering every other card on
+  // screen when one thing elsewhere changes; see App.js's onGlobalEntryClick
+  // for the pattern.
+  // SystemHome.js's own card wrapper handles clicks itself (long-press/
+  // bulk-select logic) and renders EntryCard with no onClick at all —
+  // optional-call keeps that path exactly as inert as it already was.
+  const handleClick = () => onClick?.(entry);
+
   return (
-    <div onClick={onClick} className="mb-entrycard"
+    <div onClick={handleClick} className="mb-entrycard"
       style={{ position:'relative', background:t.surface, border:`1px solid ${t.border}`,
         borderRadius:RADIUS.xl, padding:`${SPACE.md+2}px ${SPACE.lg}px ${SPACE.md+2}px ${SPACE.xl2}px`,
         cursor:'pointer', display:'flex', gap:SPACE.md+2, alignItems:'flex-start',

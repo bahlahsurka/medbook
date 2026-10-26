@@ -21,7 +21,7 @@
 // from next_review/review_count that already exist) and a client-side sort
 // mode that doesn't touch persistence.
 import React, { useState, useMemo, useRef } from 'react';
-import { SPACE, RADIUS, FONT, MOTION } from '../lib/theme';
+import { SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
 import { IconRepeat, IconPlus, IconChevronRight, IconInbox, IconListBullet } from '../lib/icons';
 import { SYSTEM_BLURBS } from '../lib/systemContent';
 import FilterChips from './FilterChips';
@@ -256,7 +256,7 @@ const SelectableCard = React.memo(function SelectableCard({ t, entry, color, bul
           borderRadius:RADIUS.sm, background:isSelected?color:t.surface,
           border:`2px solid ${isSelected?color:t.borderStrong}`,
           display:'flex', alignItems:'center', justifyContent:'center',
-          boxShadow:`0 1px 2px ${t.shadow}`, pointerEvents:'none',
+          boxShadow:elevation(t,'sm'), pointerEvents:'none',
           transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}` }}>
           {isSelected && <span style={{ color:'#fff', fontSize:FONT.size.sm, fontWeight:FONT.weight.bold }}>✓</span>}
         </div>
@@ -342,15 +342,15 @@ export default function SystemHome({
               )}
 
               {bulkMode && selected2.size > 0 && (<>
-                <button className="mb-bulkbtn" onClick={()=>bulkPin(true)} style={bulkBtnStyle('#d97706')}>📌 Pin</button>
-                <button className="mb-bulkbtn" onClick={()=>bulkPin(false)} style={bulkBtnStyle('#6b7280')}>Unpin</button>
+                <button className="mb-bulkbtn" onClick={()=>bulkPin(true)} style={bulkBtnStyle(t.warn)}>📌 Pin</button>
+                <button className="mb-bulkbtn" onClick={()=>bulkPin(false)} style={bulkBtnStyle(t.text3)}>Unpin</button>
                 <select onChange={e=>{ if (e.target.value) { bulkMove(e.target.value); e.target.value=''; } }}
                   defaultValue="" style={{ fontSize:FONT.size.sm, border:`1px solid ${t.border}`, borderRadius:RADIUS.sm,
                     padding:'5px 10px', cursor:'pointer', color:t.text2, background:t.surface }}>
                   <option value="" disabled>Move to…</option>
                   {userSystems.filter(s=>s.name!==system).map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
                 </select>
-                <button className="mb-bulkbtn" onClick={bulkDelete} style={bulkBtnStyle('#dc2626')}>🗑 Delete</button>
+                <button className="mb-bulkbtn" onClick={bulkDelete} style={bulkBtnStyle(t.danger)}>🗑 Delete</button>
               </>)}
               {bulkMode && selected2.size === 0 && (
                 <span style={{ fontSize:FONT.size.sm, color:t.text4 }}>

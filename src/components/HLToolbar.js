@@ -1,5 +1,5 @@
 import { HL_COLORS } from '../lib/highlights';
-import { useTheme } from '../lib/theme';
+import { useTheme, RADIUS } from '../lib/theme';
 
 /**
  * Highlight toolbar.
@@ -14,7 +14,7 @@ export default function HLToolbar({ onApply, onRemove, onClearAll, hasSelection 
 
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 6,
+      display: 'flex', alignItems: 'center', gap: 8,
       flexWrap: 'wrap', marginBottom: 8,
       userSelect: 'none', WebkitUserSelect: 'none'
     }}>
@@ -30,7 +30,11 @@ export default function HLToolbar({ onApply, onRemove, onClearAll, hasSelection 
           onTouchStart={prevent}
           onClick={() => onApply(c)}
           style={{
-            width: 26, height: 26, borderRadius: 6,
+            // 26px read as a mis-tap risk on mobile right after selecting
+            // text — exactly the moment a highlight color needs a precise
+            // tap. 34px keeps the row compact while clearing a comfortable
+            // touch target.
+            width: 34, height: 34, borderRadius: RADIUS.sm,
             border: `2px solid ${hasSelection ? t.text2 : t.border}`,
             background: c.bg, cursor: 'pointer', flexShrink: 0,
             opacity: hasSelection ? 1 : 0.45,
@@ -47,7 +51,7 @@ export default function HLToolbar({ onApply, onRemove, onClearAll, hasSelection 
         title={hasSelection ? 'Remove highlight from selected text' : 'Select text first'}
         style={{
           fontSize: 11, background: t.surface3, border: `1px solid ${t.border}`,
-          borderRadius: 5, padding: '3px 10px',
+          borderRadius: RADIUS.sm, padding: '7px 12px',
           cursor: hasSelection ? 'pointer' : 'not-allowed',
           color: t.text3, fontWeight: 600, fontFamily: 'Inter,sans-serif',
           opacity: hasSelection ? 1 : 0.45
@@ -63,7 +67,7 @@ export default function HLToolbar({ onApply, onRemove, onClearAll, hasSelection 
           title="Remove every highlight in this entry"
           style={{
             fontSize: 11, background: t.dangerBg, border: `1px solid ${t.dangerBorder}`,
-            borderRadius: 5, padding: '3px 10px', cursor: 'pointer',
+            borderRadius: RADIUS.sm, padding: '7px 12px', cursor: 'pointer',
             color: t.danger, fontWeight: 600, fontFamily: 'Inter,sans-serif'
           }}>
           Clear all

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useTheme } from '../lib/theme';
+import { useTheme, RADIUS } from '../lib/theme';
 
 const STEPS = [
   { icon:'📋', title:'Welcome to MedBook', body:'Your personal USMLE Step 2 notebook. Organised by organ system, accessible on all your devices.' },
@@ -18,7 +18,7 @@ export default function Onboarding({ onDone }) {
     <div style={{ position:'fixed', inset:0, background:t.overlay, zIndex:300,
       display:'flex', alignItems:'center', justifyContent:'center', padding:20,
       fontFamily:'Inter,sans-serif' }}>
-      <div style={{ background:t.surface, borderRadius:16, width:'100%', maxWidth:400,
+      <div style={{ background:t.surface, borderRadius:RADIUS.xl, width:'100%', maxWidth:400,
         padding:'36px 28px', textAlign:'center', boxShadow:`0 8px 32px ${t.shadowStrong}` }}>
 
         <div style={{ fontSize:48, marginBottom:16 }}>{s.icon}</div>

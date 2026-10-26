@@ -5,6 +5,7 @@ import { SYS_COLOR } from './lib/constants';
 import { useScrollRestore } from './lib/useScrollRestore';
 import { useDebouncedValue } from './lib/useDebouncedValue';
 import { useStudySession } from './lib/useStudySession';
+import { useServiceWorkerUpdate } from './lib/useServiceWorkerUpdate';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation, BREAKPOINT } from './lib/theme';
 import { IconMenu, IconX, IconChevronLeft, IconPlus, IconInbox, IconSearch } from './lib/icons';
 import Auth from './components/Auth';
@@ -140,6 +141,14 @@ export default function App() {
   // the hook's own visibilitychange/pagehide/heartbeat handling already
   // takes care of pausing while backgrounded and persisting periodically.
   useStudySession(!!session && !isRecovery, session?.user?.id, 'app', session?.access_token);
+
+  // A new deployed version has finished installing in the background (see
+  // lib/useServiceWorkerUpdate.js's own comment for why this matters for a
+  // long-lived study session). Deliberately a separate, persistent banner
+  // rather than the auto-dismissing `toast` below — "tap to reload" needs
+  // to stay on screen until acted on, not vanish after 3.5s.
+  const [swUpdateReady, setSwUpdateReady] = useState(false);
+  useServiceWorkerUpdate(useCallback(() => setSwUpdateReady(true), []));
 
   // Resize
   useEffect(() => {
@@ -280,25 +289,44 @@ export default function App() {
     setSB(false); // sidebar only ever opens via the hamburger button
   }, [activeSystem, saveScroll]);
 
+  // Set by DetailView while an entry edit has unsaved changes (see its own
+  // onDirtyChange comment). The sidebar and every other navigation trigger
+  // stay rendered/clickable the whole time editing is open — without this,
+  // clicking a different system or screen mid-edit silently discarded
+  // every change. Guarded centrally here (navigate/switchView), rather
+  // than at each of their many call sites, since those two functions are
+  // the actual choke point every "go somewhere else" action already routes
+  // through.
+  const [hasUnsavedEdit, setHasUnsavedEdit] = useState(false);
+  const confirmDiscardEdit = useCallback(() => {
+    if (!hasUnsavedEdit) return true;
+    if (!window.confirm('Discard unsaved changes to this entry?')) return false;
+    setHasUnsavedEdit(false);
+    return true;
+  }, [hasUnsavedEdit]);
+
   const backToList = useCallback(() => {
+    if (!confirmDiscardEdit()) return;
     setView('list');
     setSelected(null);
     // restoreScroll already waits for layout via requestAnimationFrame — no timer needed.
     restoreScroll(activeSystem);
-  }, [activeSystem, restoreScroll]);
+  }, [activeSystem, restoreScroll, confirmDiscardEdit]);
 
   const navigate = useCallback((sys, v = 'list') => {
+    if (!confirmDiscardEdit()) return;
     setAS(sys); setView(v); setSearch('');
     setDifficultyFilter('All'); setPinnedOnly(false);
     setBulkMode(false); setSelected2(new Set());
     setSB(false); // sidebar only ever opens via the hamburger button
-  }, []);
+  }, [confirmDiscardEdit]);
 
   const switchView = useCallback((v) => {
+    if (!confirmDiscardEdit()) return;
     setView(v);
     setBulkMode(false); setSelected2(new Set());
     setSB(false); // sidebar only ever opens via the hamburger button
-  }, []);
+  }, [confirmDiscardEdit]);
 
 
   // Entry handlers
@@ -501,6 +529,24 @@ export default function App() {
   const color = userSystems.find(s=>s.name===activeSystem)?.color
     || SYS_COLOR[activeSystem] || '#2563eb';
 
+  // Global Search's results list can run up to 50 EntryCards (each wrapped
+  // in React.memo — see its own comment: "Parent must pass stable props").
+  // A `.find()` per card per App.js render (search debounce aside, App.js
+  // re-renders on any unrelated state change — toast, sidebar, filters)
+  // and a fresh per-card onClick closure both defeated that memoization
+  // outright, so every visible card re-rendered on changes that had
+  // nothing to do with search results. Memoizing the system->color lookup
+  // and giving EntryCard one stable, entry-taking callback (see its own
+  // handleClick) fixes both.
+  const systemColorMap = useMemo(() => {
+    const m = {};
+    userSystems.forEach(s => { m[s.name] = s.color; });
+    return m;
+  }, [userSystems]);
+  const onGlobalEntryClick = useCallback((e) => {
+    setAS(e.system); openEntry(e); setSB(false);
+  }, [openEntry]);
+
   // Distinguishes "this system truly has nothing yet" (show the Add First
   // Entry CTA) from "search/filters narrowed it to nothing" (don't — the
   // fix there is to loosen the filter, not add a duplicate entry).
@@ -565,7 +611,23 @@ export default function App() {
           setBulkMode(false); setSelected2(new Set());
         }
       }}
-      style={{display:'flex',height:'100vh',background:t.bg,overflow:'hidden'}}>
+      className="mb-app-shell"
+      style={{display:'flex',background:t.bg,overflow:'hidden'}}>
+
+      {/* New version available — persistent until acted on, unlike the
+          auto-dismissing toast below. Opposite corner so the two can never
+          visually collide if both happen to be showing at once. */}
+      {swUpdateReady && (
+        <div onClick={() => window.location.reload()} style={{position:'fixed',bottom:SPACE.xl,left:SPACE.xl,zIndex:Z.toast,
+          background:t.surface,border:`1px solid ${t.borderStrong}`,color:t.text,
+          borderRadius:RADIUS.md,padding:'11px 16px',fontSize:FONT.size.base,fontWeight:FONT.weight.semibold,
+          boxShadow:elevation(t,'lg'),cursor:'pointer',display:'flex',alignItems:'center',gap:10,
+          animation:`medbook-fade-in ${MOTION.normal} ${MOTION.ease}`,
+          maxWidth:'calc(100vw - 40px)'}}>
+          Update available
+          <span style={{fontSize:FONT.size.sm,fontWeight:FONT.weight.semibold,color:t.accent}}>Tap to reload</span>
+        </div>
+      )}
 
       {/* Toast */}
       {toast && (
@@ -777,8 +839,8 @@ export default function App() {
                       animation:globalResults.length>0?`medbook-fade-in ${MOTION.fast} ${MOTION.ease}`:'none'}}>
                     {globalResults.map(e=>(
                       <EntryCard key={e.id} entry={e}
-                        color={userSystems.find(s=>s.name===e.system)?.color||SYS_COLOR[e.system]||'#2563eb'}
-                        showSystem onClick={()=>{ setAS(e.system); openEntry(e); setSB(false); }} />
+                        color={systemColorMap[e.system]||SYS_COLOR[e.system]||'#2563eb'}
+                        showSystem onClick={onGlobalEntryClick} />
                     ))}
                   </div>
                 </div>
@@ -815,7 +877,8 @@ export default function App() {
                     || SYS_COLOR[selected.system] || '#2563eb'}
                   onPrev={()=>navigateEntry(-1)} onNext={()=>navigateEntry(1)}
                   hasPrev={detailIndex > 0}
-                  hasNext={detailIndex !== -1 && detailIndex < sysEntries.length - 1} />
+                  hasNext={detailIndex !== -1 && detailIndex < sysEntries.length - 1}
+                  onDirtyChange={setHasUnsavedEdit} />
               )}
 
               {view==='list' && (

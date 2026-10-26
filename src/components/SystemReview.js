@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { DIFF_COLOR } from '../lib/constants';
-import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
+import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation, BREAKPOINT } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue, buildCycledQueueWithScheduled } from '../lib/reviewQueue';
 import { normalizeSections } from '../services/ai';
@@ -403,7 +403,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
     .mb-sr-btn:active:not(:disabled) { transform: scale(0.96); }
     .mb-sr-rate:active { transform: scale(0.95); }
     .mb-sr-content { display:grid; grid-template-columns:minmax(0,1fr); gap:${SPACE.xl}px; align-items:start; }
-    @media (min-width:760px) {
+    @media (min-width:${BREAKPOINT.tablet}px) {
       .mb-sr-content.has-side { grid-template-columns:minmax(0,1fr) 280px; gap:${SPACE.xl2}px; }
     }
     .mb-sr-scroll { scrollbar-width:thin; scrollbar-color:${t.borderStrong} transparent; }
