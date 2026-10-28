@@ -32,6 +32,16 @@
 //      lets a meaningful boundary (ReviewQueue.js's flushSessionLog) commit
 //      the running timer immediately, WITHOUT stopping it the way the
 //      internal hide/pagehide flush() does.
+//   5. Rapid repeated app-switching (many hide/show cycles with each
+//      foreground dwell under ~500ms — the actual pattern during fast
+//      alt-tabbing, not a single clean pause/resume) used to lose ALL of
+//      that time, permanently. flush()/checkpoint() rounded EACH segment to
+//      whole seconds before adding it to the carried-over total, so a
+//      300ms dwell rounds to 0 and `+= 0` contributes nothing — confirmed
+//      live: 15 real hide/show cycles of ~300ms each (4.5s of genuinely
+//      active time) persisted a combined 0s, with the accumulator never
+//      moving. Fixed by carrying the total in raw milliseconds and rounding
+//      exactly once, at the point of persisting/floor-checking.
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useStudySession, flushStudySessionNow } from '../lib/useStudySession';
@@ -225,4 +235,26 @@ test('flushStudySessionNow is a safe no-op when no session is running', async ()
 
   // Unmounted — the hook's own cleanup clears the live checkpoint reference.
   expect(() => flushStudySessionNow()).not.toThrow();
+});
+
+test('many rapid sub-second hide/show cycles (fast app-switching) still accumulate real active time, not zero', async () => {
+  const calls = mockFetch();
+  act(() => { root.render(<Harness active={true} userId="u1" />); });
+
+  // 15 cycles of 300ms visible / 200ms hidden — each individual segment is
+  // well under the old per-segment rounding's ~500ms cutoff. Real active
+  // time across the burst: 15 * 300ms = 4500ms.
+  for (let i = 0; i < 15; i++) {
+    act(() => { jest.advanceTimersByTime(300); });
+    await act(async () => { setHidden(true); });
+    act(() => { jest.advanceTimersByTime(200); });
+    await act(async () => { setHidden(false); });
+  }
+
+  // Before the fix, every one of these 15 segments rounded to 0 and the
+  // accumulator never moved — total persisted was 0, not "still pending".
+  // After the fix, the accumulated 4500ms rounds to 5s exactly once, the
+  // moment the running total itself crosses the 5s floor.
+  expect(calls.length).toBe(1);
+  expect(calls[0].row.duration_seconds).toBe(5);
 });
