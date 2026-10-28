@@ -45,7 +45,7 @@ let liveCheckpoint = null;
  * A reported bug — finishing a Review Queue session and seeing it in
  * Insights' "Recent study sessions" list but NOT reflected in the Study
  * Time total — was exactly this: the elapsed time was sitting, correctly
- * tracked but uncommitted, in the running timer's startRef/pendingRef,
+ * tracked but uncommitted, in the running timer's startRef/pendingMsRef,
  * waiting on a heartbeat tick or a tab hide that might be a while off (or
  * might not come at all if the user closes the tab right after finishing).
  * This checkpoints that same running timer at the moment it's most likely
@@ -101,17 +101,29 @@ export function flushStudySessionNow() {
  * even though the user came straight back and kept studying: real regular
  * usage made of many such short hops could lose a meaningful amount of its
  * own total time this way, never reaching the floor each individual gap
- * was measured against. `pendingRef` carries an under-the-floor fragment
+ * was measured against. `pendingMsRef` carries an under-the-floor fragment
  * forward into the NEXT segment instead, so only the running TOTAL across a
  * string of brief interruptions has to clear the floor, not each one on its
  * own.
+ *
+ * `pendingMsRef` holds RAW MILLISECONDS, not seconds — rounding to whole
+ * seconds happens exactly once, at the point of persisting or checking the
+ * floor, never per-segment. An earlier version rounded each segment to
+ * whole seconds before accumulating it, which silently discarded any
+ * foreground dwell under ~500ms (it rounds to 0 and `+= 0` is a no-op) —
+ * confirmed by an instrumented test: 15 rapid hide/show cycles of ~300ms
+ * each (the real pattern during fast app-switching) persisted a combined
+ * 0 of their ~4.5s of genuinely active time, with the accumulator never
+ * moving. Summing in milliseconds fixes this at the source: no matter how
+ * short or how many segments a burst of rapid switching is cut into, their
+ * exact durations add up before anything is ever rounded.
  *
  * Insert failures are swallowed (dev-only console.warn) — analytics must
  * never break or block the screen the user is actually trying to use.
  */
 export function useStudySession(active, userId, context, accessToken) {
   const startRef = useRef(null);
-  const pendingRef = useRef(0); // seconds carried over from a too-short-to-log gap
+  const pendingMsRef = useRef(0); // raw milliseconds carried over from a too-short-to-log gap
   // Always the LATEST token, read synchronously by persist() at call time —
   // not an effect dependency, so a routine token refresh (Supabase re-mints
   // the JWT roughly hourly, and again on every tab/app foreground — see
@@ -123,7 +135,7 @@ export function useStudySession(active, userId, context, accessToken) {
   useEffect(() => {
     if (!active || !userId) return;
     startRef.current = Date.now();
-    pendingRef.current = 0;
+    pendingMsRef.current = 0;
 
     const persist = (elapsedSeconds, endedAt) => {
       if (!tokenRef.current) return; // not actually signed in — RLS would reject this anyway
@@ -174,18 +186,18 @@ export function useStudySession(active, userId, context, accessToken) {
     };
 
     // Session is pausing (hidden/unmounting). Stops the clock and rolls
-    // whatever just elapsed into pendingRef, persisting only once the
-    // carried-over TOTAL clears MIN_SECONDS_TO_LOG — see the doc comment
-    // above for why this accumulates rather than each gap being judged
-    // against the floor on its own.
+    // whatever just elapsed into pendingMsRef (raw ms — see the doc comment
+    // above on why this must not round per-segment), persisting only once
+    // the carried-over TOTAL, rounded ONCE, clears MIN_SECONDS_TO_LOG.
     const flush = () => {
       if (!startRef.current) return;
       const now = Date.now();
-      pendingRef.current += Math.round((now - startRef.current) / 1000);
+      pendingMsRef.current += now - startRef.current;
       startRef.current = null;
-      if (pendingRef.current >= MIN_SECONDS_TO_LOG) {
-        persist(pendingRef.current, now);
-        pendingRef.current = 0;
+      const pendingSeconds = Math.round(pendingMsRef.current / 1000);
+      if (pendingSeconds >= MIN_SECONDS_TO_LOG) {
+        persist(pendingSeconds, now);
+        pendingMsRef.current = 0;
       }
     };
 
@@ -194,19 +206,20 @@ export function useStudySession(active, userId, context, accessToken) {
     // heartbeat tick below is just this called on a timer, and
     // flushStudySessionNow (exported above) is this called on demand from
     // elsewhere in the app. Floor-respects the same way flush() does: a
-    // too-small-on-its-own amount carries forward in pendingRef rather than
-    // writing a noise row, so an on-demand checkpoint fired moments after
-    // the clock last restarted can't spam tiny rows.
+    // too-small-on-its-own amount carries forward in pendingMsRef (raw ms)
+    // rather than writing a noise row, so an on-demand checkpoint fired
+    // moments after the clock last restarted can't spam tiny rows.
     const checkpoint = () => {
       if (!startRef.current) return;
       const now = Date.now();
-      const elapsedSeconds = pendingRef.current + Math.round((now - startRef.current) / 1000);
+      const elapsedMs = pendingMsRef.current + (now - startRef.current);
       startRef.current = now; // keep timing — this is a commit, not a pause
+      const elapsedSeconds = Math.round(elapsedMs / 1000);
       if (elapsedSeconds >= MIN_SECONDS_TO_LOG) {
         persist(elapsedSeconds, now);
-        pendingRef.current = 0;
+        pendingMsRef.current = 0;
       } else {
-        pendingRef.current = elapsedSeconds;
+        pendingMsRef.current = elapsedMs;
       }
     };
     liveCheckpoint = checkpoint;
