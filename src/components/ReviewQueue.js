@@ -133,6 +133,23 @@ const RATINGS = [
   { key:'easy',  label:'Easy',  tone:'ok'     },
 ];
 
+// The rating bar's four buttons used to borrow rt's own due/warn/accent/
+// success tokens for their color — fine in dark mode (those are plain red/
+// amber/blue/green there), but in LIGHT mode rt's accent and success are
+// both earthy greens (forest accent vs sage success) and due/warn are both
+// browns, so all four buttons read as one muddy, nearly-indistinguishable
+// tan/olive block instead of four clearly different ratings. Per explicit
+// feedback, only THIS box reverts to the app's original, unambiguous
+// red/amber/blue/green identity (lib/theme.js's own LIGHT danger/warn/
+// accent/ok) — every other light-mode surface keeps the cream/sage palette
+// from the redesign untouched.
+const RATING_COLORS_LIGHT = {
+  danger: '#dc2626', dangerBg: '#fef2f2',
+  warn:   '#d97706', warnBg:   '#fffbeb',
+  accent: '#2563eb', accentBg: '#eff6ff',
+  ok:     '#16a34a', okBg:     '#f0fdf4',
+};
+
 // Deliberately just these three (+ "All" below) — not the full DIFFICULTY
 // list from lib/constants.js, which also has "Flagged". This filter is
 // about how hard an entry is to review, not about flagging; Flagged stays
@@ -1371,12 +1388,14 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     acc[r.key] = formatDays(calcNext(card, r.key).review_interval);
     return acc;
   }, {}) : {};
-  const toneColor = {
-    danger: rt.due, warn: rt.warn, accent: rt.accent, ok: rt.success,
-  };
-  const toneBg = {
-    danger: rt.dueBg, warn: rt.warnBg, accent: rt.accentBg, ok: rt.successBg,
-  };
+  const toneColor = isDark
+    ? { danger: rt.due, warn: rt.warn, accent: rt.accent, ok: rt.success }
+    : { danger: RATING_COLORS_LIGHT.danger, warn: RATING_COLORS_LIGHT.warn,
+        accent: RATING_COLORS_LIGHT.accent, ok: RATING_COLORS_LIGHT.ok };
+  const toneBg = isDark
+    ? { danger: rt.dueBg, warn: rt.warnBg, accent: rt.accentBg, ok: rt.successBg }
+    : { danger: RATING_COLORS_LIGHT.dangerBg, warn: RATING_COLORS_LIGHT.warnBg,
+        accent: RATING_COLORS_LIGHT.accentBg, ok: RATING_COLORS_LIGHT.okBg };
 
   // A side column only appears once the answer is revealed AND there's
   // actually something to put in it (images or key points) — never an
