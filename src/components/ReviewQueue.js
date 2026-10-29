@@ -220,6 +220,17 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   const { isDark } = useTheme();
   const rt = getReviewQueueTheme(isDark);
 
+  // HLPopover normally renders with the app's plain global theme (fine on
+  // DetailView's plain white/near-black surfaces) — against this screen's
+  // own warm cream/sage (light) or blue/black (dark) card, that read as a
+  // stark, mismatched box. Mapping rt's own tokens onto the handful
+  // HLPopover actually uses keeps the popover's colors part of THIS card's
+  // palette instead of floating on top of it looking out of place.
+  const hlPopoverColors = useMemo(() => ({
+    text2: rt.text2, surface: rt.surface, border: rt.border,
+    shadowStrong: rt.shadowRich, danger: rt.due, text4: rt.text4,
+  }), [rt]);
+
   // Always-current entries, WITHOUT making the queue rebuild on every rating.
   // (Rebuilding mid-session makes the list shift under the cursor and skip cards.)
   const entriesRef = useRef(allEntries);
@@ -1391,6 +1402,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
           onRemove={removeCardHL}
           onCopy={copyCardSelection}
           hasHighlightInSelection={selHasHighlight}
+          colors={hlPopoverColors}
         />
       )}
 
@@ -1455,14 +1467,20 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
           {/* Subtle quick-edit entry point — a small icon-only button, same
               size/weight as Prev/Pause beside it, deliberately not called
               out as its own feature. Opens a tiny overlay (below) and
-              returns to this exact card/position on save or cancel. */}
-          <button className="mb-headerbtn" onClick={openEditCard}
-            title="Edit this entry" aria-label="Edit this entry" style={{
-            background:'none', border:'none', color:rt.text3, padding:6, width:28, height:28,
-            borderRadius:RADIUS.sm, cursor:'pointer',
-            display:'flex', alignItems:'center', justifyContent:'center' }}>
-            <IconEdit size={13} />
-          </button>
+              returns to this exact card/position on save or cancel. Only
+              shown once the answer is revealed — before that, there's
+              nothing on screen yet worth a quick correction, and an Edit
+              icon sitting there while still trying to recall the answer
+              from memory is a small, pointless hint. */}
+          {flipped && (
+            <button className="mb-headerbtn" onClick={openEditCard}
+              title="Edit this entry" aria-label="Edit this entry" style={{
+              background:'none', border:'none', color:rt.text3, padding:6, width:28, height:28,
+              borderRadius:RADIUS.sm, cursor:'pointer',
+              display:'flex', alignItems:'center', justifyContent:'center' }}>
+              <IconEdit size={13} />
+            </button>
+          )}
           <button className="mb-headerbtn" onClick={goPrev} disabled={idx===0}
             title="Previous card" aria-label="Previous card" style={{
             background:'none', border:'none', color: idx===0 ? rt.text4 : rt.text3,

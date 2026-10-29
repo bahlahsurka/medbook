@@ -14,9 +14,17 @@ const MARGIN = 8;      // min distance from viewport edge
  *
  * Every button uses onMouseDown/onTouchStart preventDefault so the browser never
  * moves focus or collapses the selection before onClick reads it.
+ *
+ * `colors`, if given, overrides the surface/border/text/shadow/danger tokens
+ * this renders with — DetailView.js leaves it unset (plain global theme, the
+ * original look), but a caller with its OWN bespoke palette (Review Queue's
+ * rt theme, warm cream/sage rather than the app's plain white/gray) passes
+ * one so the popover reads as part of that surface instead of a stark,
+ * mismatched box dropped on top of it.
  */
-export default function HLPopover({ rect, onApply, onRemove, onCopy, hasHighlightInSelection }) {
-  const { t, isDark } = useTheme();
+export default function HLPopover({ rect, onApply, onRemove, onCopy, hasHighlightInSelection, colors }) {
+  const { t: globalT, isDark } = useTheme();
+  const t = colors || globalT;
   const ref = useRef(null);
   const [pos, setPos] = useState({ left: 0, top: 0, below: false, ready: false });
 
