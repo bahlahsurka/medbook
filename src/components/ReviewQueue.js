@@ -2,7 +2,8 @@ import { useState, useMemo, useRef, useCallback, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR } from '../lib/constants';
-import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation, BREAKPOINT } from '../lib/theme';
+import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, BREAKPOINT } from '../lib/theme';
+import { getReviewQueueTheme } from '../lib/reviewQueueTheme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue } from '../lib/reviewQueue';
 import { computeSystemStats } from '../lib/systemStats';
@@ -13,6 +14,8 @@ import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
 import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
   IconX, IconZap } from '../lib/icons';
 import RichRuns from '../lib/RichRuns';
+
+const SANS = 'Inter,sans-serif';
 
 // Renders notes with the same highlight colours the entry has in its
 // system view. Formatting and highlight colour are composed in ONE pass
@@ -45,13 +48,13 @@ function RenderedNotes({ text, highlights, isDark }) {
 // a far worse outcome than the re-render cost it would save. `onImageClick`
 // below is a plain useState setter (setLightboxIdx), which React guarantees
 // is always referentially stable — no such risk here.
-const SideColumn = memo(function SideColumn({ t, images, aiSections, hasKeyPoints, onImageClick }) {
+const SideColumn = memo(function SideColumn({ rt, images, aiSections, hasKeyPoints, onImageClick }) {
   const hasImages = images?.length > 0;
   return (
     <div className="mb-rq-side-col mb-rq-fade">
       {hasImages && (
         <div style={{ marginBottom: hasKeyPoints ? SPACE.xl : 0 }}>
-          <div style={{ fontSize:FONT.size.xs, color:t.text4, letterSpacing:.8, fontWeight:FONT.weight.bold,
+          <div style={{ fontSize:FONT.size.xs, color:rt.text4, letterSpacing:.8, fontWeight:FONT.weight.bold,
             textTransform:'uppercase', marginBottom:10 }}>
             Images
           </div>
@@ -59,7 +62,8 @@ const SideColumn = memo(function SideColumn({ t, images, aiSections, hasKeyPoint
             {images.map((url, i) => (
               <img key={i} src={url} alt="" onClick={()=>onImageClick(i)} className="mb-rq-img"
                 style={{ width:'100%', maxHeight:280, objectFit:'contain', borderRadius:RADIUS.xl,
-                  cursor:'zoom-in', background:t.surface2, display:'block', boxShadow:elevation(t,'sm') }} />
+                  cursor:'zoom-in', background:rt.surfaceSunken, display:'block',
+                  border:`1px solid ${rt.border}`, boxShadow:`0 6px 20px -10px ${rt.shadow}` }} />
             ))}
           </div>
         </div>
@@ -183,24 +187,20 @@ function formatDays(d) {
   return `${(d / 365).toFixed(1)}y`;
 }
 
-function StatPill({ t, value, label, tone='neutral' }) {
-  const map = {
-    danger:  { color:t.danger, bg:t.dangerBg, border:t.dangerBorder },
-    accent:  { color:t.accent, bg:t.navActiveBg, border:t.navActiveBorder },
-    neutral: { color:t.text2,  bg:t.surface2,  border:t.border },
-  };
-  const c = map[tone] || map.neutral;
-  return (
-    <div style={{ background:c.bg, border:`1px solid ${c.border}`, borderRadius:RADIUS.md,
-      padding:'10px 16px', flex:'1 1 120px', minWidth:100 }}>
-      <div style={{ fontSize:FONT.size.xl2, fontWeight:FONT.weight.bold, color:c.color, lineHeight:1.1 }}>{value}</div>
-      <div style={{ fontSize:FONT.size.xs, color:t.text4, marginTop:3, fontWeight:FONT.weight.medium }}>{label}</div>
-    </div>
-  );
+// Short, human description of the current session configuration — read by
+// the CTA panel's summary line. Pure presentation; reads the same filter
+// state the controls themselves set, never a second source of truth.
+function describeSession(mode, systemCount, difficulty) {
+  const parts = [];
+  parts.push(mode === 'due' ? 'Due cards' : mode === 'new' ? 'New cards' : 'Due + new cards');
+  parts.push(systemCount === 0 ? 'every system' : systemCount === 1 ? '1 system' : `${systemCount} systems`);
+  if (difficulty !== 'All') parts.push(difficulty.toLowerCase());
+  return parts.join(' · ');
 }
 
 export default function ReviewQueue({ allEntries, onReviewed, userSystems, initialFilterSystem, userId }) {
-  const { t, isDark } = useTheme();
+  const { isDark } = useTheme();
+  const rt = getReviewQueueTheme(isDark);
 
   // Always-current entries, WITHOUT making the queue rebuild on every rating.
   // (Rebuilding mid-session makes the list shift under the cursor and skip cards.)
@@ -610,11 +610,11 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   // second counting system, the same one, just surfaced here too.
   const priority = useMemo(() => {
     if (!userSystems) return [];
-    return computeSystemStats(allEntries, userSystems, t.accent)
+    return computeSystemStats(allEntries, userSystems, rt.accent)
       .filter(s => s.dueCount > 0)
       .sort((a, b) => b.dueCount - a.dueCount)
       .slice(0, 6);
-  }, [allEntries, userSystems, t.accent]);
+  }, [allEntries, userSystems, rt.accent]);
 
   const rate = async (rating) => {
     if (!card) return;
@@ -669,16 +669,69 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
 
   const pauseSession = () => { setEnded(true); setTimerRunning(false); };
 
+  // ── Shared local CSS — editorial-luxury interaction language ────────────
+  // One rule set for both the setup screen (new composition) and the
+  // active-card/paused/complete screens below (lighter-touch restyle of
+  // the existing structure) so the whole component reads as one coherent
+  // instrument. Motion is collapsed app-wide for prefers-reduced-motion by
+  // public/index.html's own global rule — nothing extra needed here.
   const localCss = `
     .mb-rq-btn { transition: filter ${MOTION.fast} ${MOTION.ease}, transform ${MOTION.fast} ${MOTION.ease}; }
-    .mb-rq-btn:hover:not(:disabled) { filter: brightness(0.97); }
-    body.medbook-dark .mb-rq-btn:hover:not(:disabled) { filter: brightness(1.15); }
-    .mb-rq-btn:active:not(:disabled) { transform: scale(0.96); }
+    .mb-rq-btn:hover:not(:disabled) { filter: brightness(1.06); }
+    .mb-rq-btn:active:not(:disabled) { transform: scale(0.97); }
     .mb-rq-rate:active { transform: scale(0.95); }
-    .mb-rq-row:hover { background: ${t.surface2}; }
+    .mb-rq-row { transition: background ${MOTION.fast} ${MOTION.ease}; }
+    .mb-rq-row:hover { background: ${rt.surfaceQuiet}; }
     .mb-rq-row:active { transform: scale(0.99); }
-    .mb-rq-filter:active { transform: scale(0.95); }
     .mb-rq-fade { animation: medbook-fade-in ${MOTION.normal} ${MOTION.ease}; }
+
+    /* Secondary-element chips (mode / system / difficulty / count) — subtle
+       outline by default, a short lift + border/background shift on hover,
+       a firm press. Selection itself is communicated by fill + border
+       colour (set inline per-chip), never by this rule alone. */
+    .mb-rq-chip {
+      transition: background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease},
+        color ${MOTION.fast} ${MOTION.ease}, transform ${MOTION.fast} ${MOTION.ease};
+    }
+    .mb-rq-chip:hover:not(:disabled) { transform: translateY(-1px); }
+    .mb-rq-chip:active:not(:disabled) { transform: translateY(0) scale(0.97); }
+
+    .mb-rq-cta-btn { transition: filter ${MOTION.fast} ${MOTION.ease}, transform ${MOTION.fast} ${MOTION.ease},
+      box-shadow ${MOTION.fast} ${MOTION.ease}; }
+    .mb-rq-cta-btn:hover { filter: brightness(1.08); box-shadow: 0 10px 28px -10px ${rt.accentDeep}; }
+    .mb-rq-cta-btn:active { transform: scale(0.98); }
+
+    /* Setup-screen composition — single column until there's real width,
+       then an asymmetric two-column workspace: configuration on the left,
+       a standing session-summary + Start Review instrument on the right.
+       The right column becomes sticky-to-top on desktop (see .mb-rq-cta's
+       own media query below) — the SAME markup repositioned, not two
+       different renders. */
+    .mb-rq-shell {
+      display: grid; grid-template-columns: minmax(0,1fr);
+      grid-template-areas: "identity" "resume" "status" "config" "cta";
+      gap: ${SPACE.xl2}px;
+    }
+    @media (min-width:${BREAKPOINT.tablet}px) {
+      .mb-rq-shell {
+        grid-template-columns: minmax(0,1fr) 336px;
+        grid-template-areas: "identity identity" "resume resume" "status cta" "config cta";
+        gap: ${SPACE.xl3}px;
+        align-items: start;
+      }
+      /* Sticky-top only — the right column is naturally shorter than the
+         left, so this keeps Start Review in view while the left column
+         scrolls past it. Deliberately NOT mirrored as sticky-bottom on the
+         single-column mobile/tablet layout below: with the CTA as a grid
+         item in an implicitly-sized row, sticky-bottom was confirmed (by
+         direct measurement, not guesswork) to engage immediately at the
+         top of the page instead of only after scrolling past it, pinning
+         the CTA over the configuration controls above it. Keeping the CTA
+         in normal document flow at those widths avoids that — it's still
+         the clearly-visible final element in a short, scannable sequence,
+         "reachable" the same way the pre-redesign page always was. */
+      .mb-rq-cta { position: sticky; top: ${SPACE.xl}px; }
+    }
 
     /* Card column + supporting column — single column (card alone, or
        card then supporting info stacked) until there's real width to work
@@ -691,9 +744,9 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     /* Scrollable study surface — the only part of the active-review screen
        that scrolls. A visible but unobtrusive scrollbar so it doesn't read
        as a cramped inner box. */
-    .mb-rq-scroll { scrollbar-width:thin; scrollbar-color:${t.borderStrong} transparent; }
+    .mb-rq-scroll { scrollbar-width:thin; scrollbar-color:${rt.borderRich} transparent; }
     .mb-rq-scroll::-webkit-scrollbar { width:8px; }
-    .mb-rq-scroll::-webkit-scrollbar-thumb { background:${t.borderStrong}; border-radius:8px; }
+    .mb-rq-scroll::-webkit-scrollbar-thumb { background:${rt.borderRich}; border-radius:8px; }
 
     .mb-rq-img { transition:transform ${MOTION.fast} ${MOTION.ease}, box-shadow ${MOTION.fast} ${MOTION.ease}; }
     .mb-rq-img:hover { transform:translateY(-2px); }
@@ -702,305 +755,399 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
        it reads as a surface sitting above the study area, not just content
        that happens to trail the card. */
     .mb-rq-ratingbar {
-      padding:${SPACE.lg}px 2px ${SPACE.xs}px; border-top:1px solid ${t.border};
-      box-shadow:0 -16px 28px -20px ${isDark?'rgba(0,0,0,.6)':'rgba(15,23,42,.14)'};
+      padding:${SPACE.lg}px 2px ${SPACE.xs}px; border-top:1px solid ${rt.border};
+      box-shadow:0 -16px 28px -20px ${rt.shadowRich};
     }
   `;
 
   // ── Overview / landing screen ────────────────────────────────────────
   if (!sessionStarted) {
     const nothingAtAll = globalDueCount === 0 && globalNewCount === 0;
+    const sessionSummary = describeSession(filterMode, filterSystem.length, filterDifficulty);
+    const willReviewCount = cardLimit !== 'all' ? Math.min(cardLimit, dueCount + newCount) : (dueCount + newCount);
+
     return (
-      <div className="mb-rq-fade" style={{ maxWidth:640, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
+      <div className="mb-rq-fade" style={{ maxWidth:1060, margin:'0 auto', fontFamily:SANS }}>
         <style>{localCss}</style>
 
-        <div style={{ marginBottom:SPACE.xl }}>
-          <div style={{ fontSize:FONT.size.xl2, fontWeight:FONT.weight.bold, color:t.text }}>Review Queue</div>
-          <div style={{ fontSize:FONT.size.sm, color:t.text3, marginTop:3 }}>What should you review right now?</div>
-        </div>
-
-        {/* Resumable session — only shown once there's actual progress worth
-            offering a choice about (see reviewSessionStore.js). Sits above
-            everything else, including the "you're caught up" screen: the
-            saved session's cards are frozen regardless of what's due right
-            now, so it's always the first thing offered. */}
-        {pendingResume && (pendingResume.sessionDone > 0 || pendingResume.idx > 0) && Array.isArray(pendingResume.entryIds) && pendingResume.entryIds.length > 0 && (
-          <div style={{ background:t.navActiveBg, border:`1px solid ${t.navActiveBorder}`, borderRadius:RADIUS.lg,
-            padding:SPACE.lg, marginBottom:SPACE.xl, display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-            <div style={{ flex:1, minWidth:180 }}>
-              <div style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.bold, color:t.navActiveText }}>
-                Resume your last session
-              </div>
-              <div style={{ fontSize:FONT.size.xs, color:t.text3, marginTop:2 }}>
-                {pendingResume.sessionDone || 0} of {pendingResume.entryIds.length} cards reviewed
-                {pendingResume.elapsedSec > 0 ? ` · ${formatElapsed(pendingResume.elapsedSec)}` : ''}
-              </div>
+        <div className="mb-rq-shell">
+          {/* ── Identity — page title + study context, no border: text and
+              hierarchy carry it, matching the brief's "minimal boundaries
+              around ordinary text." ───────────────────────────────────── */}
+          <div style={{ gridArea:'identity' }}>
+            <div style={{ fontSize:FONT.size.micro, color:rt.accent, letterSpacing:1.6, fontWeight:FONT.weight.bold,
+              textTransform:'uppercase', marginBottom:8 }}>
+              Study Session
             </div>
-            <button className="mb-rq-btn" onClick={() => resumeSession(pendingResume)} style={{
-              background:t.accent, color:'#fff', border:'none', borderRadius:RADIUS.sm+1,
-              padding:'9px 18px', fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, cursor:'pointer',
-              fontFamily:'Inter,sans-serif' }}>
-              Resume
-            </button>
-            <button className="mb-rq-btn" onClick={discardResume} style={{
-              background:'none', color:t.text4, border:`1px solid ${t.border}`, borderRadius:RADIUS.sm+1,
-              padding:'9px 14px', fontSize:FONT.size.sm, cursor:'pointer', fontFamily:'Inter,sans-serif' }}>
-              Discard
-            </button>
-          </div>
-        )}
-
-        {nothingAtAll ? (
-          // Rewarding, intentional — not "No data."
-          <div style={{ background:t.surface, border:`1px solid ${t.border}`, borderRadius:RADIUS.lg,
-            padding:'48px 24px', textAlign:'center', boxShadow:elevation(t,'sm') }}>
-            <div style={{ width:52, height:52, borderRadius:RADIUS.xl2, background:t.okBg,
-              display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 16px' }}>
-              <IconCheck size={22} style={{ color:t.ok }} />
+            <div style={{ fontFamily:SANS, fontSize:28, fontWeight:FONT.weight.bold,
+              color:rt.text, lineHeight:1.15, letterSpacing:-.3 }}>
+              Review Queue
             </div>
-            <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.bold, color:t.text, marginBottom:6 }}>
-              You're caught up
-            </div>
-            <div style={{ fontSize:FONT.size.sm, color:t.text3, lineHeight:1.6 }}>
-              {globalNextDue
-                ? <>No reviews are due right now. Next card is scheduled for{' '}
-                    <strong style={{ color:t.text2 }}>
-                      {globalNextDue.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}
-                    </strong>.</>
-                : 'No cards due. Rate entries here as you review them to start scheduling.'}
+            <div style={{ fontSize:FONT.size.base, color:rt.text3, marginTop:6, maxWidth:440, lineHeight:1.5 }}>
+              What should you review right now?
             </div>
           </div>
-        ) : (
-          <>
-            {/* Summary row */}
-            <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:SPACE.xl }}>
-              <StatPill t={t} value={dueCount} label="Due Today" tone={dueCount>0?'danger':'neutral'} />
-              <StatPill t={t} value={newCount} label="New" tone={newCount>0?'accent':'neutral'} />
-              {priority.length > 0 && <StatPill t={t} value={priority.length} label="Systems Need Review" tone="neutral" />}
+
+          {/* ── Resumable session — same logic as before, restyled into an
+              accent-tinted banner that reads as "pick up where you left
+              off", distinct from the rest of the page's graphite surfaces. */}
+          {pendingResume && (pendingResume.sessionDone > 0 || pendingResume.idx > 0) && Array.isArray(pendingResume.entryIds) && pendingResume.entryIds.length > 0 && (
+            <div style={{ gridArea:'resume', background:rt.accentBg, border:`1px solid ${rt.accentBorder}`,
+              borderRadius:RADIUS.lg, padding:`${SPACE.md+2}px ${SPACE.lg}px`,
+              display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
+              <div style={{ flex:1, minWidth:180 }}>
+                <div style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, color:rt.accentStrong }}>
+                  Resume your last session
+                </div>
+                <div style={{ fontSize:FONT.size.xs, color:rt.text3, marginTop:2 }}>
+                  {pendingResume.sessionDone || 0} of {pendingResume.entryIds.length} cards reviewed
+                  {pendingResume.elapsedSec > 0 ? ` · ${formatElapsed(pendingResume.elapsedSec)}` : ''}
+                </div>
+              </div>
+              <button className="mb-rq-btn" onClick={() => resumeSession(pendingResume)} style={{
+                background:rt.accent, color:isDark?'#1b1420':'#fff', border:'none', borderRadius:RADIUS.sm+1,
+                padding:'9px 18px', fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, cursor:'pointer',
+                fontFamily:SANS }}>
+                Resume
+              </button>
+              <button className="mb-rq-btn" onClick={discardResume} style={{
+                background:'none', color:rt.text3, border:`1px solid ${rt.border}`, borderRadius:RADIUS.sm+1,
+                padding:'9px 14px', fontSize:FONT.size.sm, cursor:'pointer', fontFamily:SANS }}>
+                Discard
+              </button>
             </div>
+          )}
 
-            {/* Priority breakdown — the biggest few due systems, real counts. */}
-            {priority.length > 0 && (
-              <div style={{ background:t.surface, border:`1px solid ${t.border}`, borderRadius:RADIUS.lg,
-                padding:SPACE.lg, boxShadow:elevation(t,'sm'), marginBottom:SPACE.xl }}>
-                <div style={{ fontSize:FONT.size.xs, color:t.text4, letterSpacing:.8, fontWeight:FONT.weight.semibold,
-                  textTransform:'uppercase', marginBottom:SPACE.sm+2, display:'flex', alignItems:'center', gap:6 }}>
-                  <IconZap size={11} /> High Priority
-                </div>
-                <div style={{ display:'flex', flexDirection:'column' }}>
-                  {priority.map((s, i) => (
-                    <button key={s.name} className="mb-rq-row" onClick={() => { setFilterSystem([s.name]); setFilterDifficulty('All'); startNewSession('due', s.name, 'All'); }}
-                      style={{ display:'flex', alignItems:'center', gap:SPACE.sm, padding:'9px 8px',
-                        borderRadius:RADIUS.sm, cursor:'pointer', background:'none', border:'none', textAlign:'left',
-                        transition:`background ${MOTION.fast} ${MOTION.ease}` }}>
-                      <div style={{ width:7, height:7, borderRadius:RADIUS.circle, background:s.color, flexShrink:0 }} />
-                      <div style={{ flex:1, fontSize:FONT.size.sm, color:t.text2, fontWeight:FONT.weight.medium,
-                        overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.name}</div>
-                      {i === 0 && <IconZap size={11} style={{ color:t.danger, flexShrink:0 }} />}
-                      <span style={{ fontSize:FONT.size.xs, fontWeight:FONT.weight.semibold, color:t.danger,
-                        background:t.dangerBg, borderRadius:RADIUS.pill, padding:'2px 8px', flexShrink:0 }}>
-                        {s.dueCount}
-                      </span>
-                    </button>
-                  ))}
-                </div>
+          {nothingAtAll ? (
+            <div style={{ gridArea:'status', background:rt.surface, border:`1px solid ${rt.borderRich}`,
+              borderRadius:RADIUS.xl2, padding:'52px 28px', textAlign:'center',
+              boxShadow:`0 1px 2px ${rt.shadow}` }}>
+              <div style={{ width:52, height:52, borderRadius:RADIUS.xl2, background:rt.successBg,
+                border:`1px solid ${rt.successBorder}`,
+                display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 18px' }}>
+                <IconCheck size={22} style={{ color:rt.success }} />
               </div>
-            )}
+              <div style={{ fontFamily:SANS, fontSize:FONT.size.xl, fontWeight:FONT.weight.bold,
+                color:rt.text, marginBottom:8 }}>
+                You're caught up
+              </div>
+              <div style={{ fontSize:FONT.size.sm, color:rt.text3, lineHeight:1.65, maxWidth:360, margin:'0 auto' }}>
+                {globalNextDue
+                  ? <>No reviews are due right now. Next card is scheduled for{' '}
+                      <strong style={{ color:rt.text2 }}>
+                        {globalNextDue.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}
+                      </strong>.</>
+                  : 'No cards due. Rate entries here as you review them to start scheduling.'}
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* ── Review status — ONE rich container holding the editorial
+                  due/new masthead and, when relevant, the priority list
+                  beneath a hairline rule. Replaces a row of generic stat
+                  cards with a single considered instrument reading. ──── */}
+              <div style={{ gridArea:'status', background:rt.surface, border:`1px solid ${rt.borderRich}`,
+                borderRadius:RADIUS.xl2, boxShadow:`0 1px 2px ${rt.shadow}`, overflow:'hidden' }}>
+                <div style={{ display:'flex', alignItems:'stretch', padding:`${SPACE.xl}px ${SPACE.xl2}px` }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontFamily:SANS, fontSize:FONT.size.display, fontWeight:FONT.weight.bold,
+                      color: dueCount>0 ? rt.due : rt.text, lineHeight:1, letterSpacing:-1, fontVariantNumeric:'tabular-nums' }}>
+                      {dueCount}
+                    </div>
+                    <div style={{ fontSize:FONT.size.xs, color:rt.text3, letterSpacing:.6, fontWeight:FONT.weight.semibold,
+                      textTransform:'uppercase', marginTop:8 }}>
+                      Due Today
+                    </div>
+                  </div>
+                  <div style={{ width:1, background:rt.border, margin:'2px 0' }} />
+                  <div style={{ flex:1, paddingLeft:SPACE.xl2 }}>
+                    <div style={{ fontFamily:SANS, fontSize:FONT.size.display, fontWeight:FONT.weight.bold,
+                      color: newCount>0 ? rt.fresh : rt.text, lineHeight:1, letterSpacing:-1, fontVariantNumeric:'tabular-nums' }}>
+                      {newCount}
+                    </div>
+                    <div style={{ fontSize:FONT.size.xs, color:rt.text3, letterSpacing:.6, fontWeight:FONT.weight.semibold,
+                      textTransform:'uppercase', marginTop:8 }}>
+                      New
+                    </div>
+                  </div>
+                  {nextDue && dueCount===0 && (
+                    <div style={{ flex:1, paddingLeft:SPACE.xl2, borderLeft:`1px solid ${rt.border}`,
+                      display:'flex', flexDirection:'column', justifyContent:'center' }}>
+                      <div style={{ fontSize:FONT.size.xs, color:rt.text4 }}>Next due</div>
+                      <div style={{ fontSize:FONT.size.sm, color:rt.text2, fontWeight:FONT.weight.semibold, marginTop:2 }}>
+                        {nextDue.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})}
+                      </div>
+                    </div>
+                  )}
+                </div>
 
-            {/* Filters — narrow the SESSION about to start, not the summary above. */}
-            <div style={{ marginBottom:SPACE.lg }}>
-              <div style={{ fontSize:FONT.size.micro, color:t.text4, letterSpacing:.8, fontWeight:FONT.weight.semibold,
-                textTransform:'uppercase', marginBottom:SPACE.sm }}>Session</div>
-              <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-                {[
-                  { key:'all', label:'All' },
-                  { key:'due', label:`Due (${dueCount})` },
-                  { key:'new', label:`New (${newCount})` },
-                ].map(f => (
-                  <button key={f.key} className="mb-rq-filter" onClick={()=>setFilterMode(f.key)} style={{
-                    fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:'Inter,sans-serif',
-                    background: filterMode===f.key ? t.navActiveBg : t.surface2,
-                    color: filterMode===f.key ? t.navActiveText : t.text3,
-                    border:`1px solid ${filterMode===f.key ? t.navActiveBorder : t.border}`,
-                    borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer',
-                    transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}` }}>
-                    {f.label}
-                  </button>
-                ))}
+                {priority.length > 0 && (
+                  <>
+                    <div style={{ height:1, background:rt.border }} />
+                    <div style={{ padding:`${SPACE.lg}px ${SPACE.xl2}px` }}>
+                      <div style={{ fontSize:FONT.size.xs, color:rt.text4, letterSpacing:.8, fontWeight:FONT.weight.semibold,
+                        textTransform:'uppercase', marginBottom:SPACE.sm+2, display:'flex', alignItems:'center', gap:6 }}>
+                        <IconZap size={11} /> High Priority — {priority.length} system{priority.length!==1?'s':''} need review
+                      </div>
+                      <div style={{ display:'flex', flexDirection:'column' }}>
+                        {priority.map((s, i) => (
+                          <button key={s.name} className="mb-rq-row" onClick={() => { setFilterSystem([s.name]); setFilterDifficulty('All'); startNewSession('due', s.name, 'All'); }}
+                            style={{ display:'flex', alignItems:'center', gap:SPACE.sm, padding:'9px 4px',
+                              borderRadius:RADIUS.sm, cursor:'pointer', background:'none', border:'none', textAlign:'left' }}>
+                            <div style={{ width:7, height:7, borderRadius:RADIUS.circle, background:s.color, flexShrink:0 }} />
+                            <div style={{ flex:1, fontSize:FONT.size.sm, color:rt.text2, fontWeight:FONT.weight.medium,
+                              overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.name}</div>
+                            {i === 0 && <IconZap size={11} style={{ color:rt.due, flexShrink:0 }} />}
+                            <span style={{ fontSize:FONT.size.xs, fontWeight:FONT.weight.semibold, color:rt.due,
+                              background:rt.dueBg, borderRadius:RADIUS.pill, padding:'2px 8px', flexShrink:0 }}>
+                              {s.dueCount}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
-              {/* Systems — a multi-select, unlike mode/difficulty's single-
-                  choice toggle rows: picking several mixes their due/new
-                  cards into one combined session, which single-select never
-                  allowed. "All systems" is its own exclusive chip (clears
-                  the selection) rather than just "nothing picked", so it's
-                  always visible as a real, clickable choice rather than an
-                  implicit empty state. */}
-              {userSystems?.length > 0 && (
-                <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginTop:8 }}>
-                  <button className="mb-rq-filter" onClick={()=>setFilterSystem([])} style={{
-                    fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:'Inter,sans-serif',
-                    background: filterSystem.length===0 ? t.navActiveBg : t.surface2,
-                    color: filterSystem.length===0 ? t.navActiveText : t.text3,
-                    border:`1px solid ${filterSystem.length===0 ? t.navActiveBorder : t.border}`,
-                    borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer',
-                    transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}` }}>
-                    All systems
-                  </button>
-                  {userSystems.map(s => {
-                    const active = filterSystem.includes(s.name);
-                    return (
-                      <button key={s.name} className="mb-rq-filter"
-                        onClick={() => setFilterSystem(prev => prev.includes(s.name) ? prev.filter(n => n !== s.name) : [...prev, s.name])}
-                        style={{
-                          fontSize:FONT.size.sm, fontWeight:FONT.weight.medium, fontFamily:'Inter,sans-serif',
-                          background: active ? t.navActiveBg : t.surface2,
-                          color: active ? t.navActiveText : t.text2,
-                          border:`1px solid ${active ? t.navActiveBorder : t.border}`,
-                          borderRadius:RADIUS.pill, padding:'8px 14px', cursor:'pointer',
-                          transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}` }}>
-                        {s.name}
+              {/* ── Configure Session — one rich container, sub-sections
+                  separated by hairline rules rather than stacked boxes.
+                  System selection gets the most internal space of the
+                  four, per the brief's call for "appropriate visual
+                  prominence." ──────────────────────────────────────── */}
+              <div style={{ gridArea:'config', background:rt.surface, border:`1px solid ${rt.borderRich}`,
+                borderRadius:RADIUS.xl2, boxShadow:`0 1px 2px ${rt.shadow}`, padding:`${SPACE.xl}px ${SPACE.xl2}px` }}>
+                <div style={{ fontFamily:SANS, fontSize:FONT.size.lg, fontWeight:FONT.weight.bold,
+                  color:rt.text, marginBottom:SPACE.lg }}>
+                  Configure Session
+                </div>
+
+                {/* Mode */}
+                <div style={{ marginBottom:SPACE.lg }}>
+                  <div style={{ fontSize:FONT.size.micro, color:rt.text4, letterSpacing:.8, fontWeight:FONT.weight.semibold,
+                    textTransform:'uppercase', marginBottom:SPACE.sm }}>Review Mode</div>
+                  <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                    {[
+                      { key:'all', label:'All' },
+                      { key:'due', label:`Due (${dueCount})` },
+                      { key:'new', label:`New (${newCount})` },
+                    ].map(f => (
+                      <button key={f.key} className="mb-rq-chip" onClick={()=>setFilterMode(f.key)} style={{
+                        fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:SANS,
+                        background: filterMode===f.key ? rt.accentBg : 'transparent',
+                        color: filterMode===f.key ? rt.accentStrong : rt.text3,
+                        border:`1px solid ${filterMode===f.key ? rt.accentBorder : rt.border}`,
+                        borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer' }}>
+                        {f.label}
                       </button>
-                    );
-                  })}
+                    ))}
+                  </div>
                 </div>
-              )}
 
-              {/* Difficulty — narrows the same session, same scoped counts
-                  above update the moment this changes, same as the systems
-                  row. */}
-              <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginTop:8 }}>
-                {['All', ...REVIEW_DIFFICULTIES].map(d => {
-                  const active = filterDifficulty === d;
-                  const c = d === 'All' ? t.text3 : (DIFF_COLOR[d] || t.text3);
-                  return (
-                    <button key={d} className="mb-rq-filter" onClick={()=>setFilterDifficulty(d)} style={{
-                      fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:'Inter,sans-serif',
-                      background: active ? `${c}1f` : t.surface2, color: active ? c : t.text3,
-                      border:`1px solid ${active ? `${c}44` : t.border}`,
-                      borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer',
-                      transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}` }}>
-                      {d}
+                <div style={{ height:1, background:rt.border, margin:`${SPACE.lg}px 0` }} />
+
+                {/* Systems — given the most room, per the brief. */}
+                {userSystems?.length > 0 && (
+                  <div style={{ marginBottom:SPACE.lg }}>
+                    <div style={{ fontSize:FONT.size.micro, color:rt.text4, letterSpacing:.8, fontWeight:FONT.weight.semibold,
+                      textTransform:'uppercase', marginBottom:SPACE.sm }}>
+                      Medical Systems {filterSystem.length>0 && <span style={{ color:rt.accent }}>· {filterSystem.length} selected</span>}
+                    </div>
+                    <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                      <button className="mb-rq-chip" onClick={()=>setFilterSystem([])} style={{
+                        fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:SANS,
+                        background: filterSystem.length===0 ? rt.accentBg : 'transparent',
+                        color: filterSystem.length===0 ? rt.accentStrong : rt.text3,
+                        border:`1px solid ${filterSystem.length===0 ? rt.accentBorder : rt.border}`,
+                        borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer' }}>
+                        All systems
+                      </button>
+                      {userSystems.map(s => {
+                        const active = filterSystem.includes(s.name);
+                        const dot = s.color || SYS_COLOR[s.name] || rt.accent;
+                        return (
+                          <button key={s.name} className="mb-rq-chip"
+                            onClick={() => setFilterSystem(prev => prev.includes(s.name) ? prev.filter(n => n !== s.name) : [...prev, s.name])}
+                            style={{
+                              display:'flex', alignItems:'center', gap:7,
+                              fontSize:FONT.size.sm, fontWeight:FONT.weight.medium, fontFamily:SANS,
+                              background: active ? rt.accentBg : 'transparent',
+                              color: active ? rt.accentStrong : rt.text2,
+                              border:`1px solid ${active ? rt.accentBorder : rt.border}`,
+                              borderRadius:RADIUS.pill, padding:'7px 14px 7px 10px', cursor:'pointer' }}>
+                            <span style={{ width:6, height:6, borderRadius:RADIUS.circle, background:dot, flexShrink:0 }} />
+                            {s.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ height:1, background:rt.border, margin:`${SPACE.lg}px 0` }} />
+
+                {/* Difficulty */}
+                <div style={{ marginBottom:SPACE.lg }}>
+                  <div style={{ fontSize:FONT.size.micro, color:rt.text4, letterSpacing:.8, fontWeight:FONT.weight.semibold,
+                    textTransform:'uppercase', marginBottom:SPACE.sm }}>Difficulty</div>
+                  <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                    {['All', ...REVIEW_DIFFICULTIES].map(d => {
+                      const active = filterDifficulty === d;
+                      const c = d === 'All' ? rt.text3 : (DIFF_COLOR[d] || rt.text3);
+                      return (
+                        <button key={d} className="mb-rq-chip" onClick={()=>setFilterDifficulty(d)} style={{
+                          fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:SANS,
+                          background: active ? `${c}1f` : 'transparent', color: active ? c : rt.text3,
+                          border:`1px solid ${active ? `${c}55` : rt.border}`,
+                          borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer' }}>
+                          {d}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div style={{ height:1, background:rt.border, margin:`${SPACE.lg}px 0` }} />
+
+                {/* Card Count */}
+                <div>
+                  <div style={{ fontSize:FONT.size.micro, color:rt.text4, letterSpacing:.8, fontWeight:FONT.weight.semibold,
+                    textTransform:'uppercase', marginBottom:SPACE.sm }}>Review Quantity</div>
+                  <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
+                    <button className="mb-rq-chip" onClick={()=>setCardLimit('all')} style={{
+                      fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:SANS,
+                      background: cardLimit==='all' ? rt.accentBg : 'transparent',
+                      color: cardLimit==='all' ? rt.accentStrong : rt.text3,
+                      border:`1px solid ${cardLimit==='all' ? rt.accentBorder : rt.border}`,
+                      borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer' }}>
+                      All
                     </button>
-                  );
-                })}
+                    {CARD_COUNT_PRESETS.map(n => (
+                      <button key={n} className="mb-rq-chip" onClick={()=>setCardLimit(n)} style={{
+                        fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:SANS,
+                        background: cardLimit===n ? rt.accentBg : 'transparent',
+                        color: cardLimit===n ? rt.accentStrong : rt.text3,
+                        border:`1px solid ${cardLimit===n ? rt.accentBorder : rt.border}`,
+                        borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer' }}>
+                        {n}
+                      </button>
+                    ))}
+                    <input type="number" min="1" placeholder="Custom"
+                      value={typeof cardLimit === 'number' && !CARD_COUNT_PRESETS.includes(cardLimit) ? cardLimit : ''}
+                      onChange={e => {
+                        const v = parseInt(e.target.value, 10);
+                        setCardLimit(v > 0 ? v : 'all');
+                      }}
+                      style={{ width:92, fontSize:FONT.size.sm, fontWeight:FONT.weight.medium, fontFamily:SANS,
+                        background:'transparent', color:rt.text2, border:`1px solid ${rt.border}`,
+                        borderRadius:RADIUS.pill, padding:'8px 12px', outline:'none' }} />
+                  </div>
+                </div>
               </div>
 
-              {/* Card Count — an exact block size for the session about to
-                  start, not a filter (unlike mode/system/difficulty above,
-                  it doesn't change dueCount/newCount). 'All' (default)
-                  reproduces the exact previous behaviour: cycle through
-                  everything due+new. Picking a number just slices the same
-                  built queue to that length — buildCycledQueue's own
-                  due/new composition and shuffling is untouched. */}
-              <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center', marginTop:8 }}>
-                <button className="mb-rq-filter" onClick={()=>setCardLimit('all')} style={{
-                  fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:'Inter,sans-serif',
-                  background: cardLimit==='all' ? t.navActiveBg : t.surface2,
-                  color: cardLimit==='all' ? t.navActiveText : t.text3,
-                  border:`1px solid ${cardLimit==='all' ? t.navActiveBorder : t.border}`,
-                  borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer',
-                  transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}` }}>
-                  All
+              {/* ── Session summary + Start Review — the dedicated primary
+                  action, richly bordered and visually distinct from the
+                  quieter configuration controls beside it. Sticky on
+                  desktop, a reachable bottom-anchored bar on mobile. ──── */}
+              <div className="mb-rq-cta" style={{ gridArea:'cta', background:rt.surfaceRaised,
+                border:`1.5px solid ${rt.accentBorder}`, borderRadius:RADIUS.xl2,
+                boxShadow:`0 18px 40px -18px ${rt.shadowRich}`, padding:SPACE.xl }}>
+                <div style={{ fontSize:FONT.size.micro, color:rt.text4, letterSpacing:.8, fontWeight:FONT.weight.semibold,
+                  textTransform:'uppercase', marginBottom:8 }}>
+                  Ready to begin
+                </div>
+                <div style={{ fontSize:FONT.size.sm, color:rt.text2, lineHeight:1.6, marginBottom:SPACE.lg }}>
+                  {sessionSummary}
+                  {cardLimit !== 'all' && <> · up to {willReviewCount} cards</>}
+                </div>
+                <button className="mb-rq-cta-btn" onClick={()=>startNewSession()} style={{
+                  width:'100%', background:rt.accent, color:isDark?'#1b1420':'#fff', border:'none',
+                  borderRadius:RADIUS.md, padding:'15px 20px', fontSize:FONT.size.base, fontWeight:FONT.weight.bold,
+                  cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:8, fontFamily:SANS }}>
+                  <IconPlay size={14} />
+                  {dueCount>0 ? 'Start Review' : 'Review New Cards'}
+                  {cardLimit !== 'all' ? ` · ${willReviewCount}` : ''}
                 </button>
-                {CARD_COUNT_PRESETS.map(n => (
-                  <button key={n} className="mb-rq-filter" onClick={()=>setCardLimit(n)} style={{
-                    fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:'Inter,sans-serif',
-                    background: cardLimit===n ? t.navActiveBg : t.surface2,
-                    color: cardLimit===n ? t.navActiveText : t.text3,
-                    border:`1px solid ${cardLimit===n ? t.navActiveBorder : t.border}`,
-                    borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer',
-                    transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}` }}>
-                    {n}
-                  </button>
-                ))}
-                <input type="number" min="1" placeholder="Custom"
-                  value={typeof cardLimit === 'number' && !CARD_COUNT_PRESETS.includes(cardLimit) ? cardLimit : ''}
-                  onChange={e => {
-                    const v = parseInt(e.target.value, 10);
-                    setCardLimit(v > 0 ? v : 'all');
-                  }}
-                  style={{ width:88, fontSize:FONT.size.sm, fontWeight:FONT.weight.medium, fontFamily:'Inter,sans-serif',
-                    background:t.surface2, color:t.text2, border:`1px solid ${t.border}`,
-                    borderRadius:RADIUS.pill, padding:'8px 12px', outline:'none' }} />
               </div>
-            </div>
-
-            <button className="mb-rq-btn" onClick={()=>startNewSession()} style={{
-              width:'100%', background:t.accent, color:'#fff', border:'none', borderRadius:RADIUS.md,
-              padding:'14px 20px', fontSize:FONT.size.base, fontWeight:FONT.weight.bold, cursor:'pointer',
-              display:'flex', alignItems:'center', justifyContent:'center', gap:8, fontFamily:'Inter,sans-serif' }}>
-              <IconPlay size={14} />
-              {dueCount>0 ? 'Start Review' : 'Review New Cards'}
-              {cardLimit !== 'all' ? ` · ${Math.min(cardLimit, dueCount+newCount)} cards` : ''}
-            </button>
-          </>
-        )}
+            </>
+          )}
+        </div>
       </div>
     );
   }
 
   // ── Paused / complete screens ─────────────────────────────────────────
-  if (ended || done) {
+  // `|| total === 0` closes a pre-existing gap (found during this redesign's
+  // own testing, not introduced by it — the original code had the identical
+  // unguarded `card.system`/`card.title` access below): starting a session
+  // whose filter combination matches zero cards left `ended`/`done` both
+  // false, so it fell through past this branch into the active-card return
+  // with `card` undefined and crashed, instead of reaching the "Nothing
+  // matches this filter" screen that already exists for exactly this case
+  // a few lines down. Purely a render guard — no filtering/scheduling logic
+  // changed.
+  if (ended || done || total === 0) {
     if (total === 0) {
       // A filtered session that matched nothing — different message from
       // "literally nothing due anywhere" on the overview screen.
       return (
-        <div className="mb-rq-fade" style={{ maxWidth:480, margin:'0 auto', textAlign:'center', paddingTop:'14vh', fontFamily:'Inter,sans-serif' }}>
+        <div className="mb-rq-fade" style={{ maxWidth:480, margin:'0 auto', textAlign:'center', paddingTop:'14vh', fontFamily:SANS }}>
           <style>{localCss}</style>
-          <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.bold, color:t.text, marginBottom:8 }}>
+          <div style={{ fontFamily:SANS, fontSize:FONT.size.xl, fontWeight:FONT.weight.bold, color:rt.text, marginBottom:8 }}>
             Nothing matches this filter
           </div>
           <button className="mb-rq-btn" onClick={backToOverview} style={{
-            background:t.surface3, color:t.text2, border:`1px solid ${t.border}`, borderRadius:RADIUS.sm+1,
+            background:'transparent', color:rt.text2, border:`1px solid ${rt.borderRich}`, borderRadius:RADIUS.sm+1,
             padding:'10px 20px', fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, cursor:'pointer',
-            marginTop:14, fontFamily:'Inter,sans-serif' }}>
+            marginTop:14, fontFamily:SANS }}>
             Back to Overview
           </button>
         </div>
       );
     }
     return (
-      <div className="mb-rq-fade" style={{ maxWidth:480, margin:'0 auto', textAlign:'center', paddingTop:'12vh', fontFamily:'Inter,sans-serif' }}>
+      <div className="mb-rq-fade" style={{ maxWidth:480, margin:'0 auto', textAlign:'center', paddingTop:'12vh', fontFamily:SANS }}>
         <style>{localCss}</style>
-        <div style={{ width:52, height:52, borderRadius:RADIUS.xl2, background: done ? t.okBg : t.surface3,
+        <div style={{ width:52, height:52, borderRadius:RADIUS.xl2,
+          background: done ? rt.successBg : rt.surfaceQuiet,
+          border:`1px solid ${done ? rt.successBorder : rt.border}`,
           display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 18px' }}>
-          {done ? <IconCheck size={22} style={{ color:t.ok }} /> : <IconPause size={20} style={{ color:t.text3 }} />}
+          {done ? <IconCheck size={22} style={{ color:rt.success }} /> : <IconPause size={20} style={{ color:rt.text3 }} />}
         </div>
-        <div style={{ fontSize:FONT.size.xl, fontWeight:FONT.weight.bold, color:t.text, marginBottom:8 }}>
+        <div style={{ fontFamily:SANS, fontSize:FONT.size.xl2, fontWeight:FONT.weight.bold, color:rt.text, marginBottom:8 }}>
           {done ? 'Session complete' : 'Paused'}
         </div>
-        <div style={{ fontSize:FONT.size.base, color:t.text3, marginBottom:6 }}>
-          Reviewed <strong style={{ color:t.text2 }}>{sessionDone}</strong> of <strong style={{ color:t.text2 }}>{total}</strong> cards this session
-          {elapsedSec > 0 && <> in <strong style={{ color:t.text2 }}>{formatElapsed(elapsedSec)}</strong></>}.
+        <div style={{ fontSize:FONT.size.base, color:rt.text3, marginBottom:6 }}>
+          Reviewed <strong style={{ color:rt.text2 }}>{sessionDone}</strong> of <strong style={{ color:rt.text2 }}>{total}</strong> cards this session
+          {elapsedSec > 0 && <> in <strong style={{ color:rt.text2 }}>{formatElapsed(elapsedSec)}</strong></>}.
         </div>
         {!done && (
-          <div style={{ fontSize:FONT.size.xs, color:t.text4, marginBottom:26 }}>
+          <div style={{ fontSize:FONT.size.xs, color:rt.text4, marginBottom:26 }}>
             {total - idx - 1} card{total-idx-1!==1?'s':''} remaining. They'll be here when you come back.
           </div>
         )}
-        {done && <div style={{ fontSize:FONT.size.xs, color:t.text4, marginBottom:26 }}>All cards reviewed!</div>}
+        {done && <div style={{ fontSize:FONT.size.xs, color:rt.text4, marginBottom:26 }}>All cards reviewed!</div>}
 
         <div style={{ display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap' }}>
           {!done && (
             <button className="mb-rq-btn" onClick={() => { setFlipped(false); setEnded(false); setTimerRunning(true); }} style={{
-              background:t.accent, color:'#fff', border:'none', borderRadius:RADIUS.sm+1,
+              background:rt.accent, color:isDark?'#1b1420':'#fff', border:'none', borderRadius:RADIUS.sm+1,
               padding:'11px 22px', fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, cursor:'pointer',
-              display:'flex', alignItems:'center', gap:7, fontFamily:'Inter,sans-serif' }}>
+              display:'flex', alignItems:'center', gap:7, fontFamily:SANS }}>
               <IconPlay size={12} /> Resume
             </button>
           )}
           <button className="mb-rq-btn" onClick={()=>startNewSession()} style={{
-            background: done ? t.accent : t.surface3, color: done ? '#fff' : t.text2,
-            border: done ? 'none' : `1px solid ${t.border}`, borderRadius:RADIUS.sm+1,
+            background: done ? rt.accent : 'transparent', color: done ? (isDark?'#1b1420':'#fff') : rt.text2,
+            border: done ? 'none' : `1px solid ${rt.borderRich}`, borderRadius:RADIUS.sm+1,
             padding:'11px 22px', fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, cursor:'pointer',
-            fontFamily:'Inter,sans-serif' }}>
+            fontFamily:SANS }}>
             Start New Session
           </button>
           <button className="mb-rq-btn" onClick={backToOverview} style={{
-            background:'none', color:t.text4, border:`1px solid ${t.border}`, borderRadius:RADIUS.sm+1,
+            background:'none', color:rt.text4, border:`1px solid ${rt.border}`, borderRadius:RADIUS.sm+1,
             padding:'11px 18px', fontSize:FONT.size.sm, fontWeight:FONT.weight.medium, cursor:'pointer',
-            fontFamily:'Inter,sans-serif' }}>
+            fontFamily:SANS }}>
             Back to Overview
           </button>
         </div>
@@ -1009,7 +1156,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   }
 
   // ── Active card review ────────────────────────────────────────────────
-  const color = SYS_COLOR[card?.system] || t.accent;
+  const color = SYS_COLOR[card?.system] || rt.accent;
   // Real, per-card interval previews — computed from the same calcNext()
   // that actually persists, so these can never fabricate a number the
   // rating buttons don't back up.
@@ -1018,13 +1165,10 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     return acc;
   }, {}) : {};
   const toneColor = {
-    danger: t.danger, warn: t.warn, accent: t.accent, ok: t.ok,
+    danger: rt.due, warn: rt.warn, accent: rt.accent, ok: rt.success,
   };
   const toneBg = {
-    danger: isDark ? `${t.danger}22` : t.dangerBg,
-    warn:   isDark ? `${t.warn}22`   : t.warnBg,
-    accent: isDark ? `${t.accent}22` : t.navActiveBg,
-    ok:     isDark ? `${t.ok}22`     : t.okBg,
+    danger: rt.dueBg, warn: rt.warnBg, accent: rt.accentBg, ok: rt.successBg,
   };
 
   // A side column only appears once the answer is revealed AND there's
@@ -1034,7 +1178,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
 
   return (
     <div className="mb-rq-fade" style={{ maxWidth:1040, margin:'0 auto', width:'100%',
-      fontFamily:'Inter,sans-serif', height:'100%', display:'flex', flexDirection:'column' }}>
+      fontFamily:SANS, height:'100%', display:'flex', flexDirection:'column' }}>
       <style>{localCss}</style>
 
       {lightboxIdx !== null && card?.images?.length > 0 && (
@@ -1049,23 +1193,23 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
         <div style={{ display:'flex', alignItems:'center', gap:6, marginLeft:'auto' }}>
           <button className="mb-headerbtn" onClick={goPrev} disabled={idx===0}
             title="Previous card" aria-label="Previous card" style={{
-            background:'none', border:'none', color: idx===0 ? t.text4 : t.text3,
+            background:'none', border:'none', color: idx===0 ? rt.text4 : rt.text3,
             opacity: idx===0 ? .45 : 1, padding:6, width:28, height:28, borderRadius:RADIUS.sm,
             cursor: idx===0 ? 'default' : 'pointer',
             display:'flex', alignItems:'center', justifyContent:'center' }}>
             <IconChevronLeft size={14} />
           </button>
-          <span style={{ fontSize:FONT.size.sm, color:t.text3, fontWeight:FONT.weight.medium, padding:'0 2px' }}>{idx + 1} / {total}</span>
+          <span style={{ fontSize:FONT.size.sm, color:rt.text3, fontWeight:FONT.weight.medium, padding:'0 2px' }}>{idx + 1} / {total}</span>
           {/* Count-up session timer — ticks via timerRunning (see its own
               effect above), so it genuinely freezes while paused instead of
               just visually looking frozen. tabular-nums keeps the digits
               from jittering the whole cluster's width as seconds roll over. */}
-          <span style={{ fontSize:FONT.size.xs, color:t.text4, fontVariantNumeric:'tabular-nums', padding:'0 2px' }}
+          <span style={{ fontSize:FONT.size.xs, color:rt.text4, fontVariantNumeric:'tabular-nums', padding:'0 2px' }}
             title="Session time">
             {formatElapsed(elapsedSec)}
           </span>
           <button className="mb-headerbtn" onClick={pauseSession} title="Pause session" aria-label="Pause session" style={{
-            background:'none', border:'none', color:t.text3, padding:6, width:28, height:28,
+            background:'none', border:'none', color:rt.text3, padding:6, width:28, height:28,
             borderRadius:RADIUS.sm, cursor:'pointer',
             display:'flex', alignItems:'center', justifyContent:'center' }}>
             <IconPause size={13} />
@@ -1079,8 +1223,8 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
           edge doubles as this session's progress bar instead of a static
           line drawn a second time inside this screen. */}
       {progressSlot && createPortal(
-        <div style={{ position:'absolute', inset:0, background:t.surface3 }}>
-          <div style={{ height:'100%', background:t.accent,
+        <div style={{ position:'absolute', inset:0, background:rt.surfaceSunken }}>
+          <div style={{ height:'100%', background:rt.accent,
             width:`${progress}%`, transition:`width ${MOTION.slow} ${MOTION.ease}` }} />
         </div>,
         progressSlot
@@ -1105,14 +1249,13 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
           <div className="mb-rq-card-col" style={showSide ? undefined : { maxWidth:760, margin:'0 auto', width:'100%' }}>
 
             {/* Card — a soft colour-tinted wash fading into the surface plus
-                a colour-matched glow shadow (the same "coloured glow"
-                language the Add Entry CTA elsewhere in the app uses) reads
-                as a lifted, deliberate surface instead of a flat bordered
-                rectangle. */}
+                a colour-matched glow shadow, plus a richer border than the
+                quiet chrome around it — this is the one primary container
+                the whole screen exists to show. */}
             <div key={idx} className="mb-rq-fade mb-rq-card" style={{
-              background:`linear-gradient(180deg, ${color}12 0%, ${t.surface} 220px)`,
-              border:`1px solid ${t.border}`, borderRadius:RADIUS.xl2, padding:SPACE.xl2,
-              boxShadow:`0 24px 48px -20px ${color}45, ${elevation(t,'sm')}`, minHeight:260 }}>
+              background:`linear-gradient(180deg, ${color}14 0%, ${rt.surface} 220px)`,
+              border:`1px solid ${rt.borderRich}`, borderRadius:RADIUS.xl2, padding:SPACE.xl2,
+              boxShadow:`0 24px 48px -20px ${color}40, 0 1px 2px ${rt.shadow}`, minHeight:260 }}>
 
               {/* System + review count — a dot + small-caps label instead of
                   a boxed pill, lighter and quieter than another bordered
@@ -1122,38 +1265,39 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                 <span style={{ fontSize:FONT.size.xs, fontWeight:FONT.weight.bold, letterSpacing:.6,
                   textTransform:'uppercase', color }}>{card.system}</span>
                 {card.review_count > 0 && (
-                  <span style={{ fontSize:FONT.size.xs, color:t.text4 }}>· Reviewed {card.review_count}×</span>
+                  <span style={{ fontSize:FONT.size.xs, color:rt.text4 }}>· Reviewed {card.review_count}×</span>
                 )}
               </div>
 
-              {/* Title — always visible */}
-              <div style={{ fontSize:FONT.size.xl, fontWeight:FONT.weight.bold, color:t.text, lineHeight:1.4, marginBottom:SPACE.xl }}>
+              {/* Title — always visible. */}
+              <div style={{ fontFamily:SANS, fontSize:FONT.size.xl2, fontWeight:FONT.weight.bold,
+                color:rt.text, lineHeight:1.4, marginBottom:SPACE.xl }}>
                 {card.title}
               </div>
 
               {/* Answer */}
               {!flipped ? (
                 <button className="mb-rq-btn" onClick={()=>setFlipped(true)} style={{
-                  width:'100%', background:t.surface2, border:`2px dashed ${t.borderStrong}`,
-                  borderRadius:RADIUS.md, padding:16, fontSize:FONT.size.md, color:t.text3,
-                  cursor:'pointer', fontWeight:FONT.weight.semibold, fontFamily:'Inter,sans-serif' }}>
+                  width:'100%', background:rt.surfaceSunken, border:`2px dashed ${rt.borderRich}`,
+                  borderRadius:RADIUS.md, padding:16, fontSize:FONT.size.md, color:rt.text3,
+                  cursor:'pointer', fontWeight:FONT.weight.semibold, fontFamily:SANS }}>
                   Tap to reveal <span style={{ opacity:.7, fontWeight:FONT.weight.regular }}>· Space</span>
                 </button>
               ) : (
                 <div className="mb-rq-fade">
-                  <div style={{ height:1, background:t.border, marginBottom:SPACE.lg }} />
+                  <div style={{ height:1, background:rt.border, marginBottom:SPACE.lg }} />
                   {card.notes ? (
                     // No maxHeight/scroll clamp here — this card sits inside
                     // the shared study-surface scroll area above, so a long
                     // answer gets real room instead of a small inner
                     // scrollbox. maxWidth keeps the LINE LENGTH readable
                     // even though the card column itself can be wide.
-                    <div style={{ fontSize:FONT.size.lg, color:t.text2, lineHeight:1.75,
+                    <div style={{ fontSize:FONT.size.lg, color:rt.text2, lineHeight:1.75,
                       whiteSpace:'pre-wrap', marginBottom:SPACE.lg, maxWidth:700 }}>
                       <RenderedNotes text={card.notes} highlights={card.highlights} isDark={isDark} />
                     </div>
                   ) : (
-                    <div style={{ fontSize:FONT.size.sm, color:t.text4, marginBottom:SPACE.lg }}>No notes for this entry.</div>
+                    <div style={{ fontSize:FONT.size.sm, color:rt.text4, marginBottom:SPACE.lg }}>No notes for this entry.</div>
                   )}
                   {/* Images move to the supporting column once there's room
                       for one (see below); on narrow screens where that
@@ -1169,7 +1313,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
               then the entry's existing AI key points, if any. Reuses the
               recovered space beside the card rather than leaving it empty. */}
           {showSide && (
-            <SideColumn t={t} images={card.images} aiSections={cardAiSections}
+            <SideColumn rt={rt} images={card.images} aiSections={cardAiSections}
               hasKeyPoints={cardHasKeyPoints} onImageClick={setLightboxIdx} />
           )}
         </div>
@@ -1183,33 +1327,32 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
             anchored action bar rather than content that happens to trail
             the card. */}
         {flipped ? (
-          <div className="mb-rq-fade mb-rq-ratingbar" style={{ position:'sticky', bottom:0, background:t.bg }}>
-            <div style={{ fontSize:FONT.size.xs, color:t.text4, fontWeight:FONT.weight.semibold,
+          <div className="mb-rq-fade mb-rq-ratingbar" style={{ position:'sticky', bottom:0, background:rt.page }}>
+            <div style={{ fontSize:FONT.size.xs, color:rt.text4, fontWeight:FONT.weight.semibold,
               textAlign:'center', marginBottom:SPACE.sm+2, letterSpacing:.4 }}>
               How well did you know this?
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10 }}>
               {RATINGS.map(r => (
                 <button key={r.key} className="mb-rq-rate mb-rq-btn" onClick={()=>rate(r.key)} style={{
-                  background:toneBg[r.tone], border:'none',
+                  background:toneBg[r.tone], border:`1px solid ${toneColor[r.tone]}33`,
                   borderRadius:RADIUS.lg, padding:'14px 4px', minHeight:64, cursor:'pointer',
-                  fontFamily:'Inter,sans-serif', display:'flex', flexDirection:'column',
-                  alignItems:'center', justifyContent:'center', gap:3,
-                  boxShadow:`0 2px 10px -4px ${toneColor[r.tone]}50` }}>
+                  fontFamily:SANS, display:'flex', flexDirection:'column',
+                  alignItems:'center', justifyContent:'center', gap:3 }}>
                   <div style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.bold, color:toneColor[r.tone] }}>{r.label}</div>
                   <div style={{ fontSize:FONT.size.micro, color:toneColor[r.tone], opacity:.8 }}>{previews[r.key]}</div>
                 </button>
               ))}
             </div>
-            <div style={{ fontSize:FONT.size.micro, color:t.text4, textAlign:'center', marginTop:8 }}>
+            <div style={{ fontSize:FONT.size.micro, color:rt.text4, textAlign:'center', marginTop:8 }}>
               a · h · g · enter
             </div>
           </div>
         ) : (
           <div style={{ textAlign:'center', padding:'14px 0 2px' }}>
             <button className="mb-rq-btn" onClick={skip} style={{ background:'none', border:'none',
-              color:t.text4, fontSize:FONT.size.xs, cursor:'pointer',
-              textDecoration:'underline', fontFamily:'Inter,sans-serif' }}>
+              color:rt.text4, fontSize:FONT.size.xs, cursor:'pointer',
+              textDecoration:'underline', fontFamily:SANS }}>
               Skip this card
             </button>
           </div>
@@ -1218,4 +1361,3 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     </div>
   );
 }
-
