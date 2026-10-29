@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR } from '../lib/constants';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, BREAKPOINT } from '../lib/theme';
-import { getReviewQueueTheme, DISPLAY_SERIF } from '../lib/reviewQueueTheme';
+import { getReviewQueueTheme } from '../lib/reviewQueueTheme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue } from '../lib/reviewQueue';
 import { computeSystemStats } from '../lib/systemStats';
@@ -779,8 +779,8 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
               textTransform:'uppercase', marginBottom:8 }}>
               Study Session
             </div>
-            <div style={{ fontFamily:DISPLAY_SERIF, fontSize:32, fontWeight:FONT.weight.medium,
-              color:rt.text, lineHeight:1.15, letterSpacing:.1 }}>
+            <div style={{ fontFamily:SANS, fontSize:28, fontWeight:FONT.weight.bold,
+              color:rt.text, lineHeight:1.15, letterSpacing:-.3 }}>
               Review Queue
             </div>
             <div style={{ fontSize:FONT.size.base, color:rt.text3, marginTop:6, maxWidth:440, lineHeight:1.5 }}>
@@ -827,7 +827,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                 display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 18px' }}>
                 <IconCheck size={22} style={{ color:rt.success }} />
               </div>
-              <div style={{ fontFamily:DISPLAY_SERIF, fontSize:FONT.size.xl, fontWeight:FONT.weight.medium,
+              <div style={{ fontFamily:SANS, fontSize:FONT.size.xl, fontWeight:FONT.weight.bold,
                 color:rt.text, marginBottom:8 }}>
                 You're caught up
               </div>
@@ -850,8 +850,8 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                 borderRadius:RADIUS.xl2, boxShadow:`0 1px 2px ${rt.shadow}`, overflow:'hidden' }}>
                 <div style={{ display:'flex', alignItems:'stretch', padding:`${SPACE.xl}px ${SPACE.xl2}px` }}>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:DISPLAY_SERIF, fontSize:FONT.size.display, fontWeight:FONT.weight.medium,
-                      color: dueCount>0 ? rt.due : rt.text, lineHeight:1 }}>
+                    <div style={{ fontFamily:SANS, fontSize:FONT.size.display, fontWeight:FONT.weight.bold,
+                      color: dueCount>0 ? rt.due : rt.text, lineHeight:1, letterSpacing:-1, fontVariantNumeric:'tabular-nums' }}>
                       {dueCount}
                     </div>
                     <div style={{ fontSize:FONT.size.xs, color:rt.text3, letterSpacing:.6, fontWeight:FONT.weight.semibold,
@@ -861,8 +861,8 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                   </div>
                   <div style={{ width:1, background:rt.border, margin:'2px 0' }} />
                   <div style={{ flex:1, paddingLeft:SPACE.xl2 }}>
-                    <div style={{ fontFamily:DISPLAY_SERIF, fontSize:FONT.size.display, fontWeight:FONT.weight.medium,
-                      color: newCount>0 ? rt.fresh : rt.text, lineHeight:1 }}>
+                    <div style={{ fontFamily:SANS, fontSize:FONT.size.display, fontWeight:FONT.weight.bold,
+                      color: newCount>0 ? rt.fresh : rt.text, lineHeight:1, letterSpacing:-1, fontVariantNumeric:'tabular-nums' }}>
                       {newCount}
                     </div>
                     <div style={{ fontSize:FONT.size.xs, color:rt.text3, letterSpacing:.6, fontWeight:FONT.weight.semibold,
@@ -917,7 +917,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                   prominence." ──────────────────────────────────────── */}
               <div style={{ gridArea:'config', background:rt.surface, border:`1px solid ${rt.borderRich}`,
                 borderRadius:RADIUS.xl2, boxShadow:`0 1px 2px ${rt.shadow}`, padding:`${SPACE.xl}px ${SPACE.xl2}px` }}>
-                <div style={{ fontFamily:DISPLAY_SERIF, fontSize:FONT.size.lg, fontWeight:FONT.weight.medium,
+                <div style={{ fontFamily:SANS, fontSize:FONT.size.lg, fontWeight:FONT.weight.bold,
                   color:rt.text, marginBottom:SPACE.lg }}>
                   Configure Session
                 </div>
@@ -934,7 +934,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                     ].map(f => (
                       <button key={f.key} className="mb-rq-chip" onClick={()=>setFilterMode(f.key)} style={{
                         fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:SANS,
-                        background: filterMode===f.key ? rt.accentDeep : 'transparent',
+                        background: filterMode===f.key ? rt.accentBg : 'transparent',
                         color: filterMode===f.key ? rt.accentStrong : rt.text3,
                         border:`1px solid ${filterMode===f.key ? rt.accentBorder : rt.border}`,
                         borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer' }}>
@@ -956,7 +956,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                     <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
                       <button className="mb-rq-chip" onClick={()=>setFilterSystem([])} style={{
                         fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:SANS,
-                        background: filterSystem.length===0 ? rt.accentDeep : 'transparent',
+                        background: filterSystem.length===0 ? rt.accentBg : 'transparent',
                         color: filterSystem.length===0 ? rt.accentStrong : rt.text3,
                         border:`1px solid ${filterSystem.length===0 ? rt.accentBorder : rt.border}`,
                         borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer' }}>
@@ -971,7 +971,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                             style={{
                               display:'flex', alignItems:'center', gap:7,
                               fontSize:FONT.size.sm, fontWeight:FONT.weight.medium, fontFamily:SANS,
-                              background: active ? rt.accentDeep : 'transparent',
+                              background: active ? rt.accentBg : 'transparent',
                               color: active ? rt.accentStrong : rt.text2,
                               border:`1px solid ${active ? rt.accentBorder : rt.border}`,
                               borderRadius:RADIUS.pill, padding:'7px 14px 7px 10px', cursor:'pointer' }}>
@@ -1016,7 +1016,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                   <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
                     <button className="mb-rq-chip" onClick={()=>setCardLimit('all')} style={{
                       fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:SANS,
-                      background: cardLimit==='all' ? rt.accentDeep : 'transparent',
+                      background: cardLimit==='all' ? rt.accentBg : 'transparent',
                       color: cardLimit==='all' ? rt.accentStrong : rt.text3,
                       border:`1px solid ${cardLimit==='all' ? rt.accentBorder : rt.border}`,
                       borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer' }}>
@@ -1025,7 +1025,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                     {CARD_COUNT_PRESETS.map(n => (
                       <button key={n} className="mb-rq-chip" onClick={()=>setCardLimit(n)} style={{
                         fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:SANS,
-                        background: cardLimit===n ? rt.accentDeep : 'transparent',
+                        background: cardLimit===n ? rt.accentBg : 'transparent',
                         color: cardLimit===n ? rt.accentStrong : rt.text3,
                         border:`1px solid ${cardLimit===n ? rt.accentBorder : rt.border}`,
                         borderRadius:RADIUS.pill, padding:'8px 16px', cursor:'pointer' }}>
@@ -1093,7 +1093,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
       return (
         <div className="mb-rq-fade" style={{ maxWidth:480, margin:'0 auto', textAlign:'center', paddingTop:'14vh', fontFamily:SANS }}>
           <style>{localCss}</style>
-          <div style={{ fontFamily:DISPLAY_SERIF, fontSize:FONT.size.xl, fontWeight:FONT.weight.medium, color:rt.text, marginBottom:8 }}>
+          <div style={{ fontFamily:SANS, fontSize:FONT.size.xl, fontWeight:FONT.weight.bold, color:rt.text, marginBottom:8 }}>
             Nothing matches this filter
           </div>
           <button className="mb-rq-btn" onClick={backToOverview} style={{
@@ -1114,7 +1114,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
           display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 18px' }}>
           {done ? <IconCheck size={22} style={{ color:rt.success }} /> : <IconPause size={20} style={{ color:rt.text3 }} />}
         </div>
-        <div style={{ fontFamily:DISPLAY_SERIF, fontSize:FONT.size.xl2, fontWeight:FONT.weight.medium, color:rt.text, marginBottom:8 }}>
+        <div style={{ fontFamily:SANS, fontSize:FONT.size.xl2, fontWeight:FONT.weight.bold, color:rt.text, marginBottom:8 }}>
           {done ? 'Session complete' : 'Paused'}
         </div>
         <div style={{ fontSize:FONT.size.base, color:rt.text3, marginBottom:6 }}>
@@ -1269,9 +1269,8 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                 )}
               </div>
 
-              {/* Title — always visible, editorial serif to match the
-                  overview screen's own display moments. */}
-              <div style={{ fontFamily:DISPLAY_SERIF, fontSize:FONT.size.xl2, fontWeight:FONT.weight.medium,
+              {/* Title — always visible. */}
+              <div style={{ fontFamily:SANS, fontSize:FONT.size.xl2, fontWeight:FONT.weight.bold,
                 color:rt.text, lineHeight:1.4, marginBottom:SPACE.xl }}>
                 {card.title}
               </div>

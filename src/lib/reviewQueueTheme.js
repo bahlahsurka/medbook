@@ -16,8 +16,11 @@
 // 4px spacing grid and motion curve, per "reuse existing tokens where
 // appropriate."
 //
-// Palette direction: warm graphite (not cold slate, not pure black/white),
-// a single restrained aubergine for brand/selection, and three distinct
+// Palette direction: warm graphite (not cold slate, not pure black/white,
+// and deliberately NOT violet-tinted — the neutrals below are as close to
+// true neutral as a "warm" graphite gets, so purple reads only where it's
+// meant to: the restrained aubergine accent/selection color, used with
+// intention rather than bleeding into every surface) and three distinct
 // warm semantic accents (muted burgundy for "due", soft antique gold for
 // "new", sage for success) so due/new/priority states stay legible without
 // leaning on the brand color for everything. Every surface/border/text tier
@@ -29,24 +32,27 @@ export function getReviewQueueTheme(isDark) {
 }
 
 const DARK = {
-  // Page / deep background — warm near-black with a whisper of violet, not
-  // a cold slate or pure #000.
-  page: '#141219',
+  // Page / deep background — a true warm-neutral near-black graphite, not
+  // a cold slate, not pure #000, and (unlike an earlier pass) not tinted
+  // violet either — the whole neutral scale below sits within a couple of
+  // RGB units of true gray, so the only purple on screen is the deliberate
+  // accent color below, not the backdrop it sits on.
+  page: '#161516',
   // Primary containers (the setup card, the active review card) — richer
   // contrast against the page than a "secondary" surface gets.
-  surface: '#1c1922',
-  surfaceRaised: '#221f2a',   // the active card itself, one step up
+  surface: '#1e1c1e',
+  surfaceRaised: '#252225',   // the active card itself, one step up
   // Recessed — insets, the track behind a selected-chip fill, the progress
   // bar's own background.
-  surfaceSunken: '#100e14',
+  surfaceSunken: '#111011',
   // Secondary elements (chips, pills) get a quieter fill than primary
   // containers, matching the brief's "subtle outlines for secondary
   // elements."
-  surfaceQuiet: '#1f1c25',
+  surfaceQuiet: '#201e20',
 
   // Borders — two distinct weights, not one border color reused everywhere.
-  border: '#2a2732',          // subtle, for secondary elements
-  borderRich: '#423c4e',      // richer, for primary containers
+  border: '#2c2a2c',          // subtle, for secondary elements
+  borderRich: '#423f42',      // richer, for primary containers
 
   // Text tiers.
   text: '#efeaf2',            // primary — warm off-white, not pure white
@@ -54,10 +60,14 @@ const DARK = {
   text3: '#968ea2',           // tertiary / metadata
   text4: '#6c6577',           // quaternary / faint, disabled-adjacent
 
-  // Brand / selected state — one restrained aubergine, used with intention.
+  // Brand / selected state — one restrained aubergine, used with intention
+  // (a border + a low-alpha wash for "selected", never a solid fill across
+  // multiple chips at once — see accentBg below, which is what selection
+  // actually uses now).
   accent: '#b08bdb',
   accentStrong: '#c7a8e8',    // hover/active text-on-accent moments
-  accentDeep: '#4f3862',      // selected-chip fill base (paired w/ accentBg)
+  accentDeep: '#4f3862',      // reserved for small, singular accents only
+                               // (e.g. a hover shadow tint) — NOT a chip fill
   accentBg: 'rgba(176,139,219,0.14)',
   accentBorder: 'rgba(176,139,219,0.45)',
 
@@ -125,10 +135,3 @@ const LIGHT = {
   shadow: 'rgba(40,32,20,0.1)',
   shadowRich: 'rgba(40,32,20,0.18)',
 };
-
-// Editorial display serif — used ONLY for the page title and the two
-// headline due/new numbers (the brief's "selected display/section
-// moments"). Every label, button, filter chip, and body of study content
-// stays on Inter for scanability. Loaded in public/index.html alongside
-// Inter.
-export const DISPLAY_SERIF = "'Fraunces', Georgia, serif";
