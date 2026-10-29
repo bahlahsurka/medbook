@@ -187,6 +187,17 @@ function formatDays(d) {
   return `${(d / 365).toFixed(1)}y`;
 }
 
+// Display-only cap for the "Due Today" count — a literal count in the
+// hundreds reads as alarming/overwhelming rather than useful, so anything
+// past DUE_DISPLAY_CAP shows as "50+" instead of the exact number. Purely
+// cosmetic: the real dueCount this is derived from is untouched, so a Due
+// session still pulls every card that's actually due, exactly as before —
+// only the headline number and the "Due (N)" mode button label are capped.
+const DUE_DISPLAY_CAP = 50;
+function formatDueCount(n) {
+  return n > DUE_DISPLAY_CAP ? `${DUE_DISPLAY_CAP}+` : String(n);
+}
+
 // Short, human description of the current session configuration — read by
 // the CTA panel's summary line. Pure presentation; reads the same filter
 // state the controls themselves set, never a second source of truth.
@@ -852,7 +863,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                   <div style={{ flex:1 }}>
                     <div style={{ fontFamily:SANS, fontSize:FONT.size.display, fontWeight:FONT.weight.bold,
                       color: dueCount>0 ? rt.due : rt.text, lineHeight:1, letterSpacing:-1, fontVariantNumeric:'tabular-nums' }}>
-                      {dueCount}
+                      {formatDueCount(dueCount)}
                     </div>
                     <div style={{ fontSize:FONT.size.xs, color:rt.text3, letterSpacing:.6, fontWeight:FONT.weight.semibold,
                       textTransform:'uppercase', marginTop:8 }}>
@@ -929,7 +940,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                   <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
                     {[
                       { key:'all', label:'All' },
-                      { key:'due', label:`Due (${dueCount})` },
+                      { key:'due', label:`Due (${formatDueCount(dueCount)})` },
                       { key:'new', label:`New (${newCount})` },
                     ].map(f => (
                       <button key={f.key} className="mb-rq-chip" onClick={()=>setFilterMode(f.key)} style={{
