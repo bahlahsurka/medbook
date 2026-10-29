@@ -496,7 +496,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
 
                 {!flipped ? (
                   <button className="mb-sr-btn" onClick={()=>setFlipped(true)} style={{width:'100%',
-                    background:t.surface2,border:`2px dashed ${t.borderStrong}`,borderRadius:RADIUS.md,
+                    background:t.surface2,border:`2px solid ${t.borderStrong}`,borderRadius:RADIUS.pill,
                     padding:16,fontSize:FONT.size.md,color:t.text3,cursor:'pointer',
                     fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif'}}>
                     Tap to reveal <span style={{opacity:.7,fontWeight:FONT.weight.regular}}>· Space</span>

@@ -12,8 +12,15 @@ import { loadSession, saveSession, clearSession, newSessionId } from '../lib/rev
 import { flushStudySessionNow } from '../lib/useStudySession';
 import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
 import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
-  IconX, IconZap } from '../lib/icons';
+  IconX, IconZap, IconEdit } from '../lib/icons';
 import RichRuns from '../lib/RichRuns';
+import { rawOffsetAt } from './DetailView';
+import { clearRange } from '../lib/useHighlight';
+import { adjustHighlights, matchHighlightShortcutEditing } from '../lib/highlights';
+import { STUDY_SCOPE_CLASS, suppressContextMenu } from '../lib/studyInteraction';
+import { toTitleCase } from '../lib/titleCase';
+import { sanitizeForStorage } from '../lib/bulletList';
+import HLPopover from './HLPopover';
 
 const SANS = 'Inter,sans-serif';
 
@@ -126,6 +133,23 @@ const RATINGS = [
   { key:'easy',  label:'Easy',  tone:'ok'     },
 ];
 
+// The rating bar's four buttons used to borrow rt's own due/warn/accent/
+// success tokens for their color — fine in dark mode (those are plain red/
+// amber/blue/green there), but in LIGHT mode rt's accent and success are
+// both earthy greens (forest accent vs sage success) and due/warn are both
+// browns, so all four buttons read as one muddy, nearly-indistinguishable
+// tan/olive block instead of four clearly different ratings. Per explicit
+// feedback, only THIS box reverts to the app's original, unambiguous
+// red/amber/blue/green identity (lib/theme.js's own LIGHT danger/warn/
+// accent/ok) — every other light-mode surface keeps the cream/sage palette
+// from the redesign untouched.
+const RATING_COLORS_LIGHT = {
+  danger: '#dc2626', dangerBg: '#fef2f2',
+  warn:   '#d97706', warnBg:   '#fffbeb',
+  accent: '#2563eb', accentBg: '#eff6ff',
+  ok:     '#16a34a', okBg:     '#f0fdf4',
+};
+
 // Deliberately just these three (+ "All" below) — not the full DIFFICULTY
 // list from lib/constants.js, which also has "Flagged". This filter is
 // about how hard an entry is to review, not about flagging; Flagged stays
@@ -210,8 +234,19 @@ function describeSession(mode, systemCount, difficulty) {
 }
 
 export default function ReviewQueue({ allEntries, onReviewed, userSystems, initialFilterSystem, userId }) {
-  const { isDark } = useTheme();
+  const { isDark, t } = useTheme();
   const rt = getReviewQueueTheme(isDark);
+
+  // HLPopover normally renders with the app's plain global theme (fine on
+  // DetailView's plain white/near-black surfaces) — against this screen's
+  // own warm cream/sage (light) or blue/black (dark) card, that read as a
+  // stark, mismatched box. Mapping rt's own tokens onto the handful
+  // HLPopover actually uses keeps the popover's colors part of THIS card's
+  // palette instead of floating on top of it looking out of place.
+  const hlPopoverColors = useMemo(() => ({
+    text2: rt.text2, surface: rt.surface, border: rt.border,
+    shadowStrong: rt.shadowRich, danger: rt.due, text4: rt.text4,
+  }), [rt]);
 
   // Always-current entries, WITHOUT making the queue rebuild on every rating.
   // (Rebuilding mid-session makes the list shift under the cursor and skip cards.)
@@ -235,6 +270,28 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   const [ended, setEnded]       = useState(false); // user paused midway
   const [lightboxIdx, setLightboxIdx] = useState(null); // index into card.images, or null
   const [cardLimit, setCardLimit] = useState('all'); // 'all' | exact card count for this session
+
+  // Subtle "quick edit" window — a small Edit button in the header toolbar
+  // opens this, lets the current card's title/notes be lightly corrected
+  // without leaving the review flow, then returns to the exact same
+  // position (idx/flipped/timer all untouched). Deliberately NOT the full
+  // DetailView editor (images/difficulty aren't editable here) — this is
+  // meant for a quick typo-level fix mid-review, not a replacement for it.
+  const [editingCard, setEditingCard] = useState(false);
+  const [editTitleField, setEditTitleField] = useState('');
+  const [editNotesField, setEditNotesField] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editErr, setEditErr] = useState('');
+
+  // View-mode highlighting of the revealed answer — same model as
+  // DetailView.js's view-mode highlight mechanism (selection tracked as raw-
+  // string offsets via rawOffsetAt, a floating HLPopover, Alt+letter
+  // shortcuts), reused here rather than reinvented. notesRef is attached to
+  // the answer's rendered-notes container below.
+  const notesRef = useRef(null);
+  const [selRect, setSelRect] = useState(null);
+  const [selRange, setSelRange] = useState(null); // { start, end }
+  const pointerDownRef = useRef(false);
 
   // Count-up session timer — elapsedSec is the authoritative displayed/
   // persisted value, ticking via timerRunning rather than a raw Date.now()
@@ -526,6 +583,162 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   const cardHasKeyPoints = hasKeyPoints(cardAiSections);
   const cardHasImages = card?.images?.length > 0;
 
+  // Persists a partial update to the current card to Supabase-synced app
+  // state immediately — the same {...card, ...updates} shape rate() below
+  // already uses for onReviewed — AND into this screen's own `queue` copy,
+  // so the edit/highlight is visible on THIS card right away. `queue` is a
+  // one-time snapshot (see its own comment above `entriesRef`), so without
+  // the local patch too, an edit made here would only show up the next time
+  // this entry happened to be queued into a future session.
+  const updateCardInPlace = (updates) => {
+    setQueue(q => q.map((c, i) => (i === idx ? { ...c, ...updates } : c)));
+    onReviewed({ ...card, ...updates });
+  };
+
+  // ── Quick edit (subtle header-bar Edit button) ───────────────────────────
+  const openEditCard = () => {
+    if (!card) return;
+    setEditTitleField(card.title);
+    setEditNotesField(card.notes || '');
+    setEditErr('');
+    setEditingCard(true);
+  };
+  const cancelEditCard = () => { setEditingCard(false); setEditErr(''); };
+  const saveEditCard = async () => {
+    if (!card) return;
+    const trimmedTitle = editTitleField.trim();
+    if (!trimmedTitle) { setEditErr('Title required'); return; }
+    setSavingEdit(true); setEditErr('');
+    const newTitle = sanitizeForStorage(toTitleCase(trimmedTitle));
+    const newNotes = sanitizeForStorage(editNotesField.trim());
+    // Editing the notes shifts every character offset after the edit point —
+    // adjustHighlights (the same diff-based shift DetailView.js's own save
+    // uses) keeps existing highlights pointing at the same words instead of
+    // drifting or getting silently dropped.
+    const newHighlights = adjustHighlights(card.notes || '', newNotes, card.highlights || []);
+    const { error } = await supabase.from('entries')
+      .update({ title: newTitle, notes: newNotes, highlights: newHighlights })
+      .eq('id', card.id);
+    setSavingEdit(false);
+    if (error) { setEditErr(error.message); return; }
+    updateCardInPlace({ title: newTitle, notes: newNotes, highlights: newHighlights });
+    setEditingCard(false);
+  };
+
+  // ── View-mode highlighting of the revealed answer ────────────────────────
+  // Same model as DetailView.js's own view-mode highlight mechanism (see its
+  // header comment for the full "why"): selection is read in raw-string
+  // offsets via rawOffsetAt (that file's export — RichRuns.js's
+  // data-raw-start annotation this walks is identical here, since this
+  // screen's RenderedNotes renders through the exact same RichRuns), synced
+  // on every selectionchange, and never gated on pointerDown for selRange
+  // itself (only for repositioning the floating popover) — see that file's
+  // comment on the Android handle-drag fix this preserves.
+  const readCardSelection = () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !notesRef.current) return null;
+    const range = sel.getRangeAt(0);
+    if (!notesRef.current.contains(range.commonAncestorContainer)) return null;
+    const start = rawOffsetAt(range.startContainer, range.startOffset);
+    const end   = rawOffsetAt(range.endContainer, range.endOffset);
+    if (start == null || end == null || start >= end) return null;
+    const text = range.toString();
+    if (!text.trim()) return null;
+    const r = range.getBoundingClientRect();
+    if (!r || (r.width === 0 && r.height === 0)) return null;
+    return { start, end, rect: r, text };
+  };
+  const clearCardSelState = () => { setSelRect(null); setSelRange(null); };
+
+  useEffect(() => {
+    if (!flipped || editingCard) { clearCardSelState(); return; }
+    const sync = () => {
+      const s = readCardSelection();
+      if (!s) { clearCardSelState(); return; }
+      setSelRange({ start: s.start, end: s.end });
+      if (!pointerDownRef.current) setSelRect(s.rect);
+    };
+    const onDown = () => { pointerDownRef.current = true; };
+    const onUp   = () => { pointerDownRef.current = false; sync(); };
+    const onScrollOrResize = () => {
+      const s = readCardSelection();
+      setSelRect(s ? s.rect : null);
+    };
+    document.addEventListener('selectionchange', sync);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchstart', onDown, { passive: true });
+    document.addEventListener('touchend', onUp);
+    window.addEventListener('scroll', onScrollOrResize, true);
+    window.addEventListener('resize', onScrollOrResize);
+    return () => {
+      document.removeEventListener('selectionchange', sync);
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('touchstart', onDown);
+      document.removeEventListener('touchend', onUp);
+      window.removeEventListener('scroll', onScrollOrResize, true);
+      window.removeEventListener('resize', onScrollOrResize);
+    };
+  }, [flipped, editingCard, idx]);
+
+  const selHasHighlight = !!selRange && (card?.highlights || []).some(h => h.start < selRange.end && h.end > selRange.start);
+
+  const applyCardHL = (c) => {
+    const s = readCardSelection();
+    if (!s || !card) return;
+    const newHl = [...clearRange(card.highlights || [], s.start, s.end), { start: s.start, end: s.end, color: c }]
+      .sort((a, b) => a.start - b.start);
+    window.getSelection()?.removeAllRanges();
+    clearCardSelState();
+    supabase.from('entries').update({ highlights: newHl }).eq('id', card.id).then(()=>{});
+    updateCardInPlace({ highlights: newHl });
+  };
+  const removeCardHL = () => {
+    const s = readCardSelection();
+    if (!s || !card) return;
+    const newHl = clearRange(card.highlights || [], s.start, s.end);
+    window.getSelection()?.removeAllRanges();
+    clearCardSelState();
+    supabase.from('entries').update({ highlights: newHl }).eq('id', card.id).then(()=>{});
+    updateCardInPlace({ highlights: newHl });
+  };
+  const copyCardSelection = async () => {
+    const s = readCardSelection();
+    if (!s) return;
+    try { await navigator.clipboard.writeText(s.text); }
+    catch {
+      const ta = document.createElement('textarea');
+      ta.value = s.text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch {}
+      ta.remove();
+    }
+    window.getSelection()?.removeAllRanges();
+    clearCardSelState();
+  };
+
+  // Bare mnemonic letters (y/g/b/p/o/r) already mean "Good"/"Hard"/"Again"
+  // in this screen's own rating shortcuts (useReviewKeyboard below), so the
+  // view-mode shortcut used here is the Alt-gated variant
+  // (matchHighlightShortcutEditing — Alt+Y/G/B/P/O, Alt+R to remove), same
+  // letters DetailView.js's EDIT mode uses for the identical reason.
+  // useReviewKeyboard itself already bails out whenever e.altKey is set, so
+  // there's no risk of a highlight shortcut also triggering a rating.
+  useEffect(() => {
+    if (!flipped || editingCard) return;
+    const isTypingTarget = (el) => !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+    const onKeyDown = (e) => {
+      if (isTypingTarget(document.activeElement)) return;
+      const m = matchHighlightShortcutEditing(e);
+      if (!m || !readCardSelection()) return;
+      e.preventDefault();
+      if (m.remove) removeCardHL(); else applyCardHL(m.color);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [flipped, editingCard, card]);
+
   // This screen's own prev/counter/pause cluster and progress fill portal
   // into App.js's PERSISTENT header bar (#mb-study-toolbar-slot and
   // #mb-header-progress-slot) instead of a second header row drawn inside
@@ -545,7 +758,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   // Keyboard: Space=reveal, Enter=Easy, g=Good, h=Hard, a=Again.
   // Disabled on the overview screen, once the session is over, or while the
   // image lightbox is open on top.
-  useReviewKeyboard(sessionStarted && !done && !ended && !!card && lightboxIdx===null, {
+  useReviewKeyboard(sessionStarted && !done && !ended && !!card && lightboxIdx===null && !editingCard, {
     flipped, onFlip: () => setFlipped(true),
     onAgain: () => rate('again'), onHard: () => rate('hard'),
     onGood: () => rate('good'),   onEasy: () => rate('easy'),
@@ -1175,12 +1388,14 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     acc[r.key] = formatDays(calcNext(card, r.key).review_interval);
     return acc;
   }, {}) : {};
-  const toneColor = {
-    danger: rt.due, warn: rt.warn, accent: rt.accent, ok: rt.success,
-  };
-  const toneBg = {
-    danger: rt.dueBg, warn: rt.warnBg, accent: rt.accentBg, ok: rt.successBg,
-  };
+  const toneColor = isDark
+    ? { danger: rt.due, warn: rt.warn, accent: rt.accent, ok: rt.success }
+    : { danger: RATING_COLORS_LIGHT.danger, warn: RATING_COLORS_LIGHT.warn,
+        accent: RATING_COLORS_LIGHT.accent, ok: RATING_COLORS_LIGHT.ok };
+  const toneBg = isDark
+    ? { danger: rt.dueBg, warn: rt.warnBg, accent: rt.accentBg, ok: rt.successBg }
+    : { danger: RATING_COLORS_LIGHT.dangerBg, warn: RATING_COLORS_LIGHT.warnBg,
+        accent: RATING_COLORS_LIGHT.accentBg, ok: RATING_COLORS_LIGHT.okBg };
 
   // A side column only appears once the answer is revealed AND there's
   // actually something to put in it (images or key points) — never an
@@ -1196,12 +1411,95 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
         <Lightbox images={card.images} start={lightboxIdx} onClose={()=>setLightboxIdx(null)} />
       )}
 
+      {/* Floating highlight bar — appears only once real text is selected
+          inside the revealed answer; nothing on-screen hints at this until
+          then, per "subtle, hidden feature." */}
+      {flipped && !editingCard && selRect && (
+        <HLPopover
+          rect={selRect}
+          onApply={applyCardHL}
+          onRemove={removeCardHL}
+          onCopy={copyCardSelection}
+          hasHighlightInSelection={selHasHighlight}
+          colors={hlPopoverColors}
+        />
+      )}
+
+      {/* Quick-edit overlay — opened by the small Edit button portaled into
+          the header bar below. Title/notes only (not the full DetailView
+          editor), so a small correction can be made and saved without
+          leaving this screen or disturbing idx/flipped/the session timer. */}
+      {editingCard && card && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', zIndex:Z.lightbox,
+          display:'flex', alignItems:'center', justifyContent:'center', padding:SPACE.lg,
+          animation:`medbook-scrim-in ${MOTION.normal} ${MOTION.ease}` }}
+          onClick={cancelEditCard}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:rt.surface, border:`1px solid ${rt.borderRich}`,
+            borderRadius:RADIUS.xl2, padding:SPACE.xl, width:'100%', maxWidth:480, maxHeight:'85vh', overflowY:'auto',
+            boxShadow:`0 24px 48px -20px ${rt.shadowRich}`, fontFamily:SANS, boxSizing:'border-box' }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:SPACE.lg }}>
+              <div style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.bold, color:rt.text, letterSpacing:.2 }}>Quick edit</div>
+              <button onClick={cancelEditCard} title="Close" aria-label="Close" style={{
+                background:'none', border:'none', color:rt.text3, cursor:'pointer', padding:4,
+                display:'flex', alignItems:'center', justifyContent:'center' }}><IconX size={16} /></button>
+            </div>
+
+            <label style={{ display:'block', fontSize:FONT.size.micro, color:rt.text4, letterSpacing:.6,
+              textTransform:'uppercase', fontWeight:FONT.weight.semibold, marginBottom:6 }}>Title</label>
+            <input value={editTitleField} onChange={e=>setEditTitleField(e.target.value)} style={{
+              width:'100%', background:rt.surfaceSunken, border:`1px solid ${rt.border}`, borderRadius:RADIUS.md,
+              color:rt.text, padding:'10px 12px', fontSize:FONT.size.md, outline:'none', boxSizing:'border-box',
+              fontFamily:SANS, marginBottom:SPACE.md }} />
+
+            <label style={{ display:'block', fontSize:FONT.size.micro, color:rt.text4, letterSpacing:.6,
+              textTransform:'uppercase', fontWeight:FONT.weight.semibold, marginBottom:6 }}>Notes</label>
+            <textarea value={editNotesField} onChange={e=>setEditNotesField(e.target.value)} rows={8} style={{
+              width:'100%', background:rt.surfaceSunken, border:`1px solid ${rt.border}`, borderRadius:RADIUS.md,
+              color:rt.text, padding:'10px 12px', fontSize:FONT.size.md, outline:'none', boxSizing:'border-box',
+              fontFamily:SANS, resize:'vertical', marginBottom:SPACE.md }} />
+
+            {editErr && <div style={{ color:rt.due, fontSize:FONT.size.sm, marginBottom:SPACE.md }}>{editErr}</div>}
+
+            <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
+              <button onClick={cancelEditCard} disabled={savingEdit} style={{
+                background:'none', border:`1px solid ${rt.border}`, color:rt.text2, borderRadius:RADIUS.md,
+                padding:'9px 16px', fontSize:FONT.size.sm, fontWeight:FONT.weight.medium, cursor:'pointer', fontFamily:SANS }}>
+                Cancel
+              </button>
+              <button onClick={saveEditCard} disabled={savingEdit} style={{
+                background:rt.accent, border:'none', color:'#fff', borderRadius:RADIUS.md,
+                padding:'9px 16px', fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, cursor:'pointer', fontFamily:SANS,
+                opacity:savingEdit?.7:1 }}>
+                {savingEdit ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Prev/counter/pause — portaled into App.js's persistent header bar
           (see the headerSlot effect above) instead of a row drawn here, so
           this component contributes NOTHING to the top of the screen and
           the card gets the full height below the app's own header. */}
       {headerSlot && createPortal(
         <div style={{ display:'flex', alignItems:'center', gap:6, marginLeft:'auto' }}>
+          {/* Subtle quick-edit entry point — a small icon-only button, same
+              size/weight as Prev/Pause beside it, deliberately not called
+              out as its own feature. Opens a tiny overlay (below) and
+              returns to this exact card/position on save or cancel. Only
+              shown once the answer is revealed — before that, there's
+              nothing on screen yet worth a quick correction, and an Edit
+              icon sitting there while still trying to recall the answer
+              from memory is a small, pointless hint. */}
+          {flipped && (
+            <button className="mb-headerbtn" onClick={openEditCard}
+              title="Edit this entry" aria-label="Edit this entry" style={{
+              background:'none', border:'none', color:rt.text3, padding:6, width:28, height:28,
+              borderRadius:RADIUS.sm, cursor:'pointer',
+              display:'flex', alignItems:'center', justifyContent:'center' }}>
+              <IconEdit size={13} />
+            </button>
+          )}
           <button className="mb-headerbtn" onClick={goPrev} disabled={idx===0}
             title="Previous card" aria-label="Previous card" style={{
             background:'none', border:'none', color: idx===0 ? rt.text4 : rt.text3,
@@ -1289,8 +1587,8 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
               {/* Answer */}
               {!flipped ? (
                 <button className="mb-rq-btn" onClick={()=>setFlipped(true)} style={{
-                  width:'100%', background:rt.surfaceSunken, border:`2px dashed ${rt.borderRich}`,
-                  borderRadius:RADIUS.md, padding:16, fontSize:FONT.size.md, color:rt.text3,
+                  width:'100%', background:rt.surfaceSunken, border:`2px solid ${rt.borderRich}`,
+                  borderRadius:RADIUS.pill, padding:16, fontSize:FONT.size.md, color:rt.text3,
                   cursor:'pointer', fontWeight:FONT.weight.semibold, fontFamily:SANS }}>
                   Tap to reveal <span style={{ opacity:.7, fontWeight:FONT.weight.regular }}>· Space</span>
                 </button>
@@ -1303,7 +1601,9 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                     // answer gets real room instead of a small inner
                     // scrollbox. maxWidth keeps the LINE LENGTH readable
                     // even though the card column itself can be wide.
-                    <div style={{ fontSize:FONT.size.lg, color:rt.text2, lineHeight:1.75,
+                    <div ref={notesRef} className={STUDY_SCOPE_CLASS} data-selectable="true"
+                      onContextMenu={suppressContextMenu}
+                      style={{ fontSize:FONT.size.lg, color:rt.text2, lineHeight:1.75,
                       whiteSpace:'pre-wrap', marginBottom:SPACE.lg, maxWidth:700 }}>
                       <RenderedNotes text={card.notes} highlights={card.highlights} isDark={isDark} />
                     </div>
@@ -1337,8 +1637,18 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
             hunting for it. A top divider + upward shadow reads as an
             anchored action bar rather than content that happens to trail
             the card. */}
+        {/* background:t.bg (not rt.page) — rt.page is this screen's own
+            bespoke card-gradient token and was never actually the real
+            backdrop behind this sticky footer (nothing else in this file
+            uses it as a page background); it just sat here as a leftover,
+            reading as a visibly mismatched tan/dark box floating on the
+            app's real page color. t.bg is that real color — the same one
+            already showing everywhere else around the card — so this
+            footer now blends into the page instead of standing apart from
+            it, while staying opaque enough to still mask the card's own
+            content scrolling underneath it. */}
         {flipped ? (
-          <div className="mb-rq-fade mb-rq-ratingbar" style={{ position:'sticky', bottom:0, background:rt.page }}>
+          <div className="mb-rq-fade mb-rq-ratingbar" style={{ position:'sticky', bottom:0, background:t.bg }}>
             <div style={{ fontSize:FONT.size.xs, color:rt.text4, fontWeight:FONT.weight.semibold,
               textAlign:'center', marginBottom:SPACE.sm+2, letterSpacing:.4 }}>
               How well did you know this?
