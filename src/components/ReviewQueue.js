@@ -234,7 +234,7 @@ function describeSession(mode, systemCount, difficulty) {
 }
 
 export default function ReviewQueue({ allEntries, onReviewed, userSystems, initialFilterSystem, userId }) {
-  const { isDark } = useTheme();
+  const { isDark, t } = useTheme();
   const rt = getReviewQueueTheme(isDark);
 
   // HLPopover normally renders with the app's plain global theme (fine on
@@ -1637,8 +1637,18 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
             hunting for it. A top divider + upward shadow reads as an
             anchored action bar rather than content that happens to trail
             the card. */}
+        {/* background:t.bg (not rt.page) — rt.page is this screen's own
+            bespoke card-gradient token and was never actually the real
+            backdrop behind this sticky footer (nothing else in this file
+            uses it as a page background); it just sat here as a leftover,
+            reading as a visibly mismatched tan/dark box floating on the
+            app's real page color. t.bg is that real color — the same one
+            already showing everywhere else around the card — so this
+            footer now blends into the page instead of standing apart from
+            it, while staying opaque enough to still mask the card's own
+            content scrolling underneath it. */}
         {flipped ? (
-          <div className="mb-rq-fade mb-rq-ratingbar" style={{ position:'sticky', bottom:0, background:rt.page }}>
+          <div className="mb-rq-fade mb-rq-ratingbar" style={{ position:'sticky', bottom:0, background:t.bg }}>
             <div style={{ fontSize:FONT.size.xs, color:rt.text4, fontWeight:FONT.weight.semibold,
               textAlign:'center', marginBottom:SPACE.sm+2, letterSpacing:.4 }}>
               How well did you know this?
