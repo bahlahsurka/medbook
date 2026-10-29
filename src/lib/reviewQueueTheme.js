@@ -15,85 +15,77 @@
 // 4px spacing grid and motion curve, per "reuse existing tokens where
 // appropriate."
 //
-// Palette direction: a sage-green / cream / warm-tan family (five supplied
-// anchor colors — #76B7A6, #A9D7C8, #FFF2DA, #EBCFB1, #3F6A5E — deliberately
-// NOT a purple/aubergine identity), read as calm and organic rather than a
-// generic "AI SaaS" dark-plus-violet look. Both ends of the green range get
-// used, one per theme: the deep forest tone (#3F6A5E) anchors the LIGHT
-// mode accent (dark enough to read on a cream page), and the brighter
-// medium sage (#76B7A6) anchors the DARK mode accent (light enough to read
-// on a near-black page) — plus the given mint (#A9D7C8) and tan (#EBCFB1)
-// reused directly for a hover tint and the "new" semantic color
-// respectively. Semantic states each keep their own hue family (terracotta
-// for "due", tan/gold for "new", sage for "success") so due/new/priority
-// states stay legible without leaning on the brand color for everything.
+// Palette direction:
+//   - LIGHT mode keeps the sage-green / cream / warm-tan family (five
+//     supplied anchor colors — #76B7A6, #A9D7C8, #FFF2DA, #EBCFB1, #3F6A5E).
+//   - DARK mode is deliberately NOT part of that bespoke identity — per
+//     explicit user feedback asking for "the original blue and black best
+//     color palette" back, DARK is instead derived directly from lib/
+//     theme.js's own DARK export (the same near-black/blue-accent identity
+//     every other screen already uses), so Review Queue's dark mode reads
+//     as the rest of the app again rather than its own standalone brand.
+//     Semantic states (due/fresh/success/warn) are likewise pulled from
+//     lib/theme.js's existing danger/ok/warn tokens where one exists, so
+//     a rating button here matches the same hue it would anywhere else.
 
 export function getReviewQueueTheme(isDark) {
   return isDark ? DARK : LIGHT;
 }
 
 const DARK = {
-  // Page / deep background — a true warm-neutral near-black graphite, with
-  // only the faintest cool-green whisper (not a cold slate, not pure #000,
-  // and not tinted toward any one hue strongly enough to read as "colored
-  // surfaces" — the palette's identity lives in the accent/semantic colors
-  // below, not bled into the backdrop).
-  page: '#151817',
-  // Primary containers (the setup card, the active review card) — richer
-  // contrast against the page than a "secondary" surface gets.
-  surface: '#1d201e',
-  surfaceRaised: '#252825',   // the active card itself, one step up
+  // Page / deep background — lib/theme.js DARK.bg, the same near-black
+  // every other screen's dark mode sits on.
+  page: '#0d0f13',
+  // Primary containers (the setup card, the active review card).
+  surface: '#181b21',
+  surfaceRaised: '#22262e',   // the active card itself, one step up
   // Recessed — insets, the track behind a selected-chip fill, the progress
   // bar's own background.
-  surfaceSunken: '#101211',
+  surfaceSunken: '#090a0d',
   // Secondary elements (chips, pills) get a quieter fill than primary
-  // containers, matching the brief's "subtle outlines for secondary
-  // elements."
-  surfaceQuiet: '#1f2220',
+  // containers.
+  surfaceQuiet: '#14171c',
 
   // Borders — two distinct weights, not one border color reused everywhere.
-  border: '#2a2d2b',          // subtle, for secondary elements
-  borderRich: '#40443f',      // richer, for primary containers
+  border: '#2c313a',          // subtle, for secondary elements
+  borderRich: '#3a404b',      // richer, for primary containers
 
-  // Text tiers.
-  text: '#eef3ef',            // primary — warm off-white, not pure white
-  text2: '#c6cec8',           // secondary
-  text3: '#95a099',           // tertiary / metadata
-  text4: '#69746d',           // quaternary / faint, disabled-adjacent
+  // Text tiers — lib/theme.js DARK's own text scale.
+  text: '#f1f3f5',
+  text2: '#c7ccd4',
+  text3: '#9aa2ad',
+  text4: '#6b7280',
 
-  // Brand / selected state — the given medium sage, bright enough to read
-  // on a near-black page. One restrained accent, used with intention (a
-  // border + a low-alpha wash for "selected", never a solid fill across
-  // multiple chips at once — see accentBg below, which is what selection
-  // actually uses).
-  accent: '#76B7A6',
-  accentStrong: '#A9D7C8',    // the given mint — hover/active text-on-accent
-  accentDeep: '#3F6A5E',      // reserved for small, singular accents only
+  // Brand / selected state — lib/theme.js DARK's own blue accent.
+  accent: '#3b82f6',
+  accentStrong: '#60a5fa',    // lighter blue — hover/active text-on-accent
+  accentDeep: '#1d4ed8',      // deep blue — small singular accents only
                                // (e.g. a hover shadow tint) — NOT a chip fill
-  accentBg: 'rgba(118,183,166,0.16)',
-  accentBorder: 'rgba(118,183,166,0.45)',
+  accentBg: 'rgba(59,130,246,0.16)',
+  accentBorder: 'rgba(59,130,246,0.4)',
 
-  // Semantic states — each its own hue family, not tints of the accent.
-  due: '#d98f68',             // warm terracotta
-  dueBg: 'rgba(217,143,104,0.14)',
-  dueBorder: 'rgba(217,143,104,0.38)',
+  // Semantic states — matching lib/theme.js DARK's own danger/ok/warn hues,
+  // plus a sky-blue "fresh" that stays in the blue family while reading
+  // distinct from the main accent.
+  due: '#f87171',             // lib/theme.js DARK.danger
+  dueBg: 'rgba(220,38,38,0.14)',
+  dueBorder: 'rgba(220,38,38,0.38)',
 
-  fresh: '#EBCFB1',           // the given tan, used directly — reads well
-  freshBg: 'rgba(235,207,177,0.14)',
-  freshBorder: 'rgba(235,207,177,0.36)',
+  fresh: '#38bdf8',
+  freshBg: 'rgba(56,189,248,0.14)',
+  freshBorder: 'rgba(56,189,248,0.36)',
 
-  success: '#8fcdb0',
-  successBg: 'rgba(143,205,176,0.14)',
-  successBorder: 'rgba(143,205,176,0.36)',
+  success: '#4ade80',         // lib/theme.js DARK.ok
+  successBg: 'rgba(22,163,74,0.14)',
+  successBorder: 'rgba(22,163,74,0.38)',
 
-  warn: '#d9a855',
-  warnBg: 'rgba(217,168,85,0.14)',
-  warnBorder: 'rgba(217,168,85,0.36)',
+  warn: '#fbbf24',            // lib/theme.js DARK.warn
+  warnBg: 'rgba(217,119,6,0.14)',
+  warnBorder: 'rgba(217,119,6,0.4)',
 
-  // Shadows — warm-tinted, not neutral black, so elevation reads as part
-  // of the same material rather than a generic drop-shadow.
-  shadow: 'rgba(8,10,9,0.45)',
-  shadowRich: 'rgba(8,10,9,0.6)',
+  // Shadows — neutral black, matching lib/theme.js DARK's own shadow tokens.
+  shadow: 'rgba(0,0,0,.5)',
+  shadowRich: 'rgba(0,0,0,.6)',
 };
 
 const LIGHT = {
