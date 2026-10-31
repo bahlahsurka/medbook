@@ -36,10 +36,10 @@
 // coverage. review_count is the field that has been authoritatively
 // incremented since review scheduling itself existed, so it — not
 // review_log — is what Reviewed/Total/Coverage are computed from everywhere
-// in this module. review_log is still the right (and here, the only)
-// source for "first review happened today" in fetchDailyActivity() below,
-// but that function has to work around the exact same gap explicitly — see
-// its own comment.
+// in this module. review_log is still the right source for today/this-week
+// activity in fetchDailyActivity() below — a reviewed-today count and a
+// time-spent estimate only ever need RECENT rows, not full lifetime
+// coverage, so the gap above doesn't affect them.
 //
 // review_log.entry_id carries `ON DELETE CASCADE` to entries.id (confirmed
 // against the live schema), so a deleted entry's review_log rows can never
@@ -170,79 +170,100 @@ export function flattenRegister(register) {
   ];
 }
 
+// Supabase/PostgREST caps a single request at 1000 rows (project default)
+// and silently truncates past it rather than erroring — see Insights.js's
+// own fetchAllRows for the first place this bit MedBook. A 7-day review_log
+// window is normally nowhere near that, but a heavy/long-running account
+// deserves the same safety net rather than a second, unguarded fetch path.
+const PAGE_SIZE = 1000;
+async function fetchAllRows(buildQuery) {
+  let all = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await buildQuery(from, from + PAGE_SIZE - 1);
+    if (error) return { data: null, error };
+    if (data) all = all.concat(data);
+    if (!data || data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return { data: all, error: null };
+}
+
 // ─── Daily activity ─────────────────────────────────────────────────────
 //
-// Two numbers, deliberately never mixed with Overall Syllabus Coverage:
+// Three figures, deliberately never mixed with Overall Syllabus Coverage
+// (that's cumulative; these are just today):
 //   reviewedActionsToday — every rating recorded today (review_log row
 //                          count), i.e. "review actions", not distinct
 //                          entries.
-//   firstTimeToday       — distinct ACTIVE entries whose true first-ever
-//                          review happened today.
+//   timeSpentTodaySeconds — active review study time today (see
+//                          computeTimeSpentSeconds below for the exact
+//                          schema-constrained formula).
 //
-// SCHEMA LIMITATION — read before changing firstTimeToday's logic:
-// review_log cannot, by itself, prove an entry's first-ever review date for
-// any entry whose review history predates full review_log coverage (see
-// this module's header comment — confirmed ~64% of already-reviewed entries
-// are affected). Naively taking MIN(reviewed_at) from review_log per entry
-// would misreport a long-since-reviewed entry's first POST-MIGRATION rating
-// as "first reviewed today." This function closes that gap the only way
-// the data allows: for each entry rated today, it also fetches that
-// entry's COMPLETE review_log history and compares the row count against
-// the entry's current review_count. Only when they match exactly (proof
-// review_log has captured every rating this entry has ever received, with
-// no pre-migration gap) does it trust review_log's MIN(reviewed_at) for
-// that entry — and only counts it as "first time today" if that true
-// minimum falls within today. Any entry with a gap is silently excluded
-// from this count rather than guessed at, which can only ever UNDERcount,
-// never overcount, "first reviewed today." A real fix (closing the gap for
-// every already-reviewed entry) would need a one-time backfill migration
-// inserting a synthetic review_log row — impossible to do accurately
-// because first-review TIMESTAMPS for the gap entries were never recorded
-// anywhere; only entries.last_reviewed (last, not first) survived.
-export async function fetchDailyActivity(userId, allEntriesObj) {
-  if (!userId) return { reviewedActionsToday: null, firstTimeToday: null };
+// SCHEMA — why this is built from review_log.reviewed_at rather than a
+// per-review duration field: review_log (user_id, entry_id, system,
+// rating, reviewed_at) has no duration column, and the one table that DOES
+// record a measured duration (review_sessions.duration_seconds, one row
+// per finished Review Queue session) is written ONLY by ReviewQueue.js —
+// SystemReview.js's per-system review modal and DetailView's single-card
+// "mark reviewed" both write review_log but never review_sessions. Using
+// review_sessions for Time Spent would silently undercount any review done
+// outside ReviewQueue.js's own session flow. review_log, by contrast, is
+// written by every review path, so reconstructing active time FROM its
+// timestamps (below) is the only source that covers all of them uniformly.
+export function computeTimeSpentSeconds(sortedMsTimestamps) {
+  if (!sortedMsTimestamps || sortedMsTimestamps.length === 0) return 0;
+  // A gap this long or longer means whatever came next is a fresh sitting,
+  // not a continuation of the same one (an open tab left idle, a lunch
+  // break) — so it resets the per-session baseline instead of being summed
+  // in as reviewing time.
+  const SESSION_GAP_SEC = 30 * 60;
+  // Within one sitting, the time between two consecutive ratings is a
+  // reasonable proxy for "time spent on the card that was just rated" —
+  // capped so a genuinely idle gap (stepped away mid-session, phone call)
+  // can't inflate the total.
+  const PER_REVIEW_CAP_SEC = 90;
+  // Credited once per sitting, for its first card — no preceding timestamp
+  // exists to measure that one against, so without this a session's first
+  // card would otherwise read as free.
+  const SESSION_BASELINE_SEC = 20;
 
-  const dayStart = new Date();
-  dayStart.setHours(0, 0, 0, 0);
-  const dayStartIso = dayStart.toISOString();
-
-  const countRes = await supabase.from('review_log')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId).gte('reviewed_at', dayStartIso);
-  if (countRes.error) return { reviewedActionsToday: null, firstTimeToday: null };
-  const reviewedActionsToday = countRes.count || 0;
-
-  const todayRows = await supabase.from('review_log')
-    .select('entry_id').eq('user_id', userId).gte('reviewed_at', dayStartIso);
-  if (todayRows.error) return { reviewedActionsToday, firstTimeToday: null };
-
-  const candidateIds = Array.from(new Set((todayRows.data || []).map(r => r.entry_id)));
-  if (candidateIds.length === 0) return { reviewedActionsToday, firstTimeToday: 0 };
-
-  const histRes = await supabase.from('review_log')
-    .select('entry_id,reviewed_at').eq('user_id', userId).in('entry_id', candidateIds);
-  if (histRes.error) return { reviewedActionsToday, firstTimeToday: null };
-
-  const perEntry = new Map();
-  for (const row of histRes.data || []) {
-    const agg = perEntry.get(row.entry_id) || { count: 0, min: null };
-    agg.count++;
-    const d = new Date(row.reviewed_at);
-    if (!agg.min || d < agg.min) agg.min = d;
-    perEntry.set(row.entry_id, agg);
+  let total = SESSION_BASELINE_SEC;
+  for (let i = 1; i < sortedMsTimestamps.length; i++) {
+    const gapSec = (sortedMsTimestamps[i] - sortedMsTimestamps[i - 1]) / 1000;
+    total += gapSec > SESSION_GAP_SEC ? SESSION_BASELINE_SEC : Math.min(gapSec, PER_REVIEW_CAP_SEC);
   }
+  return Math.round(total);
+}
 
-  const reviewCountById = new Map();
-  for (const list of Object.values(allEntriesObj || {})) {
-    for (const e of list) reviewCountById.set(e.id, e.review_count || 0);
-  }
+// "0m" / "28m" / "1h 14m" — same shape as Insights.js's own formatMinutes,
+// kept as a separate copy here (not imported) since that one lives in a
+// component file and takes whole minutes, not raw seconds.
+export function formatTimeSpent(totalSeconds) {
+  const mins = Math.round(totalSeconds / 60);
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
 
-  let firstTimeToday = 0;
-  for (const [entryId, agg] of perEntry) {
-    const currentReviewCount = reviewCountById.get(entryId);
-    if (currentReviewCount === undefined) continue; // no longer active — excluded
-    if (agg.count === currentReviewCount && agg.min >= dayStart) firstTimeToday++;
-  }
+export async function fetchDailyActivity(userId) {
+  if (!userId) return { reviewedActionsToday: null, timeSpentTodaySeconds: null };
 
-  return { reviewedActionsToday, firstTimeToday };
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayStartIso = todayStart.toISOString();
+
+  const { data, error } = await fetchAllRows((from, to) =>
+    supabase.from('review_log').select('reviewed_at')
+      .eq('user_id', userId).gte('reviewed_at', todayStartIso)
+      .order('reviewed_at', { ascending: true }).range(from, to)
+  );
+  if (error) return { reviewedActionsToday: null, timeSpentTodaySeconds: null };
+
+  const todayTimestampsMs = (data || []).map(row => new Date(row.reviewed_at).getTime());
+
+  return {
+    reviewedActionsToday: todayTimestampsMs.length,
+    timeSpentTodaySeconds: computeTimeSpentSeconds(todayTimestampsMs),
+  };
 }

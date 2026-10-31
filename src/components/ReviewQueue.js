@@ -6,7 +6,6 @@ import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, BREAKPOINT } from '../lib/the
 import { getReviewQueueTheme } from '../lib/reviewQueueTheme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue } from '../lib/reviewQueue';
-import { computeSystemStats } from '../lib/systemStats';
 import { normalizeSections } from '../services/ai';
 import { loadSession, saveSession, clearSession, newSessionId } from '../lib/reviewSessionStore';
 import { flushStudySessionNow } from '../lib/useStudySession';
@@ -15,7 +14,7 @@ import { OverallSyllabusProgress, SystemProgressRegister } from './SyllabusProgr
 import { formatDueCount } from '../lib/dueCount';
 import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
 import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
-  IconX, IconZap, IconEdit } from '../lib/icons';
+  IconX, IconEdit } from '../lib/icons';
 import RichRuns from '../lib/RichRuns';
 import { rawOffsetAt } from './DetailView';
 import { clearRange } from '../lib/useHighlight';
@@ -851,16 +850,6 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     return upcoming[0] || null;
   }, [scopedEntries]);
 
-  // Same shared per-system rollup Dashboard/Sidebar already use — not a
-  // second counting system, the same one, just surfaced here too.
-  const priority = useMemo(() => {
-    if (!userSystems) return [];
-    return computeSystemStats(allEntries, userSystems, rt.accent)
-      .filter(s => s.dueCount > 0)
-      .sort((a, b) => b.dueCount - a.dueCount)
-      .slice(0, 6);
-  }, [allEntries, userSystems, rt.accent]);
-
   const rate = async (rating) => {
     if (!card) return;
     const updates = calcNext(card, rating);
@@ -1115,10 +1104,12 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
             </div>
           ) : (
             <>
-              {/* ── Review status — ONE rich container holding the editorial
-                  due/new masthead and, when relevant, the priority list
-                  beneath a hairline rule. Replaces a row of generic stat
-                  cards with a single considered instrument reading. ──── */}
+              {/* ── Review status — the due/new counter, which changes with
+                  whatever system/mode configuration is selected below.
+                  The High Priority system list that used to live beneath
+                  it (and the separate boxed Start Review CTA further
+                  down) were removed per explicit feedback — this card is
+                  just the numbers now. ──────────────────────────────── */}
               <div style={{ gridArea:'status', background:rt.surface, border:`1px solid ${rt.borderRich}`,
                 borderRadius:RADIUS.xl2, boxShadow:`0 1px 2px ${rt.shadow}`, overflow:'hidden' }}>
                 <div style={{ display:'flex', alignItems:'stretch', padding:`${SPACE.xl}px ${SPACE.xl2}px` }}>
@@ -1154,33 +1145,6 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                   )}
                 </div>
 
-                {priority.length > 0 && (
-                  <>
-                    <div style={{ height:1, background:rt.border }} />
-                    <div style={{ padding:`${SPACE.lg}px ${SPACE.xl2}px` }}>
-                      <div style={{ fontSize:FONT.size.xs, color:rt.text4, letterSpacing:.8, fontWeight:FONT.weight.semibold,
-                        textTransform:'uppercase', marginBottom:SPACE.sm+2, display:'flex', alignItems:'center', gap:6 }}>
-                        <IconZap size={11} /> High Priority — {priority.length} system{priority.length!==1?'s':''} need review
-                      </div>
-                      <div style={{ display:'flex', flexDirection:'column' }}>
-                        {priority.map((s, i) => (
-                          <button key={s.name} className="mb-rq-row" onClick={() => { setFilterSystem([s.name]); setFilterDifficulty('All'); startNewSession('due', s.name, 'All'); }}
-                            style={{ display:'flex', alignItems:'center', gap:SPACE.sm, padding:'9px 4px',
-                              borderRadius:RADIUS.sm, cursor:'pointer', background:'none', border:'none', textAlign:'left' }}>
-                            <div style={{ width:7, height:7, borderRadius:RADIUS.circle, background:s.color, flexShrink:0 }} />
-                            <div style={{ flex:1, fontSize:FONT.size.sm, color:rt.text2, fontWeight:FONT.weight.medium,
-                              overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.name}</div>
-                            {i === 0 && <IconZap size={11} style={{ color:rt.due, flexShrink:0 }} />}
-                            <span style={{ fontSize:FONT.size.xs, fontWeight:FONT.weight.semibold, color:rt.due,
-                              background:rt.dueBg, borderRadius:RADIUS.pill, padding:'2px 8px', flexShrink:0 }}>
-                              {s.dueCount}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
               </div>
 
               {/* ── Configure Session — one rich container, sub-sections
@@ -1318,18 +1282,14 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                 </div>
               </div>
 
-              {/* ── Session summary + Start Review — the dedicated primary
-                  action, richly bordered and visually distinct from the
-                  quieter configuration controls beside it. Sticky on
-                  desktop, a reachable bottom-anchored bar on mobile. ──── */}
-              <div className="mb-rq-cta" style={{ gridArea:'cta', background:rt.surfaceRaised,
-                border:`1.5px solid ${rt.accentBorder}`, borderRadius:RADIUS.xl2,
-                boxShadow:`0 18px 40px -18px ${rt.shadowRich}`, padding:SPACE.xl }}>
-                <div style={{ fontSize:FONT.size.micro, color:rt.text4, letterSpacing:.8, fontWeight:FONT.weight.semibold,
-                  textTransform:'uppercase', marginBottom:8 }}>
-                  Ready to begin
-                </div>
-                <div style={{ fontSize:FONT.size.sm, color:rt.text2, lineHeight:1.6, marginBottom:SPACE.lg }}>
+              {/* ── Start Review — a plain button, no surrounding card.
+                  Used to be a heavily-boxed "Ready to begin" CTA card;
+                  removed per explicit feedback, keeping just the action
+                  itself. Still sticky on desktop (same .mb-rq-cta class,
+                  now carrying no box styling) so it stays reachable while
+                  Configure Session scrolls past it. ─────────────────── */}
+              <div className="mb-rq-cta" style={{ gridArea:'cta' }}>
+                <div style={{ fontSize:FONT.size.xs, color:rt.text3, lineHeight:1.5, marginBottom:SPACE.sm }}>
                   {sessionSummary}
                   {cardLimit !== 'all' && <> · up to {willReviewCount} cards</>}
                 </div>
