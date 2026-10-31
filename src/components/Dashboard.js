@@ -5,6 +5,7 @@ import { timeAgo } from '../lib/timeAgo';
 import { SYS_COLOR } from '../lib/constants';
 import { computeOverallProgress, buildSystemRegister, fetchDailyActivity } from '../lib/syllabusProgress';
 import { OverallSyllabusProgress, SystemProgressRegister } from './SyllabusProgress';
+import { formatDueCount } from '../lib/dueCount';
 import EntryCard from './EntryCard';
 import { IconRepeat, IconPlus, IconChart, IconCheck } from '../lib/icons';
 
@@ -297,7 +298,7 @@ export default function Dashboard({ entries, userSystems, userId, onOpenEntry, o
           functionality), deliberately kept out of the syllabus-progress
           composition above per the brief. */}
       <div className="mb-dash-summary" style={{ marginBottom:SPACE.xl2 }}>
-        <SummaryTile t={t} icon={IconRepeat} label="Due Today" value={stats.dueCount} accent={stats.dueCount>0} />
+        <SummaryTile t={t} icon={IconRepeat} label="Due Today" value={formatDueCount(stats.dueCount)} accent={stats.dueCount>0} />
         <SummaryTile t={t} label="Review Entries" value={stats.total} />
         <SummaryTile t={t} label="Active Systems" value={stats.bySystem.length} />
       </div>
@@ -324,8 +325,9 @@ export default function Dashboard({ entries, userSystems, userId, onOpenEntry, o
 
           {stats.dueCount > 0 ? (
             <>
-              <div style={{ fontSize:FONT.size.xl2, fontWeight:FONT.weight.bold, color:t.text, lineHeight:1.1 }}>
-                {stats.dueCount} due
+              <div style={{ fontSize:FONT.size.xl2, fontWeight:FONT.weight.bold, color:t.text, lineHeight:1.1,
+                fontVariantNumeric:'tabular-nums' }}>
+                {formatDueCount(stats.dueCount)} due
               </div>
               <div style={{ fontSize:FONT.size.xs, color:t.text4, marginTop:3, marginBottom:SPACE.md }}>
                 {stats.focusSystems.length > 0

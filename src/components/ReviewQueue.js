@@ -12,6 +12,7 @@ import { loadSession, saveSession, clearSession, newSessionId } from '../lib/rev
 import { flushStudySessionNow } from '../lib/useStudySession';
 import { computeOverallProgress, buildSystemRegister } from '../lib/syllabusProgress';
 import { OverallSyllabusProgress, SystemProgressRegister } from './SyllabusProgress';
+import { formatDueCount } from '../lib/dueCount';
 import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
 import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
   IconX, IconZap, IconEdit } from '../lib/icons';
@@ -211,17 +212,6 @@ function formatDays(d) {
   if (d < 30) return `${d}d`;
   if (d < 365) return `${(d / 30).toFixed(1)}mo`;
   return `${(d / 365).toFixed(1)}y`;
-}
-
-// Display-only cap for the "Due Today" count — a literal count in the
-// hundreds reads as alarming/overwhelming rather than useful, so anything
-// past DUE_DISPLAY_CAP shows as "50+" instead of the exact number. Purely
-// cosmetic: the real dueCount this is derived from is untouched, so a Due
-// session still pulls every card that's actually due, exactly as before —
-// only the headline number and the "Due (N)" mode button label are capped.
-const DUE_DISPLAY_CAP = 50;
-function formatDueCount(n) {
-  return n > DUE_DISPLAY_CAP ? `${DUE_DISPLAY_CAP}+` : String(n);
 }
 
 // Short, human description of the current session configuration — read by
