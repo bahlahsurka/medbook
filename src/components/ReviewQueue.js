@@ -10,6 +10,8 @@ import { computeSystemStats } from '../lib/systemStats';
 import { normalizeSections } from '../services/ai';
 import { loadSession, saveSession, clearSession, newSessionId } from '../lib/reviewSessionStore';
 import { flushStudySessionNow } from '../lib/useStudySession';
+import { computeOverallProgress, buildSystemRegister } from '../lib/syllabusProgress';
+import { OverallSyllabusProgress, SystemProgressRegister } from './SyllabusProgress';
 import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
 import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
   IconX, IconZap, IconEdit } from '../lib/icons';
@@ -248,6 +250,27 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     shadowStrong: rt.shadowRich, danger: rt.due, text4: rt.text4,
   }), [rt]);
 
+  // Same adapter pattern as hlPopoverColors above, mapping rt onto the
+  // small flat shape SyllabusProgress.js's shared components expect — see
+  // that file's own header comment.
+  const syllabusColors = useMemo(() => ({
+    text: rt.text, text2: rt.text2, text3: rt.text3, text4: rt.text4,
+    border: rt.border, borderStrong: rt.borderRich,
+    surface: rt.surface, surfaceTrack: rt.surfaceSunken,
+    accent: rt.accent, accentBg: rt.accentBg, accentBorder: rt.accentBorder,
+  }), [rt]);
+
+  // Overall + per-system syllabus progress — the exact same shared
+  // calculation Dashboard.js reads (lib/syllabusProgress.js), so the two
+  // screens can never disagree about Reviewed/Total/Coverage. Deliberately
+  // excludes due-review stats (see the Due Today/New masthead below, which
+  // is a separate, pre-existing SRS concern this composition never mixes
+  // with).
+  const overallProgress = useMemo(() => computeOverallProgress(allEntries), [allEntries]);
+  const syllabusRegister = useMemo(() => buildSystemRegister(allEntries, userSystems, rt.accent),
+    [allEntries, userSystems, rt.accent]);
+  const [syllabusExpanded, setSyllabusExpanded] = useState(false);
+
   // Always-current entries, WITHOUT making the queue rebuild on every rating.
   // (Rebuilding mid-session makes the list shift under the cursor and skip cards.)
   const entriesRef = useRef(allEntries);
@@ -261,6 +284,14 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   const [filterMode, setFilterMode]     = useState('all');   // 'all' | 'due' | 'new'
   const [filterSystem, setFilterSystem] = useState([]);       // [] = every system; else a list of selected system names
   const [filterDifficulty, setFilterDifficulty] = useState('All'); // 'All' | 'Easy' | 'Medium' | 'Hard'
+
+  // Clicking a system row in the syllabus-progress register toggles it
+  // into/out of filterSystem — the SAME state the "Medical Systems" chips
+  // further down the page already drive — so selecting a system via the
+  // register is just another entry point into that one piece of state,
+  // never a parallel selection concept.
+  const toggleRegisterSystem = (name) =>
+    setFilterSystem(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]);
 
   const [queue, setQueue] = useState([]);
   const [idx, setIdx]  = useState(0);
@@ -933,13 +964,14 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
        different renders. */
     .mb-rq-shell {
       display: grid; grid-template-columns: minmax(0,1fr);
-      grid-template-areas: "identity" "resume" "status" "config" "cta";
+      grid-template-areas: "identity" "resume" "progress" "status" "config" "cta";
       gap: ${SPACE.xl2}px;
     }
+    .mb-rq-progress { grid-area:progress; }
     @media (min-width:${BREAKPOINT.tablet}px) {
       .mb-rq-shell {
         grid-template-columns: minmax(0,1fr) 336px;
-        grid-template-areas: "identity identity" "resume resume" "status cta" "config cta";
+        grid-template-areas: "identity identity" "resume resume" "progress progress" "status cta" "config cta";
         gap: ${SPACE.xl3}px;
         align-items: start;
       }
@@ -1039,6 +1071,33 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                 padding:'9px 14px', fontSize:FONT.size.sm, cursor:'pointer', fontFamily:SANS }}>
                 Discard
               </button>
+            </div>
+          )}
+
+          {/* ── Syllabus progress — the compact version of the same shared
+              composition Dashboard shows, reusing the exact same
+              calculation and ranking (lib/syllabusProgress.js). Unlike
+              Dashboard, clicking a system row here toggles it into the
+              upcoming session's filter in place (same state the "Medical
+              Systems" chips below drive) rather than navigating away.
+              Deliberately kept out of the Due/New masthead below — that's
+              due-review scheduling, this is cumulative coverage, and the
+              brief asks the two never be mixed. Only shown once there's
+              at least one active entry, so a brand-new account's "nothing
+              at all" state stays exactly as it was. ────────────────────── */}
+          {overallProgress.total > 0 && (
+            <div className="mb-rq-progress" style={{ background:rt.surface, border:`1px solid ${rt.borderRich}`,
+              borderRadius:RADIUS.xl2, boxShadow:`0 1px 2px ${rt.shadow}`, padding:`${SPACE.lg}px ${SPACE.xl2}px` }}>
+              <div style={{ fontSize:FONT.size.micro, color:rt.text4, letterSpacing:.8, fontWeight:FONT.weight.semibold,
+                textTransform:'uppercase', marginBottom:SPACE.md }}>
+                Syllabus Progress
+              </div>
+              <OverallSyllabusProgress colors={syllabusColors} compact
+                total={overallProgress.total} reviewed={overallProgress.reviewed} unreviewed={overallProgress.unreviewed} />
+              <div style={{ height:1, background:rt.border, margin:`${SPACE.lg}px 0 ${SPACE.sm}px` }} />
+              <SystemProgressRegister colors={syllabusColors} register={syllabusRegister}
+                onRowClick={toggleRegisterSystem} selectedNames={filterSystem}
+                maxRows={5} expanded={syllabusExpanded} onToggleExpand={() => setSyllabusExpanded(e => !e)} />
             </div>
           )}
 

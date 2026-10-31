@@ -1,9 +1,10 @@
-import { useMemo, useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
 import { computeSystemStats } from '../lib/systemStats';
 import { timeAgo } from '../lib/timeAgo';
 import { SYS_COLOR } from '../lib/constants';
+import { computeOverallProgress, buildSystemRegister, fetchDailyActivity } from '../lib/syllabusProgress';
+import { OverallSyllabusProgress, SystemProgressRegister } from './SyllabusProgress';
 import EntryCard from './EntryCard';
 import { IconRepeat, IconPlus, IconChart, IconCheck } from '../lib/icons';
 
@@ -70,35 +71,41 @@ export default function Dashboard({ entries, userSystems, userId, onOpenEntry, o
   onStartReview, onAddEntry }) {
   const { t } = useTheme();
 
-  // "Reviewed today" — a real per-review-event count from review_log (see
+  // Always-current entries for the daily-activity fetch below, without
+  // making that effect re-run (and re-query review_log) on every entries
+  // change — same pattern ReviewQueue.js uses for its own entriesRef.
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+
+  // Daily activity — two real counts from review_log (see
   // SUPABASE_MIGRATION_INSIGHTS.sql), written by ReviewQueue/SystemReview's
-  // rate() and DetailView's markReviewed(). Deliberately NOT derived from
-  // entries.last_reviewed (a single overwritten timestamp per entry that
-  // can't distinguish "reviewed once today" from "reviewed three times
-  // today", and would conflate cards reviewed with entries studied).
+  // rate(): every review action taken today, and distinct active entries
+  // whose true first-ever review happened today (see
+  // lib/syllabusProgress.js's fetchDailyActivity for the exact, carefully
+  // scoped logic — and the review_log coverage gap it works around).
+  // Deliberately NOT derived from entries.last_reviewed (a single
+  // overwritten timestamp per entry that can't distinguish "reviewed once
+  // today" from "reviewed three times today", and would conflate cards
+  // reviewed with entries studied).
   // undefined=loading (card renders with a neutral placeholder, no layout
   // shift), null=table unavailable (card omitted entirely rather than
-  // showing a guessed number), number=real count for the viewer's LOCAL day.
-  const [reviewedToday, setReviewedToday] = useState(undefined);
+  // showing a guessed number), object=real counts for the viewer's LOCAL day.
+  const [dailyActivity, setDailyActivity] = useState(undefined);
   useEffect(() => {
     if (!userId) return;
     let cancelled = false;
-    const localMidnight = new Date();
-    localMidnight.setHours(0, 0, 0, 0);
-    supabase.from('review_log').select('id', { count: 'exact', head: true })
-      .eq('user_id', userId).gte('reviewed_at', localMidnight.toISOString())
-      .then(({ count, error }) => {
-        if (cancelled) return;
-        if (error) {
-          if (process.env.NODE_ENV !== 'production') {
-            // eslint-disable-next-line no-console
-            console.warn('[Dashboard] review_log unavailable, hiding Reviewed Today — has SUPABASE_MIGRATION_INSIGHTS.sql been run?', error.message);
-          }
-          setReviewedToday(null);
-          return;
+    fetchDailyActivity(userId, entriesRef.current).then(result => {
+      if (cancelled) return;
+      if (result.reviewedActionsToday === null) {
+        if (process.env.NODE_ENV !== 'production') {
+          // eslint-disable-next-line no-console
+          console.warn('[Dashboard] review_log unavailable, hiding Daily Activity — has SUPABASE_MIGRATION_INSIGHTS.sql been run?');
         }
-        setReviewedToday(count || 0);
-      });
+        setDailyActivity(null);
+        return;
+      }
+      setDailyActivity(result);
+    });
     return () => { cancelled = true; };
   }, [userId]);
 
@@ -114,7 +121,6 @@ export default function Dashboard({ entries, userSystems, userId, onOpenEntry, o
       .filter(e => e.next_review && new Date(e.next_review) > now)
       .map(e => new Date(e.next_review))
       .sort((a, b) => a - b);
-    const reviewedCount = all.filter(e => e.review_count > 0).length;
     const recent = [...all].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 6);
 
     const bySystem = computeSystemStats(entries, userSystems, t.accent).filter(s => s.count > 0);
@@ -131,23 +137,34 @@ export default function Dashboard({ entries, userSystems, userId, onOpenEntry, o
       .sort((a, b) => b.dueCount - a.dueCount)
       .slice(0, 4);
 
-    // The biggest few systems by volume — where the study workload is
-    // actually concentrated, not an exhaustive list of every system the
-    // user has ever touched (which could be 20+).
-    const activitySystems = [...bySystem].sort((a, b) => b.count - a.count).slice(0, 6);
-
     return {
       total: all.length,
       dueCount: due.length,
       nextDue: upcoming[0] || null,
-      reviewedCount,
       recent,
       bySystem,
       recentlyStudied,
       focusSystems,
-      activitySystems,
     };
   }, [entries, userSystems, t.accent]);
+
+  // Syllabus progress — Reviewed/Total/Coverage, overall and per system.
+  // See lib/syllabusProgress.js for the shared definitions/ranking rules
+  // (the exact same module Review Queue's compact version reads).
+  const overallProgress = useMemo(() => computeOverallProgress(entries), [entries]);
+  const register = useMemo(() => buildSystemRegister(entries, userSystems, t.accent), [entries, userSystems, t.accent]);
+  const [registerExpanded, setRegisterExpanded] = useState(false);
+
+  // Maps this screen's global theme onto the small flat shape
+  // SyllabusProgress.js's components expect — see that file's own header
+  // comment for why (Dashboard's `t` and Review Queue's `rt` don't share
+  // field names).
+  const syllabusColors = useMemo(() => ({
+    text:t.text, text2:t.text2, text3:t.text3, text4:t.text4,
+    border:t.border, borderStrong:t.borderStrong,
+    surface:t.surface, surfaceTrack:t.surface3,
+    accent:t.accent, accentBg:t.navActiveBg, accentBorder:t.navActiveBorder,
+  }), [t]);
 
   const greeting = greetingFor(new Date().getHours());
   const today = new Date().toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long' });
@@ -188,13 +205,11 @@ export default function Dashboard({ entries, userSystems, userId, onOpenEntry, o
     );
   }
 
-  const reviewedPct = stats.total ? Math.round((stats.reviewedCount / stats.total) * 100) : 0;
-
   // Only reserve a grid row/area for the card once we know it'll actually
   // render (loading or real count) — never reserve space for a card that
   // turns out to be permanently omitted (review_log unavailable), which
   // would otherwise leave a hollow gap next to "Recent Entries" spanning it.
-  const showReviewedCard = reviewedToday !== null;
+  const showReviewedCard = dailyActivity !== null;
   const mobileAreas = ['"focus"', '"recent"', showReviewedCard && '"reviewed"', '"studied"', '"activity"']
     .filter(Boolean).join(' ');
   const desktopAreas = ['"recent focus"', showReviewedCard && '"recent reviewed"', '"recent studied"', '"activity activity"']
@@ -223,12 +238,15 @@ export default function Dashboard({ entries, userSystems, userId, onOpenEntry, o
            the "metric appearance" touch — backwards fill so tiles don't
            flash visible before their delay. */
         .mb-dash-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
-        @media (min-width:640px) { .mb-dash-summary { grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; } }
+        @media (min-width:640px) { .mb-dash-summary { grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; } }
         .mb-dash-summary > * { animation: medbook-fade-in 220ms ease backwards; }
         .mb-dash-summary > *:nth-child(1) { animation-delay: 0ms; }
         .mb-dash-summary > *:nth-child(2) { animation-delay: 30ms; }
         .mb-dash-summary > *:nth-child(3) { animation-delay: 60ms; }
-        .mb-dash-summary > *:nth-child(4) { animation-delay: 90ms; }
+
+        .mb-dash-progress { background:${t.surface}; border:1px solid ${t.border}; border-radius:${RADIUS.lg}px;
+          padding:${SPACE.lg}px ${SPACE.lg+2}px; box-shadow:${elevation(t,'sm')};
+          margin-bottom:${SPACE.xl2}px; animation: medbook-fade-in ${MOTION.normal} ${MOTION.ease}; }
 
         /* Primary content (Recent Entries) + actionable secondary column
            (Today's Focus / Recently Studied), with System Activity using
@@ -251,14 +269,6 @@ export default function Dashboard({ entries, userSystems, userId, onOpenEntry, o
         .mb-dash-reviewed { grid-area:reviewed; }
         .mb-dash-studied  { grid-area:studied; }
         .mb-dash-activity { grid-area:activity; }
-
-        /* System Activity: a single narrow list stretched across the full
-           ~70% width would just relocate the empty-space problem this
-           redesign exists to fix — two columns once there's room instead. */
-        .mb-dash-activity-grid { display:flex; flex-direction:column; gap:${SPACE.xs}px; }
-        @media (min-width:768px) {
-          .mb-dash-activity-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:${SPACE.xs}px ${SPACE.lg}px; }
-        }
       `}</style>
 
       {/* Page header — the greeting already reads as this screen's own
@@ -273,11 +283,22 @@ export default function Dashboard({ entries, userSystems, userId, onOpenEntry, o
         </div>
       </div>
 
-      {/* Compact summary row */}
+      {/* Overall Syllabus Progress — one integrated composition (coverage %,
+          reviewed/total, a quiet remaining label, one proportional bar),
+          not a statistic tile. See lib/syllabusProgress.js for the shared
+          Reviewed/Total/Coverage definitions this reads. */}
+      <div className="mb-dash-progress">
+        <div style={capLabel}>Overall Syllabus Progress</div>
+        <OverallSyllabusProgress colors={syllabusColors} total={overallProgress.total}
+          reviewed={overallProgress.reviewed} unreviewed={overallProgress.unreviewed} />
+      </div>
+
+      {/* Compact summary row — due-review stats stay here (existing SRS
+          functionality), deliberately kept out of the syllabus-progress
+          composition above per the brief. */}
       <div className="mb-dash-summary" style={{ marginBottom:SPACE.xl2 }}>
         <SummaryTile t={t} icon={IconRepeat} label="Due Today" value={stats.dueCount} accent={stats.dueCount>0} />
         <SummaryTile t={t} label="Review Entries" value={stats.total} />
-        <SummaryTile t={t} label="Reviewed" value={`${reviewedPct}%`} sub={`${stats.reviewedCount} entries`} />
         <SummaryTile t={t} label="Active Systems" value={stats.bySystem.length} />
       </div>
 
@@ -347,18 +368,35 @@ export default function Dashboard({ entries, userSystems, userId, onOpenEntry, o
           )}
         </div>
 
-        {/* Reviewed Today — real per-review-event count from review_log,
-            see the hook above. Omitted entirely (not rendered as 0) when
-            that table isn't reachable, so this card never shows a guess. */}
+        {/* Daily Activity — two real per-day counts from review_log, see
+            the hook above. A separate, compact presentation, deliberately
+            never mixed with Overall Syllabus Progress above (that's
+            cumulative coverage; this is just today). Omitted entirely (not
+            rendered as 0) when the table isn't reachable, so this card
+            never shows a guess. */}
         {showReviewedCard && (
           <div className="mb-dash-reviewed" style={{ ...card, borderTop:`3px solid ${t.ok}` }}>
-            <div style={capLabel}><IconCheck size={12} /> Reviewed Today</div>
-            <div style={{ fontSize:FONT.size.xl2, fontWeight:FONT.weight.bold, color:t.text, lineHeight:1.1 }}>
-              {reviewedToday === undefined ? '–' : reviewedToday}
-            </div>
-            <div style={{ fontSize:FONT.size.xs, color:t.text4, marginTop:3 }}>
-              {reviewedToday === undefined ? 'Loading…'
-                : reviewedToday === 1 ? 'card reviewed' : 'cards reviewed'}
+            <div style={capLabel}><IconCheck size={12} /> Daily Activity</div>
+            <div style={{ display:'flex', gap:SPACE.lg }}>
+              <div>
+                <div style={{ fontSize:FONT.size.xl2, fontWeight:FONT.weight.bold, color:t.text, lineHeight:1.1,
+                  fontVariantNumeric:'tabular-nums' }}>
+                  {dailyActivity === undefined ? '–' : dailyActivity.reviewedActionsToday}
+                </div>
+                <div style={{ fontSize:FONT.size.xs, color:t.text4, marginTop:3 }}>
+                  {dailyActivity === undefined ? 'Loading…'
+                    : dailyActivity.reviewedActionsToday === 1 ? 'review today' : 'reviews today'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize:FONT.size.xl2, fontWeight:FONT.weight.bold, color:t.text, lineHeight:1.1,
+                  fontVariantNumeric:'tabular-nums' }}>
+                  {dailyActivity === undefined || dailyActivity.firstTimeToday === null ? '–' : dailyActivity.firstTimeToday}
+                </div>
+                <div style={{ fontSize:FONT.size.xs, color:t.text4, marginTop:3 }}>
+                  {dailyActivity === undefined ? 'Loading…' : 'new entries started'}
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -383,34 +421,14 @@ export default function Dashboard({ entries, userSystems, userId, onOpenEntry, o
           )}
         </div>
 
-        {/* System Activity — where the workload is concentrated, not a
-            decorative chart. Real per-system counts, same colours as the
-            rest of the app. */}
+        {/* System Progress — the ranked register (In Progress / Not
+            Started / Completed), not a decorative chart. Whole rows
+            navigate to that system, same as the rest of this page. */}
         <div className="mb-dash-activity" style={card}>
-          <div style={capLabel}><IconChart size={12} /> System Activity</div>
-          <div className="mb-dash-activity-grid">
-            {stats.activitySystems.map(s => {
-              const pct = Math.round((s.reviewedCount / s.count) * 100);
-              return (
-                <div key={s.name} className="mb-dash-row" onClick={()=>onNavigateSystem(s.name)} style={{
-                  padding:8, borderRadius:RADIUS.sm, cursor:'pointer',
-                  transition:`background ${MOTION.fast} ${MOTION.ease}` }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:8, marginBottom:4 }}>
-                    <span style={{ fontSize:FONT.size.sm, color:t.text2, fontWeight:FONT.weight.medium,
-                      overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.name}</span>
-                    <span style={{ fontSize:FONT.size.micro, color:t.text4, flexShrink:0 }}>
-                      {s.reviewedCount}/{s.count} reviewed{s.dueCount>0?` · ${s.dueCount} due`:''}
-                    </span>
-                  </div>
-                  <div style={{ height:5, background:t.surface3, borderRadius:RADIUS.sm }}>
-                    <div style={{ height:'100%', borderRadius:RADIUS.sm, background:s.color,
-                      width:`${Math.max(pct>0?4:0, pct)}%`,
-                      transition:`width ${MOTION.slow} ${MOTION.ease}` }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <div style={capLabel}><IconChart size={12} /> System Progress</div>
+          <SystemProgressRegister colors={syllabusColors} register={register}
+            onRowClick={onNavigateSystem} maxRows={8} expanded={registerExpanded}
+            onToggleExpand={() => setRegisterExpanded(e => !e)} />
         </div>
 
       </div>
