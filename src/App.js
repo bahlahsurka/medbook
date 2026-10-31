@@ -772,6 +772,20 @@ export default function App() {
                 width:isMobile?'100%':260,flex:isMobile?1:'none'}} />
           )}
 
+          {/* Dashboard-only quick-search trigger — a clean, understated
+              entry point into the existing Global Search view, rather than
+              a second search implementation. Icon-only on narrow
+              viewports to stay out of the way of the Menu button. */}
+          {view==='stats' && (
+            <button className="mb-headerbtn" onClick={()=>switchView('search')} title="Search all entries"
+              style={{background:'none',border:`1px solid ${t.border}`,color:t.text3,cursor:'pointer',
+                borderRadius:RADIUS.sm+1,padding:isMobile?'7px':'7px 12px',display:'flex',alignItems:'center',gap:6,
+                fontSize:FONT.size.sm}}>
+              <IconSearch size={14} />
+              {!isMobile && <span>Search</span>}
+            </button>
+          )}
+
           {(view==='add'||view==='detail') && (
             <button className="mb-actionbtn-ghost" onClick={()=>{ if(view==='detail') backToList(); else setView('list'); }}
               style={{background:t.surface3,color:t.text3,border:`1px solid ${t.border}`,
@@ -853,6 +867,7 @@ export default function App() {
                 <Dashboard entries={entries} userSystems={userSystems} userId={session.user.id}
                   onOpenEntry={e=>{ setAS(e.system); openEntry(e); }}
                   onNavigateSystem={sys=>navigate(sys,'list')}
+                  onReviewSystem={sys=>{ setReviewFilterSystem(sys); switchView('review'); }}
                   onStartReview={()=>switchView('review')}
                   onAddEntry={()=>switchView('add')}
                   onStudyFlashcards={()=>switchView('cards')}
