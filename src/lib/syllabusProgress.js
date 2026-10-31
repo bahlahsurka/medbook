@@ -192,16 +192,13 @@ async function fetchAllRows(buildQuery) {
 // ─── Daily activity ─────────────────────────────────────────────────────
 //
 // Three figures, deliberately never mixed with Overall Syllabus Coverage
-// (that's cumulative; these are just today/this week):
+// (that's cumulative; these are just today):
 //   reviewedActionsToday — every rating recorded today (review_log row
 //                          count), i.e. "review actions", not distinct
 //                          entries.
 //   timeSpentTodaySeconds — active review study time today (see
 //                          computeTimeSpentSeconds below for the exact
 //                          schema-constrained formula).
-//   sevenDayStrip         — one {dayKey, count} per local day, oldest to
-//                          newest, ending today — a consistency strip, not
-//                          a full chart.
 //
 // SCHEMA — why this is built from review_log.reviewed_at rather than a
 // per-review duration field: review_log (user_id, entry_id, system,
@@ -249,51 +246,24 @@ export function formatTimeSpent(totalSeconds) {
   return m ? `${h}h ${m}m` : `${h}h`;
 }
 
-function localDayKey(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x.getTime();
-}
-
 export async function fetchDailyActivity(userId) {
-  if (!userId) return { reviewedActionsToday: null, timeSpentTodaySeconds: null, sevenDayStrip: null };
+  if (!userId) return { reviewedActionsToday: null, timeSpentTodaySeconds: null };
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-  const windowStart = new Date(todayStart);
-  windowStart.setDate(windowStart.getDate() - 6); // today + 6 prior local days = 7
-  const windowStartIso = windowStart.toISOString();
+  const todayStartIso = todayStart.toISOString();
 
   const { data, error } = await fetchAllRows((from, to) =>
     supabase.from('review_log').select('reviewed_at')
-      .eq('user_id', userId).gte('reviewed_at', windowStartIso)
+      .eq('user_id', userId).gte('reviewed_at', todayStartIso)
       .order('reviewed_at', { ascending: true }).range(from, to)
   );
-  if (error) return { reviewedActionsToday: null, timeSpentTodaySeconds: null, sevenDayStrip: null };
+  if (error) return { reviewedActionsToday: null, timeSpentTodaySeconds: null };
 
-  const dayKeys = [];
-  const counts = new Map();
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(windowStart);
-    d.setDate(d.getDate() + i);
-    const key = localDayKey(d);
-    dayKeys.push(key);
-    counts.set(key, 0);
-  }
-
-  const todayKey = localDayKey(todayStart);
-  const todayTimestampsMs = [];
-  for (const row of data || []) {
-    const ms = new Date(row.reviewed_at).getTime();
-    const key = localDayKey(ms);
-    if (counts.has(key)) counts.set(key, counts.get(key) + 1);
-    if (key === todayKey) todayTimestampsMs.push(ms);
-  }
-  todayTimestampsMs.sort((a, b) => a - b);
+  const todayTimestampsMs = (data || []).map(row => new Date(row.reviewed_at).getTime());
 
   return {
-    reviewedActionsToday: counts.get(todayKey) || 0,
+    reviewedActionsToday: todayTimestampsMs.length,
     timeSpentTodaySeconds: computeTimeSpentSeconds(todayTimestampsMs),
-    sevenDayStrip: dayKeys.map(key => ({ dayKey: key, count: counts.get(key) || 0 })),
   };
 }

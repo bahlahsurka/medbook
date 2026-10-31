@@ -22,6 +22,13 @@ function neutralCardSurface(t, isDark) {
     borderRight: `1px solid ${isDark ? 'rgba(255,255,255,0.05)' : t.border}`,
     borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.05)' : t.border}`,
     borderRadius: RADIUS.lg,
+    // Same padding rhythm as .mb-dash-progress's own card (below) — every
+    // card on this page now shares the exact same padding, not just "has
+    // some padding each" — that symmetry was the actual bug: this object
+    // previously had NO padding at all, so every card but Overall
+    // Syllabus Progress (which sets its own via a CSS class, untouched by
+    // this bug) rendered its content flush against the card edges.
+    padding: `${SPACE.lg}px ${SPACE.lg+2}px`,
     boxShadow: elevation(t, 'sm'),
   };
 }
@@ -86,30 +93,6 @@ function RecentEntryRow({ t, isDark, entry, color, onClick }) {
         )}
       </div>
     </button>
-  );
-}
-
-// Ultra-compact 7-day activity strip — one dot per local day, oldest to
-// newest, ending today. Intensity (not a new color) marks whether that day
-// had any reviews at all; today gets a ring so "where am I" is unambiguous
-// at a glance. Purely presentational — see fetchDailyActivity for the data.
-function ActivityStrip({ t, isDark, strip }) {
-  if (!strip) return null;
-  const todayKey = strip[strip.length - 1]?.dayKey;
-  return (
-    <div style={{ display:'flex', gap:5, marginTop:SPACE.md }}>
-      {strip.map(day => {
-        const active = day.count > 0;
-        return (
-          <div key={day.dayKey} title={new Date(day.dayKey).toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'})}
-            style={{
-              width:9, height:9, borderRadius:RADIUS.circle, flexShrink:0,
-              background: active ? t.ok : (isDark ? 'rgba(255,255,255,0.07)' : t.surface3),
-              boxShadow: day.dayKey === todayKey ? `0 0 0 2px ${isDark ? 'rgba(255,255,255,0.18)' : t.border}` : 'none',
-            }} />
-        );
-      })}
-    </div>
   );
 }
 
@@ -428,9 +411,6 @@ export default function Dashboard({ entries, userSystems, userId, onOpenEntry, o
                   </div>
                 </div>
               </div>
-              {dailyActivity !== undefined && (
-                <ActivityStrip t={t} isDark={isDark} strip={dailyActivity.sevenDayStrip} />
-              )}
             </div>
           )}
         </div>
