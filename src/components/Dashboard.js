@@ -121,7 +121,7 @@ export default function Dashboard({ entries, userSystems, userId, onOpenEntry, o
       .filter(e => e.next_review && new Date(e.next_review) > now)
       .map(e => new Date(e.next_review))
       .sort((a, b) => a - b);
-    const recent = [...all].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 6);
+    const recent = [...all].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 4);
 
     const bySystem = computeSystemStats(entries, userSystems, t.accent).filter(s => s.count > 0);
 
