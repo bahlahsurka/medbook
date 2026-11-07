@@ -1,0 +1,192 @@
+// lib/ownCards/api.js
+//
+// Data layer for My Cards' spaced-repetition engine (Engram Stage 1).
+// Deliberately a separate, small module from lib/importedDecks/api.js —
+// NOT a shared one — so nothing here can ever change Imported Decks/
+// Favorites behaviour (the #1 engine-decision criterion). It mirrors that
+// module's rateCard/getSessionCards/getCardsByIds shape (same scheduler,
+// same "freeze the id order, never re-run the selection query on resume"
+// contract from studySessionStore.js) but targets the plain `flashcards`
+// table, which has no deck tree — folders are just `flashcards.system`
+// values, grouped client-side.
+//
+// SCHEMA — SUPABASE_MIGRATION_OWN_CARDS_SRS.sql added: state, due_at,
+// interval_days, ease_factor, review_count, lapse_count,
+// last_reviewed_at, source_entry_id on `flashcards`, plus a new
+// `flashcard_review_log` table (card_id, user_id, rating,
+// prev_interval_days, new_interval_days, time_spent_seconds,
+// reviewed_at). Every existing row got state='new' for free from the
+// column default — "existing cards start as new" per the brief, no
+// separate backfill needed for that part.
+
+import { supabase } from '../supabase';
+import { scheduler } from '../srs/Scheduler';
+
+// Same fields rateCard can change, and therefore the exact snapshot Undo
+// needs to restore — identical list to imported api.js's own
+// SCHEDULING_FIELDS, kept as a separate copy (not shared) since the two
+// tables are independent and must stay that way per the engine decision.
+export const SCHEDULING_FIELDS = ['state', 'due_at', 'interval_days', 'ease_factor', 'review_count', 'lapse_count', 'last_reviewed_at'];
+
+/**
+ * Builds the WHERE-clause scope for a system filter. `system` is one of:
+ *   undefined/null -> no system filter (every folder, including Uncategorized)
+ *   { uncategorized: true } -> only cards with system IS NULL
+ *   a plain string -> only cards with that exact system name
+ * Kept as one small helper rather than three call sites each re-deriving
+ * the same three-way branch.
+ */
+function applySystemScope(query, system) {
+  if (!system) return query;
+  if (system.uncategorized) return query.is('system', null);
+  return query.eq('system', system);
+}
+
+/**
+ * Due + new cards for a My Cards study session, same due-first-then-new
+ * shape as imported api.js's getSessionCards, scoped to one user and
+ * (optionally) one system/folder instead of a deck subtree. New cards
+ * respect `newCardsPerDay` using the same "today" + review_count===1
+ * convention imported decks already use for their own daily cap — see
+ * that module's own comment on why this is an approximation (inferred
+ * from each card's own last_reviewed_at, not a separate ledger) and why
+ * that's good enough for a soft daily cap.
+ */
+export async function getSessionCards({ userId, system, limit = 50, newCardsPerDay = 20 } = {}) {
+  const nowIso = new Date().toISOString();
+  const dayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+
+  let newCap = limit;
+  if (newCardsPerDay != null) {
+    let doneQuery = supabase.from('flashcards').select('*', { count: 'exact', head: true })
+      .eq('user_id', userId).eq('review_count', 1).gte('last_reviewed_at', dayStart);
+    doneQuery = applySystemScope(doneQuery, system);
+    const { count } = await doneQuery;
+    newCap = Math.min(newCap, Math.max(0, newCardsPerDay - (count || 0)));
+  }
+
+  let dueQuery = supabase.from('flashcards').select('*').eq('user_id', userId)
+    .neq('state', 'new').neq('state', 'suspended').lte('due_at', nowIso)
+    .order('due_at', { ascending: true, nullsFirst: false }).limit(limit);
+  dueQuery = applySystemScope(dueQuery, system);
+  const { data: dueRows, error: dueErr } = await dueQuery;
+  if (dueErr) throw new Error(`Due cards query failed: ${dueErr.message}`);
+
+  let newRows = [];
+  if (newCap > 0) {
+    let newQuery = supabase.from('flashcards').select('*').eq('user_id', userId)
+      .eq('state', 'new').order('created_at', { ascending: true }).limit(newCap);
+    newQuery = applySystemScope(newQuery, system);
+    const { data, error } = await newQuery;
+    if (error) throw new Error(`New cards query failed: ${error.message}`);
+    newRows = data || [];
+  }
+
+  return [...(dueRows || []), ...newRows].slice(0, limit);
+}
+
+/** Re-fetch current row data for a frozen set of ids — the resume half of
+ *  the same contract imported api.js's getCardsByIds follows: never
+ *  re-runs the selection query, only refreshes rows for ids a session
+ *  already chose. Rows come back in no particular order; the caller
+ *  reassembles the frozen order itself (same as StudySession already
+ *  does for Imported Decks/Favorites). */
+export async function getCardsByIds(cardIds) {
+  if (!cardIds?.length) return [];
+  const { data, error } = await supabase.from('flashcards').select('*').in('id', cardIds);
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+/**
+ * Persist a rating via the existing scheduler — no separate interval math.
+ * `timeSpentSeconds` is stats-only (written to flashcard_review_log, never
+ * read back into scheduling) — per the brief, it must never influence the
+ * fixed 40s/card "Study by time" planning rate.
+ * Returns `{ card, logInsert }` — logInsert is the fire-and-forget log
+ * insert's own promise, exposed (not awaited here) so Undo can await it
+ * before deleting that exact row, same race-avoidance as imported
+ * api.js's rateCard/unrateCard pair.
+ */
+export async function rateCard(card, rating, timeSpentSeconds) {
+  const patch = scheduler.calculateNextReview(card, rating);
+  const { data, error } = await supabase.from('flashcards').update(patch).eq('id', card.id).select().single();
+  if (error) throw new Error(error.message);
+  const logInsert = supabase.from('flashcard_review_log').insert({
+    user_id: card.user_id, card_id: card.id, rating,
+    prev_interval_days: card.interval_days ?? 0,
+    new_interval_days: patch.interval_days,
+    time_spent_seconds: timeSpentSeconds ?? null,
+    reviewed_at: patch.last_reviewed_at,
+  }).then(({ error: logError }) => {
+    if (logError && process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line no-console
+      console.warn('[ownCards.rateCard] flashcard_review_log insert failed', logError.message);
+    }
+  });
+  return { card: data, logInsert };
+}
+
+/**
+ * Reverses one specific rating from earlier in the current session — same
+ * contract as imported api.js's unrateCard: `previousState` is the exact
+ * pre-rating snapshot the caller captured client-side, restored as a
+ * plain field-for-field UPDATE (never a recomputation), so it can't itself
+ * produce a wrong interval. `ratedAtIso` + `card_id` together are the
+ * natural key used to delete ONLY that one log row.
+ */
+export async function unrateCard(cardId, previousState, ratedAtIso, logInsert) {
+  if (logInsert) { try { await logInsert; } catch { /* rateCard already reports insert failures itself */ } }
+  const { data, error } = await supabase.from('flashcards').update(previousState).eq('id', cardId).select().single();
+  if (error) throw new Error(error.message);
+  if (ratedAtIso) {
+    const { error: logError } = await supabase.from('flashcard_review_log')
+      .delete().eq('card_id', cardId).eq('reviewed_at', ratedAtIso);
+    if (logError && process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line no-console
+      console.warn('[ownCards.unrateCard] review_log cleanup failed (card row was still correctly restored)', logError.message);
+    }
+  }
+  return data;
+}
+
+/**
+ * New/Learning/Due counts per folder, computed live from a caller-supplied
+ * card list (FlashCards.js already holds the full `cards` array in memory
+ * — there's no separate deck-count table to denormalize into or go stale,
+ * unlike Imported Decks' due_cards column). Grouped by the SAME key
+ * FlashCards.js's own `folders` memo already uses (system name, or the
+ * UNCAT sentinel for null), so a caller can zip this straight onto its
+ * existing folder list. "Due" means learning/review cards whose due_at
+ * has already passed — a 'new' card is never "due" until first studied.
+ */
+export function computeFolderCounts(cards, uncatKey) {
+  const nowMs = Date.now();
+  const counts = {}; // key -> { new, learning, due }
+  const bump = (key, field) => {
+    const row = (counts[key] ||= { new: 0, learning: 0, due: 0 });
+    row[field]++;
+  };
+  for (const c of cards || []) {
+    const key = c.system || uncatKey;
+    if (c.state === 'new' || !c.state) { bump(key, 'new'); continue; }
+    if (c.state === 'suspended') continue;
+    if (c.due_at && new Date(c.due_at).getTime() <= nowMs) bump(key, 'due');
+    else if (c.state === 'learning') bump(key, 'learning');
+  }
+  return counts;
+}
+
+/** Overall New/Learning/Due across every folder — same shape as a single
+ *  computeFolderCounts row, for "Study due (all folders)" at the top level. */
+export function computeOverallCounts(cards) {
+  const nowMs = Date.now();
+  const row = { new: 0, learning: 0, due: 0 };
+  for (const c of cards || []) {
+    if (c.state === 'new' || !c.state) { row.new++; continue; }
+    if (c.state === 'suspended') continue;
+    if (c.due_at && new Date(c.due_at).getTime() <= nowMs) row.due++;
+    else if (c.state === 'learning') row.learning++;
+  }
+  return row;
+}

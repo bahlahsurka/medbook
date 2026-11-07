@@ -31,8 +31,14 @@ import { useEffect } from 'react';
  * `onPrev` is likewise optional — pass it to enable ← for "previous card";
  * omit it (e.g. on the first card, where there's nothing to go back to) and
  * ArrowLeft simply does nothing.
+ *
+ * `numericKeys` — opt-in, default false: when true, 1/2/3/4 also rate
+ * again/hard/good/easy (Engram's My Cards shortcut). Deliberately NOT
+ * wired up by default — Imported Decks/Favorites' own call site never
+ * passes this, so a bare "1" keeps doing nothing there, exactly as
+ * before this option existed (zero behaviour change for those screens).
  */
-export function useReviewKeyboard(enabled, { flipped, onFlip, onAgain, onHard, onGood, onEasy, onNext, onPrev }) {
+export function useReviewKeyboard(enabled, { flipped, onFlip, onAgain, onHard, onGood, onEasy, onNext, onPrev, numericKeys = false }) {
   useEffect(() => {
     if (!enabled) return;
 
@@ -49,8 +55,9 @@ export function useReviewKeyboard(enabled, { flipped, onFlip, onAgain, onHard, o
       // Only blur when we're actually about to act on this key — not on
       // every keystroke, so normal Tab-based keyboard navigation between
       // buttons is left alone.
+      const numericKeySet = numericKeys ? ['1', '2', '3', '4'] : [];
       const isHandledKey = e.code === 'Space' || e.key === 'ArrowLeft' ||
-        (flipped && ['Enter','g','G','h','H','a','A'].includes(e.key));
+        (flipped && ['Enter','g','G','h','H','a','A', ...numericKeySet].includes(e.key));
       if (isHandledKey && document.activeElement?.tagName === 'BUTTON') {
         document.activeElement.blur();
       }
@@ -86,6 +93,18 @@ export function useReviewKeyboard(enabled, { flipped, onFlip, onAgain, onHard, o
         case 'a': case 'A':
           if (onAgain) onAgain();
           break;
+        case '1':
+          if (numericKeys && onAgain) onAgain();
+          break;
+        case '2':
+          if (numericKeys && onHard) onHard();
+          break;
+        case '3':
+          if (numericKeys && onGood) onGood();
+          break;
+        case '4':
+          if (numericKeys && onEasy) onEasy();
+          break;
         default:
           break;
       }
@@ -93,5 +112,5 @@ export function useReviewKeyboard(enabled, { flipped, onFlip, onAgain, onHard, o
 
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [enabled, flipped, onFlip, onAgain, onHard, onGood, onEasy, onNext, onPrev]);
+  }, [enabled, flipped, onFlip, onAgain, onHard, onGood, onEasy, onNext, onPrev, numericKeys]);
 }

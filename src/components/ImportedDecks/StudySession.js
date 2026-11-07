@@ -57,6 +57,7 @@ import { createPortal } from 'react-dom';
 import { useTheme } from '../../lib/theme';
 import * as api from '../../lib/importedDecks/api';
 import * as favoritesApi from '../../lib/importedDecks/favorites';
+import * as ownCardsApi from '../../lib/ownCards/api';
 import { scheduler } from '../../lib/srs/Scheduler';
 import { useReviewKeyboard } from '../../lib/useReviewKeyboard';
 import { FLAGS, FLAG_COLORS, FLAG_NAMES } from '../../lib/importedDecks/flags';
@@ -96,10 +97,14 @@ export default function StudySession({ deck, userId, onExit }) {
   // fails, surfacing a concise error instead of silently losing the tap.
   const [favoriteIds, setFavoriteIds] = useState(new Set());
   useEffect(() => {
+    // My Cards has no favorites concept (flashcards carries no flag/
+    // favorite column) — skip the fetch entirely rather than calling an
+    // API scoped to imported_cards ids that could never match.
+    if (deck.isOwnCards) return;
     let cancelled = false;
     favoritesApi.getFavoriteCardIds(userId).then(ids => { if (!cancelled) setFavoriteIds(ids); }).catch(() => {});
     return () => { cancelled = true; };
-  }, [userId]);
+  }, [userId, deck.isOwnCards]);
 
   // Batch 2 — Focus Mode: hides everything but the minimum needed to get
   // back out (plus the image-expand affordance, if the card has one), so
@@ -184,6 +189,14 @@ export default function StudySession({ deck, userId, onExit }) {
   // rate a card, then hit Previous before the fire-and-forget insert from
   // THAT rating has necessarily landed yet.
   const logInsertsRef = useRef({});
+  // Stats-only timer for My Cards' per-review log (time_spent_seconds) —
+  // when the card currently on screen was shown. Reset on every card
+  // change (advance, Previous, or a resumed session landing on a card),
+  // never read back into scheduling — the brief requires the 40s/card
+  // "Study by time" planning rate stay fixed regardless of what this
+  // measures.
+  const cardShownAtRef = useRef(Date.now());
+  useEffect(() => { cardShownAtRef.current = Date.now(); }, [idx]);
   // True while an undo (the async half of goPrev) is in flight — disables
   // Previous and the rating buttons so a second action can't land on top
   // of a restore that hasn't finished yet ("prevent the user from
@@ -207,7 +220,9 @@ export default function StudySession({ deck, userId, onExit }) {
         if (resumeChoice === 'resume' && pendingResume) {
           sessionIdRef.current = pendingResume.sessionId || newSessionId();
           createdAtRef.current = pendingResume.createdAt || pendingResume.lastActiveAt || new Date().toISOString();
-          const rows = await api.getCardsByIds(pendingResume.cardIds);
+          const rows = deck.isOwnCards
+            ? await ownCardsApi.getCardsByIds(pendingResume.cardIds)
+            : await api.getCardsByIds(pendingResume.cardIds);
           if (cancelled) return;
           const byId = new Map(rows.map(r => [r.id, r]));
           // Reassemble in the FROZEN order, dropping any id that no longer
@@ -235,6 +250,8 @@ export default function StudySession({ deck, userId, onExit }) {
           createdAtRef.current = new Date().toISOString();
           const cards = deck.isFavorites
             ? (await favoritesApi.getFavoriteCards(userId)).filter(c => !deck.onlyCardId || c.id === deck.onlyCardId)
+            : deck.isOwnCards
+            ? await ownCardsApi.getSessionCards({ userId, system: deck.ownCardsSystem, limit: 50, newCardsPerDay: deck.newCardsPerDay })
             : await api.getSessionCards([deck.id], { limit: 50, userId });
           if (cancelled) return;
           setQueue(cards);
@@ -248,7 +265,7 @@ export default function StudySession({ deck, userId, onExit }) {
     // `pendingResume` is a mount-stable lazy-init value (see above) —
     // intentionally not listed as a dependency, same reasoning as
     // DeckBrowser's own mount-time-only effect.
-  }, [deck.id, deck.isFavorites, deck.onlyCardId, userId, resumeChoice]);
+  }, [deck.id, deck.isFavorites, deck.onlyCardId, deck.isOwnCards, deck.ownCardsSystem, deck.newCardsPerDay, userId, resumeChoice]);
 
   // Persist proactively on every meaningful change — card advances, a
   // rating lands, pause/resume — rather than trying to catch a single
@@ -306,13 +323,17 @@ export default function StudySession({ deck, userId, onExit }) {
   // not a synchronous mock lookup.
   const [noteModel, setNoteModel] = useState({ note: null, model: null });
   useEffect(() => {
-    if (!card) { setNoteModel({ note: null, model: null }); return; }
+    // My Cards cards are plain question/answer text, not an Anki note+
+    // model — nothing to fetch here. note/model stay permanently null for
+    // an own-cards session, which also makes the media-resolve effect
+    // below a no-op for free (it only runs once note+model are both set).
+    if (!card || deck.isOwnCards) { setNoteModel({ note: null, model: null }); return; }
     let cancelled = false;
     api.getNoteAndModel(card.note_id)
       .then(nm => { if (!cancelled) setNoteModel(nm); })
       .catch(e => { if (!cancelled) { setErr(e.message || 'Could not load card content'); setNoteModel({ note: null, model: null }); } });
     return () => { cancelled = true; };
-  }, [card]);
+  }, [card, deck.isOwnCards]);
   const { note, model } = noteModel;
 
   // Resolve this card's media before rendering — never the whole deck's.
@@ -374,15 +395,35 @@ export default function StudySession({ deck, userId, onExit }) {
     // rateCard's patch lands, the pre-rating values are gone from every
     // copy of this card MedBook holds (the row itself, and the queue
     // entry rate() is about to overwrite below) except this one.
-    const previousState = Object.fromEntries(api.SCHEDULING_FIELDS.map(f => [f, card[f]]));
+    const fields = deck.isOwnCards ? ownCardsApi.SCHEDULING_FIELDS : api.SCHEDULING_FIELDS;
+    const previousState = Object.fromEntries(fields.map(f => [f, card[f]]));
     setRating(label);
     try {
-      const { card: updated, logInsert } = await api.rateCard(card, label);
+      const { card: updated, logInsert } = deck.isOwnCards
+        ? await ownCardsApi.rateCard(card, label, (Date.now() - cardShownAtRef.current) / 1000)
+        : await api.rateCard(card, label);
       // Same reason ReviewQueue.js keeps its cards array live after rating:
       // ← lets you step back to this card and rate it again, and a re-rating
       // has to act on the card's CURRENT (post-rating) scheduling state, not
       // the stale pre-rating snapshot still sitting in the queue array.
-      setQueue(q => { const next = [...q]; next[ratedIdx] = updated; return next; });
+      setQueue(q => {
+        const next = [...q];
+        next[ratedIdx] = updated;
+        // My Cards only — "Again" cards come back later in the SAME
+        // session (Stage 1 item 1). Imported Decks/Favorites have no such
+        // behaviour today and this brief doesn't ask for it there, so it's
+        // gated strictly behind isOwnCards: the queue only ever grows for
+        // a My Cards session, never for the other two. Re-inserted a fixed
+        // number of cards ahead (not literally last) so it doesn't always
+        // land at the very end of a long queue; clamped to the queue's own
+        // length so it can never be inserted past the end.
+        if (deck.isOwnCards && label === 'again') {
+          const REQUEUE_AFTER = 8;
+          const insertAt = Math.min(ratedIdx + 1 + REQUEUE_AFTER, next.length);
+          next.splice(insertAt, 0, updated);
+        }
+        return next;
+      });
       // Record the undo entry AFTER the rating is confirmed saved — never
       // on a failed rating, which correctly leaves nothing for Previous to
       // undo (there's nothing to undo; the rating never happened).
@@ -450,7 +491,9 @@ export default function StudySession({ deck, userId, onExit }) {
     setRestoring(true);
     setErr('');
     try {
-      const restored = await api.unrateCard(target.id, target.deck_id, action.previousState, action.ratedAtIso, logInsertsRef.current[target.id]);
+      const restored = deck.isOwnCards
+        ? await ownCardsApi.unrateCard(target.id, action.previousState, action.ratedAtIso, logInsertsRef.current[target.id])
+        : await api.unrateCard(target.id, target.deck_id, action.previousState, action.ratedAtIso, logInsertsRef.current[target.id]);
       setQueue(q => { const next = [...q]; next[targetIdx] = restored; return next; });
       setActions(a => { const next = { ...a }; delete next[target.id]; return next; });
       delete logInsertsRef.current[target.id];
@@ -513,6 +556,7 @@ export default function StudySession({ deck, userId, onExit }) {
     onGood: () => rate('good'),
     onEasy: () => rate('easy'),
     onPrev: idx > 0 ? goPrev : undefined,
+    numericKeys: !!deck.isOwnCards,
   });
 
   // Close the flag popup and any open image lightbox whenever the card
@@ -777,12 +821,14 @@ export default function StudySession({ deck, userId, onExit }) {
           <>
             <div />
             <div className="mb-ss-icongroup">
-              <button className="mb-ss-iconbtn" onClick={toggleCardFavorite}
-                title={favoriteIds.has(card.id) ? 'Remove favorite' : 'Favorite this card'}
-                aria-label={favoriteIds.has(card.id) ? 'Remove favorite' : 'Favorite this card'}
-                style={iconBtnStyle({ color: favoriteIds.has(card.id) ? '#eab308' : t.text3 })}>
-                <IconStar size={14} filled={favoriteIds.has(card.id)} />
-              </button>
+              {!deck.isOwnCards && (
+                <button className="mb-ss-iconbtn" onClick={toggleCardFavorite}
+                  title={favoriteIds.has(card.id) ? 'Remove favorite' : 'Favorite this card'}
+                  aria-label={favoriteIds.has(card.id) ? 'Remove favorite' : 'Favorite this card'}
+                  style={iconBtnStyle({ color: favoriteIds.has(card.id) ? '#eab308' : t.text3 })}>
+                  <IconStar size={14} filled={favoriteIds.has(card.id)} />
+                </button>
+              )}
               {sideImages.length > 0 && (
                 <button className="mb-ss-iconbtn" onClick={() => setLightboxSrc(sideImages[0])}
                   title="Expand image" aria-label="Expand image" style={iconBtnStyle()}>
@@ -807,59 +853,67 @@ export default function StudySession({ deck, userId, onExit }) {
                 title="Pause session" aria-label="Pause session" style={iconBtnStyle()}>
                 <IconPause size={13} />
               </button>
-              {/* position:relative wrapper makes the color popover a true
-                  sub-part of this button — anchored right below/beside it
-                  via absolute positioning — instead of a full-width bar
-                  down in the content area with no visible connection to
-                  what opened it. */}
-              <div style={{ position: 'relative' }}>
-                <button className="mb-ss-iconbtn" onClick={() => setFlagPickerOpen(o => !o)}
-                  title={card.flag ? `Flagged: ${FLAG_NAMES[card.flag]}` : 'Flag this card'} aria-label="Flag this card"
-                  style={iconBtnStyle({ background: flagPickerOpen ? t.surface3 : t.surface2 })}>
-                  {/* 🚩 is a fixed-color emoji glyph — CSS `color` can't tint it, so
-                      the current flag color is shown as a separate dot instead. */}
-                  <span style={{ position: 'relative', fontSize: 14, lineHeight: 1 }}>
-                    🚩
-                    {card.flag > 0 && (
-                      <span style={{ position: 'absolute', right: -3, bottom: -2, width: 6, height: 6,
-                        borderRadius: '50%', background: FLAG_COLORS[card.flag], border: `1px solid ${t.surface2}` }} />
+              {/* Flag/favorite — Imported Decks/Favorites only. `flashcards`
+                  has no flag column and no favorites concept at all, so
+                  these are simply not shown for a My Cards session rather
+                  than wired up against data that doesn't exist. */}
+              {!deck.isOwnCards && (
+                <>
+                  {/* position:relative wrapper makes the color popover a true
+                      sub-part of this button — anchored right below/beside it
+                      via absolute positioning — instead of a full-width bar
+                      down in the content area with no visible connection to
+                      what opened it. */}
+                  <div style={{ position: 'relative' }}>
+                    <button className="mb-ss-iconbtn" onClick={() => setFlagPickerOpen(o => !o)}
+                      title={card.flag ? `Flagged: ${FLAG_NAMES[card.flag]}` : 'Flag this card'} aria-label="Flag this card"
+                      style={iconBtnStyle({ background: flagPickerOpen ? t.surface3 : t.surface2 })}>
+                      {/* 🚩 is a fixed-color emoji glyph — CSS `color` can't tint it, so
+                          the current flag color is shown as a separate dot instead. */}
+                      <span style={{ position: 'relative', fontSize: 14, lineHeight: 1 }}>
+                        🚩
+                        {card.flag > 0 && (
+                          <span style={{ position: 'absolute', right: -3, bottom: -2, width: 6, height: 6,
+                            borderRadius: '50%', background: FLAG_COLORS[card.flag], border: `1px solid ${t.surface2}` }} />
+                        )}
+                      </span>
+                    </button>
+                    {flagPickerOpen && (
+                      <>
+                        {/* Full-viewport, invisible, dismiss-on-click — NOT a
+                            cosmetic backdrop. A plain "click outside closes it"
+                            document listener can't work here: most of the
+                            screen is the card's sandboxed iframe, and a click
+                            that lands inside an iframe never bubbles out to the
+                            parent document at all (separate browsing context —
+                            true regardless of sandboxing). This scrim sits
+                            between the popover (z-index 20, above it) and
+                            everything else, so it's what actually catches
+                            "clicked the card to dismiss this" rather than that
+                            click silently doing nothing. */}
+                        <div onClick={() => setFlagPickerOpen(false)}
+                          style={{ position: 'fixed', inset: 0, zIndex: 15 }} />
+                        <div className="mb-ss-flagpop" style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 20,
+                          display: 'flex', alignItems: 'center', gap: 6, padding: '8px 9px',
+                          background: t.surface, border: `1px solid ${t.border}`, borderRadius: 10,
+                          boxShadow: `0 8px 24px ${t.shadowStrong}`, whiteSpace: 'nowrap' }}>
+                          {FLAGS.map(f => (
+                            <button key={f} onClick={() => setFlag(f)} title={card.flag === f ? `Clear flag (${FLAG_NAMES[f]})` : FLAG_NAMES[f]}
+                              style={{ width: 18, height: 18, borderRadius: '50%', background: FLAG_COLORS[f], padding: 0,
+                                border: card.flag === f ? `2px solid ${t.text}` : '2px solid transparent', cursor: 'pointer' }} />
+                          ))}
+                        </div>
+                      </>
                     )}
-                  </span>
-                </button>
-                {flagPickerOpen && (
-                  <>
-                    {/* Full-viewport, invisible, dismiss-on-click — NOT a
-                        cosmetic backdrop. A plain "click outside closes it"
-                        document listener can't work here: most of the
-                        screen is the card's sandboxed iframe, and a click
-                        that lands inside an iframe never bubbles out to the
-                        parent document at all (separate browsing context —
-                        true regardless of sandboxing). This scrim sits
-                        between the popover (z-index 20, above it) and
-                        everything else, so it's what actually catches
-                        "clicked the card to dismiss this" rather than that
-                        click silently doing nothing. */}
-                    <div onClick={() => setFlagPickerOpen(false)}
-                      style={{ position: 'fixed', inset: 0, zIndex: 15 }} />
-                    <div className="mb-ss-flagpop" style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 20,
-                      display: 'flex', alignItems: 'center', gap: 6, padding: '8px 9px',
-                      background: t.surface, border: `1px solid ${t.border}`, borderRadius: 10,
-                      boxShadow: `0 8px 24px ${t.shadowStrong}`, whiteSpace: 'nowrap' }}>
-                      {FLAGS.map(f => (
-                        <button key={f} onClick={() => setFlag(f)} title={card.flag === f ? `Clear flag (${FLAG_NAMES[f]})` : FLAG_NAMES[f]}
-                          style={{ width: 18, height: 18, borderRadius: '50%', background: FLAG_COLORS[f], padding: 0,
-                            border: card.flag === f ? `2px solid ${t.text}` : '2px solid transparent', cursor: 'pointer' }} />
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-              <button className="mb-ss-iconbtn" onClick={toggleCardFavorite}
-                title={favoriteIds.has(card.id) ? 'Remove favorite' : 'Favorite this card'}
-                aria-label={favoriteIds.has(card.id) ? 'Remove favorite' : 'Favorite this card'}
-                style={iconBtnStyle({ color: favoriteIds.has(card.id) ? '#eab308' : t.text3 })}>
-                <IconStar size={14} filled={favoriteIds.has(card.id)} />
-              </button>
+                  </div>
+                  <button className="mb-ss-iconbtn" onClick={toggleCardFavorite}
+                    title={favoriteIds.has(card.id) ? 'Remove favorite' : 'Favorite this card'}
+                    aria-label={favoriteIds.has(card.id) ? 'Remove favorite' : 'Favorite this card'}
+                    style={iconBtnStyle({ color: favoriteIds.has(card.id) ? '#eab308' : t.text3 })}>
+                    <IconStar size={14} filled={favoriteIds.has(card.id)} />
+                  </button>
+                </>
+              )}
             </div>
             <span className="mb-ss-counter" style={{ color: t.text3, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
               {idx + 1} / {queue.length}
@@ -909,6 +963,34 @@ export default function StudySession({ deck, userId, onExit }) {
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
           ...(card.flag ? { borderLeft: `4px solid ${FLAG_COLORS[card.flag]}`, borderRadius: 4, paddingLeft: 10 } : {}) }}>
           <CardRenderer card={card} note={note} model={model} resolvedMedia={resolvedMedia} revealed={revealed} fill />
+        </div>
+      )}
+
+      {/* My Cards — plain question/answer text, not an Anki note+model.
+          Cloze/image rendering through the shared CardRenderer is Stage 2
+          item 6's job (coordinated with the AI Analyze V2 doc's shared
+          renderer); Stage 1 is the engine, so this stays deliberately
+          plain — exactly the same question/answer text FlashCards.js's own
+          old flip-through screen rendered, just inside this engine instead.
+          Text sizes are >=16px per the brief ("Study text >= 16px"). */}
+      {card && deck.isOwnCards && (
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto', background: t.surface,
+          border: `1px solid ${t.border}`, borderRadius: 12, padding: '22px 20px',
+          display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <div style={{ fontSize: 12, color: t.text4, fontWeight: 700, textTransform: 'uppercase',
+            letterSpacing: .6, marginBottom: 10 }}>Question</div>
+          <div data-selectable="true" style={{ fontSize: 18, fontWeight: 600, color: t.text, lineHeight: 1.55 }}>
+            {card.question}
+          </div>
+          {revealed && (
+            <div style={{ marginTop: 22, paddingTop: 18, borderTop: `1px solid ${t.border}` }}>
+              <div style={{ fontSize: 12, color: t.ok, fontWeight: 700, textTransform: 'uppercase',
+                letterSpacing: .6, marginBottom: 10 }}>Answer</div>
+              <div data-selectable="true" style={{ fontSize: 16.5, color: t.text2, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
+                {card.answer}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
