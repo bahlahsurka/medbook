@@ -59,6 +59,10 @@ import * as api from '../../lib/importedDecks/api';
 import * as favoritesApi from '../../lib/importedDecks/favorites';
 import * as ownCardsApi from '../../lib/ownCards/api';
 import { renderOwnCardText } from '../../lib/ownCards/cardText';
+import { OWN_CARDS_DEFAULTS } from '../../lib/ownCards/settings';
+import SourceEntryModal from '../SourceEntryModal';
+
+const { jumpToSourceEnabled } = OWN_CARDS_DEFAULTS;
 import { scheduler } from '../../lib/srs/Scheduler';
 import { useReviewKeyboard } from '../../lib/useReviewKeyboard';
 import { FLAGS, FLAG_COLORS, FLAG_NAMES } from '../../lib/importedDecks/flags';
@@ -203,6 +207,19 @@ export default function StudySession({ deck, userId, onExit }) {
   // of a restore that hasn't finished yet ("prevent the user from
   // accidentally applying another rating on corrupted state").
   const [restoring, setRestoring] = useState(false);
+  // Stage 3 item 8 — { sourceEntryId } while a missed (Again/Hard) My
+  // Cards card is paused waiting for "Source" or "Continue", else null.
+  // `sourceModalOpen` is a separate flag (not folded into missPause)
+  // because closing the modal must NOT itself advance — only "Continue"
+  // does — so the pause and "is the entry currently showing" states need
+  // to vary independently.
+  const [missPause, setMissPause] = useState(null);
+  const [sourceModalOpen, setSourceModalOpen] = useState(false);
+
+  // Clear a pending miss-pause whenever the card actually changes from
+  // under it (Previous, a resumed session landing elsewhere) — it only
+  // ever makes sense for the exact card that was just rated.
+  useEffect(() => { setMissPause(null); setSourceModalOpen(false); }, [idx]);
 
   // Load session — RESUME re-fetches current row data for the FROZEN set
   // of card ids a previous session already chose (never re-running
@@ -252,7 +269,7 @@ export default function StudySession({ deck, userId, onExit }) {
           const cards = deck.isFavorites
             ? (await favoritesApi.getFavoriteCards(userId)).filter(c => !deck.onlyCardId || c.id === deck.onlyCardId)
             : deck.isOwnCards
-            ? await ownCardsApi.getSessionCards({ userId, system: deck.ownCardsSystem, limit: 50, newCardsPerDay: deck.newCardsPerDay })
+            ? await ownCardsApi.getSessionCards({ userId, system: deck.ownCardsSystem, limit: deck.limit || 50, newCardsPerDay: deck.newCardsPerDay })
             : await api.getSessionCards([deck.id], { limit: 50, userId });
           if (cancelled) return;
           setQueue(cards);
@@ -266,7 +283,7 @@ export default function StudySession({ deck, userId, onExit }) {
     // `pendingResume` is a mount-stable lazy-init value (see above) —
     // intentionally not listed as a dependency, same reasoning as
     // DeckBrowser's own mount-time-only effect.
-  }, [deck.id, deck.isFavorites, deck.onlyCardId, deck.isOwnCards, deck.ownCardsSystem, deck.newCardsPerDay, userId, resumeChoice]);
+  }, [deck.id, deck.isFavorites, deck.onlyCardId, deck.isOwnCards, deck.ownCardsSystem, deck.newCardsPerDay, deck.limit, userId, resumeChoice]);
 
   // Persist proactively on every meaningful change — card advances, a
   // rating lands, pause/resume — rather than trying to catch a single
@@ -376,6 +393,11 @@ export default function StudySession({ deck, userId, onExit }) {
     setIdx(p => p + 1);
   }, []);
 
+  // Stage 3 item 8 — "Continue" is the only thing that advances past a
+  // paused miss; closing the Source modal on its own does not (see
+  // `missPause`'s own comment on why these are separate flags).
+  const continueAfterMiss = () => { setMissPause(null); setSourceModalOpen(false); advance(); };
+
   // Duplicate-review note: if the app is interrupted while api.rateCard's
   // request is in flight — the write reaches the server, but the response
   // never reaches this client — `idx` never advances locally (setQueue/
@@ -436,7 +458,18 @@ export default function StudySession({ deck, userId, onExit }) {
       // going forward, not the first rating's now-irrelevant history.
       logInsertsRef.current[card.id] = logInsert;
       setActions(a => ({ ...a, [card.id]: { previousState, rating: label, ratedAtIso: updated.last_reviewed_at } }));
-      advance();
+      // Stage 3 item 8 — "jump to source on a miss." A card graded Again
+      // or Hard that came from an AI-added entry pauses here instead of
+      // auto-advancing, so there's an actual moment to tap Source before
+      // the card is gone. Every other case (Good/Easy, no known source,
+      // or not a My Cards session at all) advances exactly as before —
+      // zero behaviour change for Imported Decks/Favorites, which never
+      // set isOwnCards or source_entry_id in the first place.
+      if (deck.isOwnCards && jumpToSourceEnabled && (label === 'again' || label === 'hard') && card.source_entry_id) {
+        setMissPause({ sourceEntryId: card.source_entry_id });
+      } else {
+        advance();
+      }
     } catch (e) {
       setErr(e.message || 'Could not save rating');
     }
@@ -549,7 +582,7 @@ export default function StudySession({ deck, userId, onExit }) {
   // lightbox is open on top of it") — otherwise "a" while just looking at
   // an enlarged image would silently rate the card underneath it.
   const activeCard = queue && idx < queue.length ? queue[idx] : null;
-  useReviewKeyboard(!!activeCard && !paused && !lightboxSrc && !restoring, {
+  useReviewKeyboard(!!activeCard && !paused && !lightboxSrc && !restoring && !missPause, {
     flipped: revealed,
     onFlip: () => setRevealed(true),
     onAgain: () => rate('again'),
@@ -997,7 +1030,26 @@ export default function StudySession({ deck, userId, onExit }) {
       )}
 
       <div style={{ marginTop: 10, flexShrink: 0 }}>
-        {!revealed ? (
+        {missPause ? (
+          // Stage 3 item 8 — paused on a miss. Replaces the rating strip
+          // (that grading already happened) with exactly two choices:
+          // look at where this card came from, or move on. Nothing here
+          // is reachable unless the card that was JUST rated Again/Hard
+          // had a source_entry_id — see rate()'s own comment.
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={() => setSourceModalOpen(true)} style={{
+              flex: 1, background: t.navActiveBg, border: `1px solid ${t.navActiveBorder}`, color: t.navActiveText,
+              borderRadius: 12, padding: '14px 10px', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+              fontFamily: 'Inter,sans-serif' }}>
+              Source
+            </button>
+            <button onClick={continueAfterMiss} style={{
+              flex: 1, background: t.accent, color: '#fff', border: 'none', borderRadius: 12,
+              padding: '14px 10px', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+              Continue →
+            </button>
+          </div>
+        ) : !revealed ? (
           // Large single tap target — the primary touch action (Phase L4).
           <button onClick={() => setRevealed(true)} className="mb-ss-showanswer" style={{
             width: '100%', background: t.accent, color: '#fff', border: 'none', borderRadius: 12,
@@ -1055,6 +1107,10 @@ export default function StudySession({ deck, userId, onExit }) {
             boxShadow: '0 8px 40px rgba(0,0,0,0.5)', cursor: 'default',
           }} />
         </div>
+      )}
+
+      {sourceModalOpen && missPause && (
+        <SourceEntryModal t={t} entryId={missPause.sourceEntryId} userId={userId} onClose={() => setSourceModalOpen(false)} />
       )}
     </div>
   );

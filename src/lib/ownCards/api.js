@@ -223,6 +223,43 @@ export async function getOwnCardsReviewStats(userId) {
 }
 
 /**
+ * Weak spots (Stage 3 item 9) — systems ranked by retention, weakest
+ * first, restricted to systems with at least `minReviews` graded ratings
+ * (a system with only a handful of reviews would rank as "weak" or
+ * "strong" almost at random — not meaningful enough to act on). Reuses
+ * the same `flashcards!inner` embed getOwnCardsReviewStats already uses
+ * to pull each log row's card system, rather than a second join shape.
+ * No time window — unlike the 90-day stats sample, "which systems am I
+ * actually weak in" should reflect the whole history, not just recently.
+ */
+export async function getWeakSpots(userId, minReviews) {
+  try {
+    const { data, error } = await supabase.from('flashcard_review_log')
+      .select('rating, flashcards!inner(system)')
+      .eq('user_id', userId);
+    if (error) throw error;
+    const bySystem = {};
+    (data || []).forEach(r => {
+      const system = r.flashcards?.system || null;
+      if (system == null) return; // Uncategorized isn't a "system" to rank
+      const row = (bySystem[system] ||= { system, total: 0, good: 0 });
+      row.total++;
+      if (r.rating === 'good' || r.rating === 'easy') row.good++;
+    });
+    return Object.values(bySystem)
+      .filter(r => r.total >= minReviews)
+      .map(r => ({ system: r.system, total: r.total, retentionPct: Math.round((r.good / r.total) * 100) }))
+      .sort((a, b) => a.retentionPct - b.retentionPct || b.total - a.total);
+  } catch (err) {
+    if (process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line no-console
+      console.warn('[getWeakSpots] unavailable', err.message);
+    }
+    return [];
+  }
+}
+
+/**
  * How many cards are due on each of the next `days` calendar days
  * (today..+days-1) — a flat count per day, not cumulative. Anything
  * already overdue is bucketed into "today" (day 0): the forecast is
