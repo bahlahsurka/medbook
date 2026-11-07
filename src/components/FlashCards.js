@@ -13,6 +13,8 @@ import ImportedStats from './ImportedDecks/ImportedStats';
 import FavoritesScreen from './ImportedDecks/FavoritesScreen';
 import { loadActiveStudy, saveActiveStudy, clearActiveStudy } from '../lib/importedDecks/studySessionStore';
 import * as ownCardsApi from '../lib/ownCards/api';
+import OwnCardsStats from './OwnCardsStats';
+import { renderOwnCardText, stripOwnCardSyntax, findSimilarCard } from '../lib/ownCards/cardText';
 
 // Sentinel key for cards with no system assigned (legacy cards, or anything
 // created before folders existed). Never stored in the DB as this string —
@@ -78,6 +80,32 @@ function ErrBox({ t, msg }) {
   return (
     <div style={{ background:t.dangerBg, border:`1px solid ${t.dangerBorder}`,
       borderRadius:RADIUS.md, padding:'10px 14px', fontSize:FONT.size.base, color:t.danger }}>{msg}</div>
+  );
+}
+
+// Stage 2 item 5 — a proper in-app confirm, My Cards only (window.confirm
+// stays exactly as-is everywhere else in the app; this never touches
+// DetailView.js/ManageSystems.js's own usages). Same overlay/centered-card
+// convention FavoritesScreen's own preview modal already uses, not a new
+// pattern. `state` is `{ message, onConfirm }` or null; the caller owns
+// that state and clears it in both the confirm and cancel handlers.
+function ConfirmDialog({ t, state, onCancel }) {
+  if (!state) return null;
+  return (
+    <div onClick={onCancel} style={{ position:'fixed', inset:0, background:t.overlay, zIndex:300,
+      display:'flex', alignItems:'center', justifyContent:'center', padding:16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background:t.surface, borderRadius:RADIUS.lg,
+        padding:20, maxWidth:360, width:'100%', boxShadow:`0 8px 32px ${t.shadowStrong}`,
+        fontFamily:'Inter,sans-serif' }}>
+        <div style={{ fontSize:FONT.size.base, color:t.text, lineHeight:1.6, marginBottom:18 }}>
+          {state.message}
+        </div>
+        <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
+          <Btn t={t} tone="ghost" onClick={onCancel}>Cancel</Btn>
+          <Btn t={t} tone="danger" onClick={state.onConfirm}>Delete</Btn>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -151,6 +179,7 @@ export default function FlashCards({ userId, userSystems }) {
       : null
   ));
   const [favoritesKey, setFavoritesKey] = useState(0); // bump to refresh FavoritesScreen after a Study Favorites round trip
+  const [showOwnStats, setShowOwnStats] = useState(false); // Stage 2 item 4 — My Cards' own Stats screen
   const [showImportWizard, setShowImportWizard] = useState(false);
   const [deckBrowserKey, setDeckBrowserKey] = useState(0); // bump to force DeckBrowser to reload after an import completes
   const [deckRefreshSignal, setDeckRefreshSignal] = useState(0); // bump to refresh DeckBrowser's counts (no remount) after Study changes deck data
@@ -162,6 +191,8 @@ export default function FlashCards({ userId, userSystems }) {
   // 'add' | 'edit' | 'study' | 'studyOne'
   const [view, setView]           = useState('folders');
   const [activeFolder, setAF]     = useState(null); // system name, or UNCAT, or null (top level)
+  // Stage 2 item 5 — search box inside a folder, question+answer text.
+  const [folderSearch, setFolderSearch] = useState('');
 
   // Bulk select — deliberately an explicit toggle button, NOT long-press.
   // The entry-list's long-press bulk mode has its own touch-sensitivity
@@ -171,6 +202,10 @@ export default function FlashCards({ userId, userSystems }) {
   const [selectedIds, setSelIds]  = useState(new Set());
   const [bulkTarget, setBulkTarget] = useState('');
   const [bulkBusy, setBulkBusy]   = useState(false);
+
+  // Stage 2 item 5 — in-app confirm dialog state. `{ message, onConfirm }`
+  // or null; see ConfirmDialog's own comment above.
+  const [confirmState, setConfirmState] = useState(null);
 
   const [studyIdx, setStudyIdx]   = useState(0);
   const [studyCards, setStudyCards] = useState([]);
@@ -253,8 +288,20 @@ export default function FlashCards({ userId, userSystems }) {
     return cards.filter(c => (c.system || UNCAT) === activeFolder);
   }, [cards, activeFolder]);
 
-  const openFolder = (key) => { setAF(key); setView('list'); exitBulk(); };
-  const backToFolders = () => { setAF(null); setView('folders'); exitBulk(); };
+  // Stage 2 item 5 — search box inside a folder. Plain case-insensitive
+  // substring match over question+answer, client-side (a folder's cards
+  // are already fully in memory — no reason for a second query). Separate
+  // from folderCards itself so "no cards in this folder at all" and "no
+  // cards match this search" can show distinct, correct empty states.
+  const visibleFolderCards = useMemo(() => {
+    const q = folderSearch.trim().toLowerCase();
+    if (!q) return folderCards;
+    return folderCards.filter(c =>
+      (c.question || '').toLowerCase().includes(q) || (c.answer || '').toLowerCase().includes(q));
+  }, [folderCards, folderSearch]);
+
+  const openFolder = (key) => { setAF(key); setView('list'); exitBulk(); setFolderSearch(''); };
+  const backToFolders = () => { setAF(null); setView('folders'); exitBulk(); setFolderSearch(''); };
 
   const exitBulk = () => { setBulkMode(false); setSelIds(new Set()); setBulkTarget(''); };
   const toggleSelect = (id) => setSelIds(prev => {
@@ -280,16 +327,21 @@ export default function FlashCards({ userId, userSystems }) {
     exitBulk();
   };
 
-  const bulkDelete = async () => {
+  const bulkDelete = () => {
     if (selectedIds.size === 0) return;
-    if (!window.confirm(`Delete ${selectedIds.size} card${selectedIds.size!==1?'s':''}? This can't be undone.`)) return;
-    setBulkBusy(true); setErr('');
     const ids = [...selectedIds];
-    const { error } = await supabase.from('flashcards').delete().in('id', ids);
-    setBulkBusy(false);
-    if (error) { setErr(`Couldn't delete cards: ${error.message}`); return; }
-    setCards(p => p.filter(c => !ids.includes(c.id)));
-    exitBulk();
+    setConfirmState({
+      message: `Delete ${ids.length} card${ids.length!==1?'s':''}? This can't be undone.`,
+      onConfirm: async () => {
+        setConfirmState(null);
+        setBulkBusy(true); setErr('');
+        const { error } = await supabase.from('flashcards').delete().in('id', ids);
+        setBulkBusy(false);
+        if (error) { setErr(`Couldn't delete cards: ${error.message}`); return; }
+        setCards(p => p.filter(c => !ids.includes(c.id)));
+        exitBulk();
+      },
+    });
   };
 
   // ── CRUD ─────────────────────────────────────────────────────────────
@@ -315,10 +367,15 @@ export default function FlashCards({ userId, userSystems }) {
     setAF(formSystem); setView('list'); // land in the folder the card was just filed under
   };
 
-  const deleteCard = async (id) => {
-    if (!window.confirm('Delete this flashcard?')) return;
-    await supabase.from('flashcards').delete().eq('id', id);
-    setCards(p => p.filter(c => c.id !== id));
+  const deleteCard = (id) => {
+    setConfirmState({
+      message: 'Delete this flashcard?',
+      onConfirm: async () => {
+        setConfirmState(null);
+        await supabase.from('flashcards').delete().eq('id', id);
+        setCards(p => p.filter(c => c.id !== id));
+      },
+    });
   };
 
   const startEdit = (card) => {
@@ -527,6 +584,10 @@ export default function FlashCards({ userId, userSystems }) {
     return <StudySession deck={ownStudyDeck} userId={userId} onExit={exitOwnStudy} />;
   }
 
+  if (showOwnStats) {
+    return <OwnCardsStats userId={userId} onExit={() => setShowOwnStats(false)} />;
+  }
+
   if (loading) return (
     <div style={{ textAlign:'center', paddingTop:60, color:t.text4, fontFamily:'Inter,sans-serif', fontSize:FONT.size.sm }}>
       Loading flashcards…
@@ -584,16 +645,14 @@ export default function FlashCards({ userId, userSystems }) {
           marginBottom:SPACE.lg, display:'flex', flexDirection:'column', justifyContent:'center' }}>
           <div style={{ fontSize:FONT.size.micro, color:t.text4, fontWeight:FONT.weight.semibold,
             textTransform:'uppercase', letterSpacing:.8, marginBottom:SPACE.md }}>Question</div>
-          <div data-selectable="true" style={{ fontSize:FONT.size.xl, fontWeight:FONT.weight.semibold, color:t.text, lineHeight:1.5 }}>
-            {card.question}
-          </div>
+          <div data-selectable="true" style={{ fontSize:FONT.size.xl, fontWeight:FONT.weight.semibold, color:t.text, lineHeight:1.5, whiteSpace:'pre-wrap' }}
+            dangerouslySetInnerHTML={{ __html: renderOwnCardText(card.question, false) }} />
           {flipped && (
             <div className="mb-fc-fade" style={{ marginTop:SPACE.xl2, paddingTop:SPACE.xl2, borderTop:`1px solid ${t.border}` }}>
               <div style={{ fontSize:FONT.size.micro, color:t.ok, fontWeight:FONT.weight.semibold,
                 textTransform:'uppercase', letterSpacing:.8, marginBottom:SPACE.md }}>Answer</div>
-              <div data-selectable="true" style={{ fontSize:FONT.size.lg, color:t.text2, lineHeight:1.7, whiteSpace:'pre-wrap' }}>
-                {card.answer}
-              </div>
+              <div data-selectable="true" style={{ fontSize:FONT.size.lg, color:t.text2, lineHeight:1.7, whiteSpace:'pre-wrap' }}
+                dangerouslySetInnerHTML={{ __html: renderOwnCardText(card.answer, true) }} />
             </div>
           )}
         </div>
@@ -613,7 +672,13 @@ export default function FlashCards({ userId, userSystems }) {
   }
 
   // ── Add mode ──────────────────────────────────────────────────────────
-  if (view === 'add') return (
+  if (view === 'add') {
+    // Stage 2 item 6 — duplicate warning, "warn, never block". Checked
+    // against every card the user owns (not just the current folder —
+    // a near-duplicate filed under a different system is still a
+    // near-duplicate), recomputed as they type. Never disables Add Card.
+    const similar = findSimilarCard(q, cards);
+    return (
     <div className="mb-fc-fade" style={{ maxWidth:560, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
       <style>{localCss}</style>
       <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.bold, color:t.text, marginBottom:SPACE.xl }}>
@@ -633,6 +698,12 @@ export default function FlashCards({ userId, userSystems }) {
             placeholder="What is the mechanism of action of metformin?"
             rows={3} style={F.ta} />
         </div>
+        {similar && (
+          <div style={{ background:t.warnBg, border:`1px solid ${t.warnBorder}`, borderRadius:RADIUS.md,
+            padding:'10px 14px', fontSize:FONT.size.xs, color:t.warn, lineHeight:1.6 }}>
+            ⚠️ A similar card already exists{similar.system ? ` in ${similar.system}` : ''}: "{stripOwnCardSyntax(similar.question).slice(0, 80)}"
+          </div>
+        )}
         <div>
           <label style={F.lbl}>Answer</label>
           <textarea value={a} onChange={e=>setA(e.target.value)}
@@ -651,7 +722,8 @@ export default function FlashCards({ userId, userSystems }) {
         </div>
       </div>
     </div>
-  );
+    );
+  }
 
   // ── Edit mode ─────────────────────────────────────────────────────────
   if (view === 'edit') return (
@@ -706,12 +778,15 @@ export default function FlashCards({ userId, userSystems }) {
           </div>
         </div>
         {cards.length > 0 && (
-          <Btn t={t} tone="primary" icon={<IconPlay size={11} />}
-            disabled={(srsCountsOverall.new + srsCountsOverall.due) === 0}
-            onClick={() => startOwnStudy({ kind: 'all' })}
-            style={{ opacity: (srsCountsOverall.new + srsCountsOverall.due) === 0 ? .5 : 1 }}>
-            Study due (all folders)
-          </Btn>
+          <div style={{ display:'flex', gap:8 }}>
+            <Btn t={t} tone="ghost" onClick={() => setShowOwnStats(true)}>Stats</Btn>
+            <Btn t={t} tone="primary" icon={<IconPlay size={11} />}
+              disabled={(srsCountsOverall.new + srsCountsOverall.due) === 0}
+              onClick={() => startOwnStudy({ kind: 'all' })}
+              style={{ opacity: (srsCountsOverall.new + srsCountsOverall.due) === 0 ? .5 : 1 }}>
+              Study due (all folders)
+            </Btn>
+          </div>
         )}
       </div>
 
@@ -779,6 +854,7 @@ export default function FlashCards({ userId, userSystems }) {
   return (
     <div className="mb-fc-fade" style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
       <style>{localCss}</style>
+      <ConfirmDialog t={t} state={confirmState} onCancel={() => setConfirmState(null)} />
       <button onClick={backToFolders} className="mb-fc-btn" style={{ background:'none', border:'none',
         color:t.text3, cursor:'pointer', fontSize:FONT.size.sm, fontWeight:FONT.weight.medium, marginBottom:SPACE.md,
         fontFamily:'Inter,sans-serif', padding:'4px 2px', display:'flex', alignItems:'center', gap:4 }}>
@@ -868,6 +944,14 @@ export default function FlashCards({ userId, userSystems }) {
         </div>
       )}
 
+      {folderCards.length > 0 && !bulkMode && (
+        <input value={folderSearch} onChange={e => setFolderSearch(e.target.value)}
+          placeholder="Search this folder…"
+          style={{ width:'100%', boxSizing:'border-box', background:t.surface2, border:`1px solid ${t.borderStrong}`,
+            borderRadius:RADIUS.md, color:t.text, padding:'10px 12px', fontSize:FONT.size.sm, outline:'none',
+            fontFamily:'Inter,sans-serif', marginBottom:SPACE.lg }} />
+      )}
+
       {folderCards.length === 0 ? (
         <div style={{ textAlign:'center', padding:'60px 20px' }}>
           <div style={{ width:52, height:52, borderRadius:RADIUS.xl2, background:t.navActiveBg,
@@ -879,9 +963,14 @@ export default function FlashCards({ userId, userSystems }) {
           </div>
           <Btn t={t} tone="primary" icon={<IconPlus size={13} />} onClick={openAdd}>Add a Card</Btn>
         </div>
+      ) : visibleFolderCards.length === 0 ? (
+        <div style={{ textAlign:'center', padding:'50px 20px' }}>
+          <div style={{ fontSize:28, marginBottom:10 }}>🔍</div>
+          <div style={{ fontSize:FONT.size.base, color:t.text3 }}>No cards match "{folderSearch}".</div>
+        </div>
       ) : (
         <div style={{ display:'flex', flexDirection:'column', gap:SPACE.sm+2 }}>
-          {folderCards.map(c => {
+          {visibleFolderCards.map(c => {
             const isSel = selectedIds.has(c.id);
             return (
             <div key={c.id} className="mb-fc-row"
@@ -904,11 +993,11 @@ export default function FlashCards({ userId, userSystems }) {
                 )}
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontSize:FONT.size.base, fontWeight:FONT.weight.semibold, color:t.text, marginBottom:6, lineHeight:1.5 }}>
-                    {c.question}
+                    {stripOwnCardSyntax(c.question)}
                   </div>
                   <div style={{ fontSize:FONT.size.sm, color:t.text3, lineHeight:1.6,
                     overflow:'hidden', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' }}>
-                    {c.answer}
+                    {stripOwnCardSyntax(c.answer)}
                   </div>
                 </div>
                 {!bulkMode && (
