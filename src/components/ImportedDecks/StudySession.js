@@ -58,6 +58,7 @@ import { useTheme } from '../../lib/theme';
 import * as api from '../../lib/importedDecks/api';
 import * as favoritesApi from '../../lib/importedDecks/favorites';
 import * as ownCardsApi from '../../lib/ownCards/api';
+import { renderOwnCardText } from '../../lib/ownCards/cardText';
 import { scheduler } from '../../lib/srs/Scheduler';
 import { useReviewKeyboard } from '../../lib/useReviewKeyboard';
 import { FLAGS, FLAG_COLORS, FLAG_NAMES } from '../../lib/importedDecks/flags';
@@ -967,28 +968,29 @@ export default function StudySession({ deck, userId, onExit }) {
       )}
 
       {/* My Cards — plain question/answer text, not an Anki note+model.
-          Cloze/image rendering through the shared CardRenderer is Stage 2
-          item 6's job (coordinated with the AI Analyze V2 doc's shared
-          renderer); Stage 1 is the engine, so this stays deliberately
-          plain — exactly the same question/answer text FlashCards.js's own
-          old flip-through screen rendered, just inside this engine instead.
-          Text sizes are >=16px per the brief ("Study text >= 16px"). */}
+          Cloze ({{c1::...}}) and recognized bare image URLs now render
+          via lib/ownCards/cardText.js's renderOwnCardText (Stage 2 item
+          6), which itself runs on the SAME shared cloze engine Imported
+          Decks uses (templateRender.js's renderCloze, extended with an
+          ord===null mode) — one renderer, not two. The question side is
+          never "revealed" (that only applies to the cloze mask on the
+          ANSWER — see renderOwnCardText's own comment); the question
+          always shows its own cloze-masked form. Text sizes are >=16px
+          per the brief ("Study text >= 16px"). */}
       {card && deck.isOwnCards && (
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto', background: t.surface,
           border: `1px solid ${t.border}`, borderRadius: 12, padding: '22px 20px',
           display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
           <div style={{ fontSize: 12, color: t.text4, fontWeight: 700, textTransform: 'uppercase',
             letterSpacing: .6, marginBottom: 10 }}>Question</div>
-          <div data-selectable="true" style={{ fontSize: 18, fontWeight: 600, color: t.text, lineHeight: 1.55 }}>
-            {card.question}
-          </div>
+          <div data-selectable="true" style={{ fontSize: 18, fontWeight: 600, color: t.text, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}
+            dangerouslySetInnerHTML={{ __html: renderOwnCardText(card.question, false) }} />
           {revealed && (
             <div style={{ marginTop: 22, paddingTop: 18, borderTop: `1px solid ${t.border}` }}>
               <div style={{ fontSize: 12, color: t.ok, fontWeight: 700, textTransform: 'uppercase',
                 letterSpacing: .6, marginBottom: 10 }}>Answer</div>
-              <div data-selectable="true" style={{ fontSize: 16.5, color: t.text2, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
-                {card.answer}
-              </div>
+              <div data-selectable="true" style={{ fontSize: 16.5, color: t.text2, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}
+                dangerouslySetInnerHTML={{ __html: renderOwnCardText(card.answer, true) }} />
             </div>
           )}
         </div>

@@ -190,3 +190,58 @@ export function computeOverallCounts(cards) {
   }
   return row;
 }
+
+/* ------------------------------------------------------------------ */
+/* Stats (Stage 2 item 4) — reads flashcard_review_log. Mirrors imported */
+/* api.js's getImportedReviewStats shape (null = unavailable, same      */
+/* undefined/null/real convention OwnCardsStats.js uses), scoped to My  */
+/* Cards' own log table. Embeds each row's CURRENT card review_count    */
+/* (a real FK, flashcard_review_log.card_id -> flashcards.id) so the    */
+/* caller can filter to "cards seen >= 3 times" without a second query. */
+/* ------------------------------------------------------------------ */
+export async function getOwnCardsReviewStats(userId) {
+  try {
+    const since = new Date(Date.now() - 90 * 86400_000).toISOString();
+    const [{ count, error: countErr }, { data: rows, error: rowsErr }] = await Promise.all([
+      supabase.from('flashcard_review_log').select('*', { count: 'exact', head: true }).eq('user_id', userId),
+      supabase.from('flashcard_review_log')
+        .select('rating, reviewed_at, flashcards!inner(review_count)')
+        .eq('user_id', userId).gte('reviewed_at', since).order('reviewed_at', { ascending: true }),
+    ]);
+    if (countErr || rowsErr) throw (countErr || rowsErr);
+    return {
+      totalAllTime: count || 0,
+      rows: (rows || []).map(r => ({ rating: r.rating, reviewed_at: r.reviewed_at, cardReviewCount: r.flashcards?.review_count ?? 0 })),
+    };
+  } catch (err) {
+    if (process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line no-console
+      console.warn('[getOwnCardsReviewStats] unavailable, Stats screen will show its empty state', err.message);
+    }
+    return null;
+  }
+}
+
+/**
+ * How many cards are due on each of the next `days` calendar days
+ * (today..+days-1) — a flat count per day, not cumulative. Anything
+ * already overdue is bucketed into "today" (day 0): the forecast is
+ * about workload per day, and an overdue card's workload lands the
+ * moment you'd actually study it (today), not on whatever day it was
+ * originally due.
+ */
+export async function getDueForecast(userId, days = 7) {
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const horizon = new Date(todayStart.getTime() + days * 86400_000);
+  const buckets = new Array(days).fill(0);
+  const { data, error } = await supabase.from('flashcards')
+    .select('due_at').eq('user_id', userId)
+    .neq('state', 'new').neq('state', 'suspended')
+    .not('due_at', 'is', null).lte('due_at', horizon.toISOString());
+  if (error) return buckets;
+  (data || []).forEach(r => {
+    const dayIdx = Math.max(0, Math.floor((new Date(r.due_at).getTime() - todayStart.getTime()) / 86400_000));
+    if (dayIdx < days) buckets[dayIdx]++;
+  });
+  return buckets;
+}

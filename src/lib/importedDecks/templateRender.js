@@ -43,12 +43,20 @@ const CLOZE_RE = /\{\{c(\d+)::(.*?)(?:::(.*?))?\}\}/g;
  * appear multiple times in the same field and all instances move as one).
  * {{cN::...}} for OTHER cloze numbers always shows its answer text plainly
  * — it belongs to a different card, not this one.
+ *
+ * `ord === null` (Engram Stage 2 item 6 — My Cards, lib/ownCards/
+ * cardText.js) means there IS no "other card" to leave alone: a
+ * `flashcards` row is already its own whole question+answer, never split
+ * into one card per cloze number the way a real Anki cloze note is. Every
+ * {{cN::...}} group, whatever its N, gets masked/revealed together — the
+ * one shared cloze renderer this brief asks for, not a second parallel
+ * implementation with its own regex.
  */
 export function renderCloze(text, ord, revealed) {
-  const targetN = ord + 1;
+  const targetN = ord == null ? null : ord + 1;
   return String(text || '').replace(CLOZE_RE, (_, nStr, answer, hint) => {
     const n = parseInt(nStr, 10);
-    if (n !== targetN) return answer; // a different cloze card's blank — always shown
+    if (targetN != null && n !== targetN) return answer; // a different cloze card's blank — always shown
     if (revealed) {
       return `<span class="cloze-reveal">${answer}</span>`;
     }
