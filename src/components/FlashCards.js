@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
@@ -12,6 +12,7 @@ import { STUDY_SCOPE_CLASS, suppressContextMenu } from '../lib/studyInteraction'
 import ImportedStats from './ImportedDecks/ImportedStats';
 import FavoritesScreen from './ImportedDecks/FavoritesScreen';
 import { loadActiveStudy, saveActiveStudy, clearActiveStudy } from '../lib/importedDecks/studySessionStore';
+import * as ownCardsApi from '../lib/ownCards/api';
 
 // Sentinel key for cards with no system assigned (legacy cards, or anything
 // created before folders existed). Never stored in the DB as this string —
@@ -37,6 +38,26 @@ const AREA_TABS = [
 // keys off deck.id/deck.isFavorites, not `deck` itself, but a stable
 // reference is one less thing to reason about).
 const FAVORITES_DECK = { id: '__favorites__', display_name: 'Favorite Cards', isFavorites: true };
+
+// A virtual "deck" for My Cards — same pattern as FAVORITES_DECK above, this
+// time keyed on `isOwnCards` (see StudySession.js / lib/ownCards/api.js).
+// `scope` is one of:
+//   { kind: 'all' }                 -> every folder, due+new across all of them
+//   { kind: 'uncat' }                -> only cards with no system (system IS NULL)
+//   { kind: 'system', system: name } -> one specific folder
+// The resulting deck's `ownCardsSystem` is exactly the shape
+// lib/ownCards/api.js's getSessionCards expects for its own `system` param.
+function ownCardsDeck(scope) {
+  const idSuffix = scope.kind === 'all' ? 'all' : scope.kind === 'uncat' ? 'uncat' : `sys:${scope.system}`;
+  const displayName = scope.kind === 'all' ? 'My Cards' : scope.kind === 'uncat' ? 'Uncategorized' : scope.system;
+  return {
+    id: `__owncards__:${idSuffix}`,
+    display_name: displayName,
+    isOwnCards: true,
+    ownCardsSystem: scope.kind === 'all' ? null : scope.kind === 'uncat' ? { uncategorized: true } : scope.system,
+    newCardsPerDay: 20,
+  };
+}
 
 // Shared field styling (add/edit forms) — tokenised, otherwise unchanged
 // from before this batch.
@@ -119,6 +140,16 @@ export default function FlashCards({ userId, userSystems }) {
       ? { ...FAVORITES_DECK, ...(restoredStudy.onlyCardId ? { onlyCardId: restoredStudy.onlyCardId } : {}) }
       : null
   )); // FAVORITES_DECK-shaped object, or null
+  // My Cards' own study pointer — Stage 1 item 1, the same saveActiveStudy
+  // pattern above extended to `area: 'own'`. The restored pointer only
+  // carries the scope (all / uncategorized / one system), which is enough
+  // to rebuild the exact same virtual deck via ownCardsDeck() — StudySession
+  // re-fetches everything else itself.
+  const [ownStudyDeck, setOwnStudyDeck] = useState(() => (
+    restoredStudy?.area === 'own'
+      ? ownCardsDeck({ kind: restoredStudy.scopeKind || 'all', system: restoredStudy.system })
+      : null
+  ));
   const [favoritesKey, setFavoritesKey] = useState(0); // bump to refresh FavoritesScreen after a Study Favorites round trip
   const [showImportWizard, setShowImportWizard] = useState(false);
   const [deckBrowserKey, setDeckBrowserKey] = useState(0); // bump to force DeckBrowser to reload after an import completes
@@ -162,9 +193,14 @@ export default function FlashCards({ userId, userSystems }) {
 
   const F = fieldStyles(t);
 
-  useEffect(() => {
+  // Extracted so a My Cards study session's exit can re-pull fresh
+  // scheduling data (state/due_at/etc. just changed by StudySession/
+  // lib/ownCards/api.js directly in the DB, bypassing this component's own
+  // `cards` state) — "counts refresh after a session" per the brief,
+  // same reason DeckBrowser bumps its own refreshSignal after Study.
+  const refetchCards = useCallback(() => {
     if (!userId) return;
-    supabase.from('flashcards').select('*')
+    return supabase.from('flashcards').select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .then(({ data, error }) => {
@@ -173,11 +209,20 @@ export default function FlashCards({ userId, userSystems }) {
       });
   }, [userId]);
 
+  useEffect(() => { refetchCards(); }, [refetchCards]);
+
   // ── Folder grouping ──────────────────────────────────────────────────
   // Systems that have cards, in the same order as the sidebar (userSystems),
   // then any system referenced by a card but no longer in userSystems (e.g.
   // renamed/removed — the cards aren't lost, they still get their own
   // folder), then Uncategorized last.
+  // Study-engine counts, per folder — New/Learning/Due, computed live from
+  // the already-loaded `cards` array (Stage 1 item 2). No denormalized
+  // count table to go stale: this is always exactly as fresh as `cards`
+  // itself, which refetchCards() refreshes after a study session.
+  const srsCountsByFolder = useMemo(() => ownCardsApi.computeFolderCounts(cards, UNCAT), [cards]);
+  const srsCountsOverall = useMemo(() => ownCardsApi.computeOverallCounts(cards), [cards]);
+
   const folders = useMemo(() => {
     const counts = {};
     cards.forEach(c => {
@@ -200,8 +245,8 @@ export default function FlashCards({ userId, userSystems }) {
     if (counts[UNCAT]) {
       out.push({ key: UNCAT, label: 'Uncategorized', color: t.text4, count: counts[UNCAT] });
     }
-    return out;
-  }, [cards, userSystems, t.text4]);
+    return out.map(f => ({ ...f, srs: srsCountsByFolder[f.key] || { new: 0, learning: 0, due: 0 } }));
+  }, [cards, userSystems, t.text4, srsCountsByFolder]);
 
   const folderCards = useMemo(() => {
     if (activeFolder === null) return [];
@@ -303,46 +348,44 @@ export default function FlashCards({ userId, userSystems }) {
   };
 
   // ── Study ────────────────────────────────────────────────────────────
-  const studyThisFolder = () => {
-    const shuffled = [...folderCards].sort(() => Math.random() - 0.5);
-    setStudyCards(shuffled);
-    setStudyIdx(0); setFlipped(false); setDone(false); setView('study');
+  // Engram Stage 1 — multi-card study now runs on the same spaced-
+  // repetition engine as Imported Decks/Favorites (StudySession +
+  // lib/ownCards/api.js), replacing the old plain shuffle-and-flip deck
+  // (and its biased `sort(() => Math.random() - 0.5)` shuffle) entirely.
+  // "Study due (all folders)" / per-folder "Study due" both go through
+  // startOwnStudy; `ownStudyDeck` being non-null takes over the whole
+  // screen below, same as importedSub/favoritesStudyDeck do for their
+  // own areas.
+  const startOwnStudy = (scope) => {
+    const deck = ownCardsDeck(scope);
+    saveActiveStudy(userId, { area: 'own', scopeKind: scope.kind, system: scope.system || null });
+    setOwnStudyDeck(deck);
   };
+  const exitOwnStudy = () => { clearActiveStudy(userId); setOwnStudyDeck(null); refetchCards(); };
 
-  const studyEverything = () => {
-    const shuffled = [...cards].sort(() => Math.random() - 0.5);
-    setStudyCards(shuffled);
-    setStudyIdx(0); setFlipped(false); setDone(false); setView('study');
-  };
-
+  // Single-card "Review" (studyOne) stays an ungraded preview, per the
+  // brief's explicit "may stay ungraded" option — chosen deliberately:
+  // it's a quick look-up from a folder list, not a scheduled study
+  // session, and keeping it as the pre-existing plain flip-through is the
+  // smallest-diff choice that doesn't interfere with the new engine's own
+  // due-card bookkeeping (a studyOne peek was never meant to count as a
+  // "review" toward scheduling).
   const studyOne = (card) => {
     setStudyCards([card]);
     setStudyIdx(0); setFlipped(false); setDone(false); setView('studyOne');
   };
 
-  const nextCard = () => {
-    if (studyIdx + 1 >= studyCards.length) setDone(true);
-    else { setStudyIdx(p => p + 1); setFlipped(false); }
-  };
-
-  // studyOne is always a single card, so there's never a previous card to
-  // go back to there — only wired up for the multi-card 'study' view.
-  const prevCard = () => {
-    if (studyIdx === 0) return;
-    setStudyIdx(p => p - 1);
-    setFlipped(false);
-  };
+  // Always exactly one card for studyOne, so "next" only ever means "done".
+  const nextCard = () => setDone(true);
 
   const card = studyCards[studyIdx];
 
-  // Keyboard: Space=reveal, Enter=Next, ←=Previous (no difficulty rating
-  // here — this is a plain flip-through deck, not the spaced-repetition
-  // Review Queue).
-  const inStudy = (view === 'study' || view === 'studyOne') && !done && !!card;
+  // Keyboard: Space=reveal, Enter=done (no Previous — a single-card preview
+  // has nothing to go back to).
+  const inStudy = view === 'studyOne' && !done && !!card;
   useReviewKeyboard(inStudy, {
     flipped, onFlip: () => setFlipped(true),
     onNext: () => nextCard(),
-    onPrev: view === 'study' ? () => prevCard() : undefined,
   });
 
   // Shared local styling — kept inline (as Dashboard.js does) since this
@@ -476,18 +519,26 @@ export default function FlashCards({ userId, userSystems }) {
     );
   }
 
+  // My Cards' own graded study session — takes over the whole screen while
+  // active, same as importedSub/favoritesStudyDeck do for their own areas.
+  // Placed before the `loading` gate: resuming into a session on reload
+  // shouldn't have to wait on the folder list's own fetch first.
+  if (ownStudyDeck) {
+    return <StudySession deck={ownStudyDeck} userId={userId} onExit={exitOwnStudy} />;
+  }
+
   if (loading) return (
     <div style={{ textAlign:'center', paddingTop:60, color:t.text4, fontFamily:'Inter,sans-serif', fontSize:FONT.size.sm }}>
       Loading flashcards…
     </div>
   );
 
-  // ── Study mode ────────────────────────────────────────────────────────
-  if (view === 'study' || view === 'studyOne') {
-    const isOne = view === 'studyOne';
+  // ── Single-card preview ("Review") ──────────────────────────────────
+  // Ungraded by design — see studyOne's own comment above for why.
+  if (view === 'studyOne') {
     const backTarget = () => { setView('list'); setDone(false); };
 
-    if (done || (!card && studyCards.length > 0)) return (
+    if (done || !card) return (
       <div className="mb-fc-fade" style={{ maxWidth:480, margin:'0 auto', textAlign:'center',
         paddingTop:'14vh', fontFamily:'Inter,sans-serif' }}>
         <style>{localCss}</style>
@@ -496,17 +547,9 @@ export default function FlashCards({ userId, userSystems }) {
           <IconCheck size={22} style={{ color:t.ok }} />
         </div>
         <div style={{ fontSize:FONT.size.xl, fontWeight:FONT.weight.bold, color:t.text, marginBottom:8 }}>
-          {isOne ? 'Card reviewed' : 'All done!'}
+          Card reviewed
         </div>
-        {!isOne && <div style={{ fontSize:FONT.size.base, color:t.text3, marginBottom:26 }}>
-          You went through all {studyCards.length} card{studyCards.length!==1?'s':''}.
-        </div>}
-        <div style={{ display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap', marginTop:isOne?18:0 }}>
-          {!isOne && activeFolder !== null && (
-            <Btn t={t} tone="primary" icon={<IconPlay size={12} />} onClick={studyThisFolder}>
-              Shuffle &amp; Restart
-            </Btn>
-          )}
+        <div style={{ display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap', marginTop:18 }}>
           <Btn t={t} tone="ghost" icon={<IconChevronLeft size={13} />}
             onClick={activeFolder===null ? backToFolders : backTarget}>
             {activeFolder===null ? 'All Folders' : 'Back to List'}
@@ -525,29 +568,7 @@ export default function FlashCards({ userId, userSystems }) {
             display:'flex', alignItems:'center', gap:4 }}>
             <IconChevronLeft size={14} /> Back
           </button>
-          {!isOne && (
-            <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-              <button className="mb-fc-btn" onClick={prevCard} disabled={studyIdx===0}
-                title="Previous card" aria-label="Previous card" style={{
-                background:t.surface2, border:`1px solid ${t.border}`,
-                color: studyIdx===0 ? t.text4 : t.text3, opacity: studyIdx===0 ? .45 : 1,
-                borderRadius:RADIUS.sm, width:28, height:28, cursor: studyIdx===0 ? 'default' : 'pointer',
-                display:'flex', alignItems:'center', justifyContent:'center' }}>
-                <IconChevronLeft size={12} />
-              </button>
-              <span style={{ fontSize:FONT.size.sm, color:t.text3, fontWeight:FONT.weight.medium, padding:'0 2px' }}>
-                {studyIdx + 1} / {studyCards.length}
-              </span>
-            </div>
-          )}
         </div>
-
-        {!isOne && (
-          <div style={{ height:4, background:t.surface3, borderRadius:RADIUS.sm, marginBottom:SPACE.xl2 }}>
-            <div style={{ height:'100%', background:t.accent, borderRadius:RADIUS.sm,
-              width:`${((studyIdx+1)/studyCards.length)*100}%`, transition:`width ${MOTION.slow} ${MOTION.ease}` }} />
-          </div>
-        )}
 
         {/* The card IS the screen — minimal chrome around it, per the "card
             as visual focus" direction. */}
@@ -582,17 +603,10 @@ export default function FlashCards({ userId, userSystems }) {
             Show Answer <span style={{ opacity:.7, fontWeight:FONT.weight.regular }}>· Space</span>
           </Btn>
         ) : (
-          <div style={{ display:'flex', gap:10 }}>
-            {!isOne && (
-              <Btn t={t} tone="ok" onClick={nextCard} style={{ flex:1, padding:'13px 18px' }}>
-                Next →
-              </Btn>
-            )}
-            <Btn t={t} tone="ghost" onClick={activeFolder===null ? backToFolders : backTarget}
-              style={{ flex:isOne?1:'0 0 auto', padding:'13px 18px' }}>
-              {isOne ? 'Back to List' : 'End Session'}
-            </Btn>
-          </div>
+          <Btn t={t} tone="ghost" onClick={activeFolder===null ? backToFolders : backTarget}
+            style={{ width:'100%', padding:'13px 18px' }}>
+            Back to List
+          </Btn>
         )}
       </div>
     );
@@ -686,11 +700,17 @@ export default function FlashCards({ userId, userSystems }) {
           <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.bold, color:t.text }}>Flashcards</div>
           <div style={{ fontSize:FONT.size.xs, color:t.text4, marginTop:2 }}>
             {cards.length} card{cards.length!==1?'s':''} across {folders.length} folder{folders.length!==1?'s':''}
+            {(srsCountsOverall.new + srsCountsOverall.due) > 0 && (
+              <> · {srsCountsOverall.due} due, {srsCountsOverall.new} new</>
+            )}
           </div>
         </div>
         {cards.length > 0 && (
-          <Btn t={t} tone="primary" icon={<IconPlay size={11} />} onClick={studyEverything}>
-            Study Everything
+          <Btn t={t} tone="primary" icon={<IconPlay size={11} />}
+            disabled={(srsCountsOverall.new + srsCountsOverall.due) === 0}
+            onClick={() => startOwnStudy({ kind: 'all' })}
+            style={{ opacity: (srsCountsOverall.new + srsCountsOverall.due) === 0 ? .5 : 1 }}>
+            Study due (all folders)
           </Btn>
         )}
       </div>
@@ -715,10 +735,24 @@ export default function FlashCards({ userId, userSystems }) {
               padding:'14px 18px', cursor:'pointer', boxShadow:elevation(t,'sm'),
               fontFamily:'Inter,sans-serif' }}>
               <div style={{ width:9, height:9, borderRadius:RADIUS.circle, background:f.color, flexShrink:0 }} />
-              <div style={{ flex:1, fontSize:FONT.size.md, fontWeight:FONT.weight.semibold,
-                color: f.key===UNCAT ? t.text3 : t.text,
-                fontStyle: f.key===UNCAT ? 'italic' : 'normal' }}>
-                {f.label}
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:FONT.size.md, fontWeight:FONT.weight.semibold,
+                  color: f.key===UNCAT ? t.text3 : t.text,
+                  fontStyle: f.key===UNCAT ? 'italic' : 'normal' }}>
+                  {f.label}
+                </div>
+                {/* Stage 1 item 2 — New/Learning/Due per folder, not just a
+                    total. Only the non-zero segments show, so a folder
+                    nobody has studied yet doesn't read as "0 · 0 · 0". */}
+                {(f.srs.new + f.srs.learning + f.srs.due) > 0 && (
+                  <div style={{ fontSize:FONT.size.micro, color:t.text4, marginTop:2 }}>
+                    {[
+                      f.srs.due > 0 && `${f.srs.due} due`,
+                      f.srs.learning > 0 && `${f.srs.learning} learning`,
+                      f.srs.new > 0 && `${f.srs.new} new`,
+                    ].filter(Boolean).join(' · ')}
+                  </div>
+                )}
               </div>
               <span style={{ fontSize:FONT.size.xs, color:t.text4, background:t.surface3,
                 borderRadius:RADIUS.pill, padding:'2px 9px', fontWeight:FONT.weight.semibold }}>{f.count}</span>
@@ -740,6 +774,7 @@ export default function FlashCards({ userId, userSystems }) {
   const folderMeta = folders.find(f => f.key === activeFolder);
   const folderLabel = folderMeta?.label || (activeFolder===UNCAT ? 'Uncategorized' : activeFolder);
   const folderColor = folderMeta?.color || t.text4;
+  const folderSrs = folderMeta?.srs || srsCountsByFolder[activeFolder] || { new: 0, learning: 0, due: 0 };
 
   return (
     <div className="mb-fc-fade" style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
@@ -754,13 +789,29 @@ export default function FlashCards({ userId, userSystems }) {
         marginBottom:SPACE.lg, flexWrap:'wrap', gap:10 }}>
         <div style={{ display:'flex', alignItems:'center', gap:9 }}>
           <div style={{ width:9, height:9, borderRadius:RADIUS.circle, background:folderColor, flexShrink:0 }} />
-          <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.bold, color:t.text }}>
-            {folderLabel} <span style={{ fontSize:FONT.size.sm, color:t.text4, fontWeight:FONT.weight.regular }}>({folderCards.length})</span>
+          <div>
+            <div style={{ fontSize:FONT.size.lg, fontWeight:FONT.weight.bold, color:t.text }}>
+              {folderLabel} <span style={{ fontSize:FONT.size.sm, color:t.text4, fontWeight:FONT.weight.regular }}>({folderCards.length})</span>
+            </div>
+            {(folderSrs.new + folderSrs.learning + folderSrs.due) > 0 && (
+              <div style={{ fontSize:FONT.size.micro, color:t.text4, marginTop:2 }}>
+                {[
+                  folderSrs.due > 0 && `${folderSrs.due} due`,
+                  folderSrs.learning > 0 && `${folderSrs.learning} learning`,
+                  folderSrs.new > 0 && `${folderSrs.new} new`,
+                ].filter(Boolean).join(' · ')}
+              </div>
+            )}
           </div>
         </div>
         <div style={{ display:'flex', gap:8 }}>
           {folderCards.length > 0 && !bulkMode && (
-            <Btn t={t} tone="primary" icon={<IconPlay size={11} />} onClick={studyThisFolder}>Study</Btn>
+            <Btn t={t} tone="primary" icon={<IconPlay size={11} />}
+              disabled={(folderSrs.new + folderSrs.due) === 0}
+              style={{ opacity: (folderSrs.new + folderSrs.due) === 0 ? .5 : 1 }}
+              onClick={() => startOwnStudy(activeFolder === UNCAT ? { kind: 'uncat' } : { kind: 'system', system: activeFolder })}>
+              Study due
+            </Btn>
           )}
           {folderCards.length > 0 && (
             <Btn t={t} tone={bulkMode ? 'ghost' : 'ghost'} onClick={()=> bulkMode ? exitBulk() : setBulkMode(true)}>

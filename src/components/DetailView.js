@@ -656,6 +656,10 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
       // makes AI-generated cards land in the right folder automatically
       // instead of a flat, undifferentiated pile.
       system: entry.system,
+      // Engram Stage 3 item 8 — "jump to source on a miss". Nullable, ON
+      // DELETE SET NULL: deleting this entry later must never touch the
+      // card, it just loses its source link.
+      source_entry_id: entry.id,
     });
     if (error) { setAiErr(`Couldn't add to deck: ${error.message}`); return; }
     setDeckAdded(p => ({ ...p, [key]: true }));
@@ -692,6 +696,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
           question: c.front.trim(),
           answer: c.back.trim(),
           system: entry.system,
+          source_entry_id: entry.id,
         }))
       );
       if (error) { setAiErr(`Couldn't add cards to deck: ${error.message}`); return; }
