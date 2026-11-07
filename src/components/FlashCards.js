@@ -14,7 +14,10 @@ import FavoritesScreen from './ImportedDecks/FavoritesScreen';
 import { loadActiveStudy, saveActiveStudy, clearActiveStudy } from '../lib/importedDecks/studySessionStore';
 import * as ownCardsApi from '../lib/ownCards/api';
 import OwnCardsStats from './OwnCardsStats';
+import StudyByTimePicker from './StudyByTimePicker';
+import WeakSpotsPanel from './WeakSpotsPanel';
 import { renderOwnCardText, stripOwnCardSyntax, findSimilarCard } from '../lib/ownCards/cardText';
+import { OWN_CARDS_DEFAULTS, studyMinutesToCardBudget } from '../lib/ownCards/settings';
 
 // Sentinel key for cards with no system assigned (legacy cards, or anything
 // created before folders existed). Never stored in the DB as this string —
@@ -49,15 +52,32 @@ const FAVORITES_DECK = { id: '__favorites__', display_name: 'Favorite Cards', is
 //   { kind: 'system', system: name } -> one specific folder
 // The resulting deck's `ownCardsSystem` is exactly the shape
 // lib/ownCards/api.js's getSessionCards expects for its own `system` param.
-function ownCardsDeck(scope) {
+// `limit` is omitted for the plain "Study due" entry points (StudySession
+// falls back to its own default of 50) and supplied by Stage 3's "Study
+// by time" picker — the exact card budget studyMinutesToCardBudget()
+// computed for whichever duration was chosen, so the picker's own "~N
+// cards" preview and the session StudySession actually runs can never
+// show two different numbers for the same duration.
+// The one place a `{ kind, system? }` scope converts to lib/ownCards/
+// api.js's own `system` param shape — used by both ownCardsDeck (actually
+// studying) and the Study-by-time picker (just previewing counts), so
+// they can never disagree about what a given scope means.
+function scopeToOwnCardsSystem(scope) {
+  if (scope.kind === 'all') return null;
+  if (scope.kind === 'uncat') return { uncategorized: true };
+  return scope.system;
+}
+
+function ownCardsDeck(scope, { limit } = {}) {
   const idSuffix = scope.kind === 'all' ? 'all' : scope.kind === 'uncat' ? 'uncat' : `sys:${scope.system}`;
   const displayName = scope.kind === 'all' ? 'My Cards' : scope.kind === 'uncat' ? 'Uncategorized' : scope.system;
   return {
     id: `__owncards__:${idSuffix}`,
     display_name: displayName,
     isOwnCards: true,
-    ownCardsSystem: scope.kind === 'all' ? null : scope.kind === 'uncat' ? { uncategorized: true } : scope.system,
-    newCardsPerDay: 20,
+    ownCardsSystem: scopeToOwnCardsSystem(scope),
+    newCardsPerDay: OWN_CARDS_DEFAULTS.newCardsPerDay,
+    limit,
   };
 }
 
@@ -180,6 +200,8 @@ export default function FlashCards({ userId, userSystems }) {
   ));
   const [favoritesKey, setFavoritesKey] = useState(0); // bump to refresh FavoritesScreen after a Study Favorites round trip
   const [showOwnStats, setShowOwnStats] = useState(false); // Stage 2 item 4 — My Cards' own Stats screen
+  // Stage 3 item 7 — Study by time picker. { scope: {kind, system}, label } or null.
+  const [studyByTimeTarget, setStudyByTimeTarget] = useState(null);
   const [showImportWizard, setShowImportWizard] = useState(false);
   const [deckBrowserKey, setDeckBrowserKey] = useState(0); // bump to force DeckBrowser to reload after an import completes
   const [deckRefreshSignal, setDeckRefreshSignal] = useState(0); // bump to refresh DeckBrowser's counts (no remount) after Study changes deck data
@@ -413,12 +435,31 @@ export default function FlashCards({ userId, userSystems }) {
   // startOwnStudy; `ownStudyDeck` being non-null takes over the whole
   // screen below, same as importedSub/favoritesStudyDeck do for their
   // own areas.
-  const startOwnStudy = (scope) => {
-    const deck = ownCardsDeck(scope);
+  const startOwnStudy = (scope, { limit } = {}) => {
+    const deck = ownCardsDeck(scope, { limit });
     saveActiveStudy(userId, { area: 'own', scopeKind: scope.kind, system: scope.system || null });
     setOwnStudyDeck(deck);
   };
   const exitOwnStudy = () => { clearActiveStudy(userId); setOwnStudyDeck(null); refetchCards(); };
+
+  // Stage 3 item 7 — "Study by time". `scope`/`label` identify what the
+  // picker is scoped to; the picker itself (StudyByTimePicker) computes
+  // the "~N cards" preview, and onStart here is only ever called with the
+  // Scheduler-math budget for whichever duration was tapped.
+  const openStudyByTime = (scope, label) => setStudyByTimeTarget({ scope, label });
+  const startStudyByTimeBudget = (budget) => {
+    const scope = studyByTimeTarget.scope;
+    setStudyByTimeTarget(null);
+    startOwnStudy(scope, { limit: budget });
+  };
+
+  // Stage 3 item 9 — "One tap = Study by time scoped to that system."
+  // Literally one tap: starts immediately at the default duration rather
+  // than opening the picker again, since the whole point of surfacing a
+  // weak spot is to make studying it as frictionless as possible.
+  const studyWeakSystem = (system) => {
+    startOwnStudy({ kind: 'system', system }, { limit: studyMinutesToCardBudget(OWN_CARDS_DEFAULTS.defaultStudyMinutes) });
+  };
 
   // Single-card "Review" (studyOne) stays an ungraded preview, per the
   // brief's explicit "may stay ungraded" option — chosen deliberately:
@@ -765,6 +806,10 @@ export default function FlashCards({ userId, userSystems }) {
   if (view === 'folders') return (
     <div className="mb-fc-fade" style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
       <style>{localCss}</style>
+      {studyByTimeTarget && (
+        <StudyByTimePicker t={t} userId={userId} system={scopeToOwnCardsSystem(studyByTimeTarget.scope)}
+          scopeLabel={studyByTimeTarget.label} onStart={startStudyByTimeBudget} onClose={() => setStudyByTimeTarget(null)} />
+      )}
       <AreaTabs t={t} area={area} setArea={setArea} />
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
         marginBottom:SPACE.xl, flexWrap:'wrap', gap:10 }}>
@@ -778,8 +823,11 @@ export default function FlashCards({ userId, userSystems }) {
           </div>
         </div>
         {cards.length > 0 && (
-          <div style={{ display:'flex', gap:8 }}>
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
             <Btn t={t} tone="ghost" onClick={() => setShowOwnStats(true)}>Stats</Btn>
+            <Btn t={t} tone="ghost" onClick={() => openStudyByTime({ kind: 'all' }, 'All folders')}>
+              Study by time
+            </Btn>
             <Btn t={t} tone="primary" icon={<IconPlay size={11} />}
               disabled={(srsCountsOverall.new + srsCountsOverall.due) === 0}
               onClick={() => startOwnStudy({ kind: 'all' })}
@@ -789,6 +837,8 @@ export default function FlashCards({ userId, userSystems }) {
           </div>
         )}
       </div>
+
+      {cards.length > 0 && <WeakSpotsPanel t={t} userId={userId} onStudySystem={studyWeakSystem} />}
 
       {cards.length === 0 ? (
         <div style={{ textAlign:'center', padding:'60px 20px' }}>
@@ -855,6 +905,10 @@ export default function FlashCards({ userId, userSystems }) {
     <div className="mb-fc-fade" style={{ maxWidth:680, margin:'0 auto', fontFamily:'Inter,sans-serif' }}>
       <style>{localCss}</style>
       <ConfirmDialog t={t} state={confirmState} onCancel={() => setConfirmState(null)} />
+      {studyByTimeTarget && (
+        <StudyByTimePicker t={t} userId={userId} system={scopeToOwnCardsSystem(studyByTimeTarget.scope)}
+          scopeLabel={studyByTimeTarget.label} onStart={startStudyByTimeBudget} onClose={() => setStudyByTimeTarget(null)} />
+      )}
       <button onClick={backToFolders} className="mb-fc-btn" style={{ background:'none', border:'none',
         color:t.text3, cursor:'pointer', fontSize:FONT.size.sm, fontWeight:FONT.weight.medium, marginBottom:SPACE.md,
         fontFamily:'Inter,sans-serif', padding:'4px 2px', display:'flex', alignItems:'center', gap:4 }}>
@@ -880,14 +934,20 @@ export default function FlashCards({ userId, userSystems }) {
             )}
           </div>
         </div>
-        <div style={{ display:'flex', gap:8 }}>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
           {folderCards.length > 0 && !bulkMode && (
-            <Btn t={t} tone="primary" icon={<IconPlay size={11} />}
-              disabled={(folderSrs.new + folderSrs.due) === 0}
-              style={{ opacity: (folderSrs.new + folderSrs.due) === 0 ? .5 : 1 }}
-              onClick={() => startOwnStudy(activeFolder === UNCAT ? { kind: 'uncat' } : { kind: 'system', system: activeFolder })}>
-              Study due
-            </Btn>
+            <>
+              <Btn t={t} tone="ghost"
+                onClick={() => openStudyByTime(activeFolder === UNCAT ? { kind: 'uncat' } : { kind: 'system', system: activeFolder }, folderLabel)}>
+                Study by time
+              </Btn>
+              <Btn t={t} tone="primary" icon={<IconPlay size={11} />}
+                disabled={(folderSrs.new + folderSrs.due) === 0}
+                style={{ opacity: (folderSrs.new + folderSrs.due) === 0 ? .5 : 1 }}
+                onClick={() => startOwnStudy(activeFolder === UNCAT ? { kind: 'uncat' } : { kind: 'system', system: activeFolder })}>
+                Study due
+              </Btn>
+            </>
           )}
           {folderCards.length > 0 && (
             <Btn t={t} tone={bulkMode ? 'ghost' : 'ghost'} onClick={()=> bulkMode ? exitBulk() : setBulkMode(true)}>
