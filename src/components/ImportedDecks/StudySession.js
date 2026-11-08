@@ -2,9 +2,11 @@
 //
 // Phase L — study flow using the EXISTING scheduler (lib/srs/Scheduler.js)
 // and its buildSessionQuery() ordering. No second scheduler, no invented
-// ordering, no manual interval math — every number shown comes from
-// scheduler.previewIntervals() / rateCard() (which itself calls
-// scheduler.calculateNextReview()).
+// ordering, no manual interval math — every number shown, and every
+// rating saved, comes from scheduler.previewIntervals() /
+// scheduler.calculateNextReview() directly (see rate()'s own comment —
+// Instant ratings call it straight from the component now, not through a
+// rateCard() network wrapper).
 //
 // ── Critical Bug Fix Batch 1 — resumable sessions ──────────────────────
 // Root cause of "reopening a deck shuffles the cards and starts over":
@@ -38,20 +40,23 @@
 // instead of replacing.
 //
 // Fix: rate() snapshots the card's exact pre-rating scheduling fields
-// before calling rateCard, and records `{previousState, rating,
-// ratedAtIso}` keyed by card id in `actions` — the ONLY state this needs
-// beyond what Batch 1 already persists, so it's added to that same
-// session snapshot rather than a second, incompatible history mechanism.
-// goPrev() checks `actions` for the card it's returning to: if that card
-// has an undo-able current-session rating, it calls api.unrateCard to
-// restore the card row to `previousState` field-for-field (a plain write,
-// not a recomputation — it can't itself produce a wrong interval) and
-// delete ONLY that rating's own imported_review_log row (matched by
-// card_id + its exact reviewed_at timestamp, never a broader match that
-// could reach into legitimate history from before this session). If the
-// returned-to card has NO recorded action (never rated, or already
-// undone), Previous is exactly the old plain index decrement — no undo
-// work, no added latency.
+// before computing the new ones, and records `{previousState, rating,
+// ratedAtIso, ratingId}` keyed by card id in `actions` — the ONLY state
+// this needs beyond what Batch 1 already persists, so it's added to that
+// same session snapshot rather than a second, incompatible history
+// mechanism. goPrev() checks `actions` for the card it's returning to: if
+// that card has an undo-able current-session rating, it restores the
+// card's local/queue state to `previousState` field-for-field (a plain
+// write, not a recomputation — it can't itself produce a wrong interval)
+// and, via lib/ratingOutbox.js, either drops the still-queued rating
+// outright (never synced — see rate()'s own updated comment for the
+// instant-ratings design, and goPrev()'s own comment for the undo
+// choice) or enqueues an undo correction that marks that one
+// imported_review_log/flashcard_review_log row undone_at (never a
+// broader match that could reach into legitimate history from before
+// this session). If the returned-to card has NO recorded action (never
+// rated, or already undone), Previous is exactly the old plain index
+// decrement — no undo work, no added latency.
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTheme } from '../../lib/theme';
@@ -69,6 +74,7 @@ import { FLAGS, FLAG_COLORS, FLAG_NAMES } from '../../lib/importedDecks/flags';
 import { IconChevronLeft, IconPause, IconX, IconMaximize, IconMinimize, IconSearch, IconStar } from '../../lib/icons';
 import CardRenderer, { cardMediaFilenames, cardSideImages } from './CardRenderer';
 import { deckKeyFor, newSessionId, loadSession, saveSession, clearSession } from '../../lib/importedDecks/studySessionStore';
+import { enqueueRating, newRatingId, flushNow, getPendingRating, dropPendingRating, subscribeSynced, mergeOutboxIntoRows } from '../../lib/ratingOutbox';
 
 // Rating strip — name first, interval (t.tokenKey) secondary. Theme tokens,
 // not hardcoded hex: identical to the old hardcoded values in light mode
@@ -89,7 +95,6 @@ export default function StudySession({ deck, userId, onExit }) {
   const [revealed, setRevealed] = useState(false);
   const [paused, setPaused] = useState(false);
   const [resolvedMedia, setResolvedMedia] = useState({});
-  const [rating, setRating] = useState(null); // in-flight rating, disables buttons briefly
   const [err, setErr] = useState('');
 
   // Batch 4 — favorite state for the WHOLE session, loaded once as a Set
@@ -109,6 +114,24 @@ export default function StudySession({ deck, userId, onExit }) {
     let cancelled = false;
     favoritesApi.getFavoriteCardIds(userId).then(ids => { if (!cancelled) setFavoriteIds(ids); }).catch(() => {});
     return () => { cancelled = true; };
+  }, [userId, deck.isOwnCards]);
+
+  // Instant ratings — Imported Decks' total/new/due_cards are denormalized
+  // rollups stored ON imported_decks, recomputed by reading imported_cards'
+  // CURRENT server state (api.refreshDeckCountsAfterRating). That read is
+  // only correct once the rating that moved a card has actually reached
+  // the server, so this fires from ratingOutbox's subscribeSynced — the
+  // moment a flush confirms an 'imported_card' batch — rather than right
+  // after the local, instant rate(). My Cards has no such table (its
+  // folder New/Due/Learning counts are computed client-side from a fresh
+  // row fetch — see FlashCards.js — which the outbox overlay already
+  // covers), so this is skipped entirely for an own-cards session.
+  useEffect(() => {
+    if (deck.isOwnCards || !userId) return;
+    return subscribeSynced(userId, 'imported_card', (items) => {
+      const deckIds = new Set(items.map(it => it.logFields?.deck_id).filter(Boolean));
+      deckIds.forEach(id => { api.refreshDeckCountsAfterRating(id).catch(() => {}); });
+    });
   }, [userId, deck.isOwnCards]);
 
   // Batch 2 — Focus Mode: hides everything but the minimum needed to get
@@ -185,15 +208,16 @@ export default function StudySession({ deck, userId, onExit }) {
   // part of the session snapshot (below) — see this file's header comment
   // on why: Previous has to keep working after a reload, same as the rest
   // of session state does since Batch 1.
-  const [actions, setActions] = useState({}); // { [cardId]: { previousState, rating, ratedAtIso } }
-  // Live imported_review_log insert promises, keyed by card id —
-  // deliberately NOT persisted (promises aren't serializable, and by the
-  // time a session is ever resumed, real wall-clock time has passed and
-  // the original insert is guaranteed to have already settled either way,
-  // per unrateCard's own comment). Only matters for the same-mount case:
-  // rate a card, then hit Previous before the fire-and-forget insert from
-  // THAT rating has necessarily landed yet.
-  const logInsertsRef = useRef({});
+  //
+  // Instant ratings (lib/ratingOutbox.js) — `ratingId` is the outbox item's
+  // own client-generated id. goPrev() uses it to tell "still queued,
+  // unsynced" (ratingOutbox.getPendingRating — just drop it, zero network
+  // call) apart from "already synced" (enqueue an undo correction instead
+  // — see goPrev()'s own comment). This replaced the old logInsertsRef
+  // (a live Supabase insert promise to await before deleting its log row)
+  // entirely: there's no longer any in-flight network request for Previous
+  // to race against, since rate() never sends one directly.
+  const [actions, setActions] = useState({}); // { [cardId]: { previousState, rating, ratedAtIso, ratingId } }
   // Stats-only timer for My Cards' per-review log (time_spent_seconds) —
   // when the card currently on screen was shown. Reset on every card
   // change (advance, Previous, or a resumed session landing on a card),
@@ -202,11 +226,6 @@ export default function StudySession({ deck, userId, onExit }) {
   // measures.
   const cardShownAtRef = useRef(Date.now());
   useEffect(() => { cardShownAtRef.current = Date.now(); }, [idx]);
-  // True while an undo (the async half of goPrev) is in flight — disables
-  // Previous and the rating buttons so a second action can't land on top
-  // of a restore that hasn't finished yet ("prevent the user from
-  // accidentally applying another rating on corrupted state").
-  const [restoring, setRestoring] = useState(false);
   // Stage 3 item 8 — { sourceEntryId } while a missed (Again/Hard) My
   // Cards card is paused waiting for "Source" or "Continue", else null.
   // `sourceModalOpen` is a separate flag (not folded into missPause)
@@ -242,7 +261,16 @@ export default function StudySession({ deck, userId, onExit }) {
             ? await ownCardsApi.getCardsByIds(pendingResume.cardIds)
             : await api.getCardsByIds(pendingResume.cardIds);
           if (cancelled) return;
-          const byId = new Map(rows.map(r => [r.id, r]));
+          // Instant ratings — a card rated just before the reload/kill that
+          // produced this resume may still be sitting in the local outbox,
+          // unsynced: the fresh row fetch above would otherwise show it
+          // exactly as it was BEFORE that rating (e.g. still due, old
+          // interval), which matters here specifically because Previous
+          // can navigate back to it and needs its real current state, not
+          // a stale one. Same section 5 "merge pending outbox items into
+          // what's displayed" overlay App.js's loadEntries already uses.
+          const merged = mergeOutboxIntoRows(userId, deck.isOwnCards ? 'own_card' : 'imported_card', rows, 'id');
+          const byId = new Map(merged.map(r => [r.id, r]));
           // Reassemble in the FROZEN order, dropping any id that no longer
           // exists (deleted/reset since) rather than erroring on it.
           const ordered = pendingResume.cardIds.map(id => byId.get(id)).filter(Boolean);
@@ -272,7 +300,11 @@ export default function StudySession({ deck, userId, onExit }) {
             ? await ownCardsApi.getSessionCards({ userId, system: deck.ownCardsSystem, limit: deck.limit || 50, newCardsPerDay: deck.newCardsPerDay })
             : await api.getSessionCards([deck.id], { limit: 50, userId });
           if (cancelled) return;
-          setQueue(cards);
+          // Same outbox overlay as the resume branch above — a brand new
+          // session composed right after an unsynced rating (e.g. exit,
+          // reopen quickly) should still show that card's real current
+          // state, not what the server has until the next flush.
+          setQueue(mergeOutboxIntoRows(userId, deck.isOwnCards ? 'own_card' : 'imported_card', cards, 'id'));
           setIdx(0);
         }
       } catch (e) {
@@ -398,82 +430,104 @@ export default function StudySession({ deck, userId, onExit }) {
   // `missPause`'s own comment on why these are separate flags).
   const continueAfterMiss = () => { setMissPause(null); setSourceModalOpen(false); advance(); };
 
-  // Duplicate-review note: if the app is interrupted while api.rateCard's
-  // request is in flight — the write reaches the server, but the response
-  // never reaches this client — `idx` never advances locally (setQueue/
-  // advance below never run), so a naive resume would show this exact
-  // card again as if it were never rated, and a second rating would
-  // compound an interval that had already moved. The queue-loading effect
-  // above guards against exactly this on resume (comparing the card's
-  // last_reviewed_at against the session's last confirmed activity) — see
-  // its own comment. Nothing extra is needed here: this function doesn't
-  // know whether a future interruption will land mid-flight, only the
-  // resume path can detect that after the fact.
-  const rate = async (label) => {
-    if (!card || rating || restoring) return;
+  // Instant ratings (lib/ratingOutbox.js) — scheduler.calculateNextReview
+  // is already plain, synchronous JS (no network); the only thing that
+  // used to make this choppy was awaiting rateCard's own imported_cards/
+  // flashcards UPDATE before advancing. That write (plus the review-log
+  // row) now goes through the shared outbox instead: computed locally,
+  // applied to the queue/actions state in this same tick, rendered
+  // immediately, and queued for the background flusher — no await on the
+  // network in the tap->next-card path, for either Imported Decks/
+  // Favorites or My Cards. See lib/ratingOutbox.js's own header comment
+  // for the full design; nothing about calculateNextReview's math changed.
+  const rate = (label) => {
+    if (!card) return;
     const ratedIdx = idx;
     // Critical Bug Fix Batch 2 — snapshot exactly the fields a rating can
-    // change, from the card as it stands RIGHT NOW, before calling
-    // rateCard. This is the only place this snapshot can be taken: once
-    // rateCard's patch lands, the pre-rating values are gone from every
-    // copy of this card MedBook holds (the row itself, and the queue
-    // entry rate() is about to overwrite below) except this one.
+    // change, from the card as it stands RIGHT NOW, before computing the
+    // patch. This is the only place this snapshot can be taken: once the
+    // patch lands, the pre-rating values are gone from every copy of this
+    // card MedBook holds (the row itself, and the queue entry rate() is
+    // about to overwrite below) except this one.
     const fields = deck.isOwnCards ? ownCardsApi.SCHEDULING_FIELDS : api.SCHEDULING_FIELDS;
     const previousState = Object.fromEntries(fields.map(f => [f, card[f]]));
-    setRating(label);
-    try {
-      const { card: updated, logInsert } = deck.isOwnCards
-        ? await ownCardsApi.rateCard(card, label, (Date.now() - cardShownAtRef.current) / 1000)
-        : await api.rateCard(card, label);
-      // Same reason ReviewQueue.js keeps its cards array live after rating:
-      // ← lets you step back to this card and rate it again, and a re-rating
-      // has to act on the card's CURRENT (post-rating) scheduling state, not
-      // the stale pre-rating snapshot still sitting in the queue array.
-      setQueue(q => {
-        const next = [...q];
-        next[ratedIdx] = updated;
-        // My Cards only — "Again" cards come back later in the SAME
-        // session (Stage 1 item 1). Imported Decks/Favorites have no such
-        // behaviour today and this brief doesn't ask for it there, so it's
-        // gated strictly behind isOwnCards: the queue only ever grows for
-        // a My Cards session, never for the other two. Re-inserted a fixed
-        // number of cards ahead (not literally last) so it doesn't always
-        // land at the very end of a long queue; clamped to the queue's own
-        // length so it can never be inserted past the end.
-        if (deck.isOwnCards && label === 'again') {
-          const REQUEUE_AFTER = 8;
-          const insertAt = Math.min(ratedIdx + 1 + REQUEUE_AFTER, next.length);
-          next.splice(insertAt, 0, updated);
-        }
-        return next;
-      });
-      // Record the undo entry AFTER the rating is confirmed saved — never
-      // on a failed rating, which correctly leaves nothing for Previous to
-      // undo (there's nothing to undo; the rating never happened).
-      // Overwrites any earlier entry for this same card outright — exactly
-      // right for "rate, Previous, rate again": the second rating's own
-      // previousState (captured above, from whatever the card looked like
-      // at THIS moment — i.e. already back at its pre-first-rating values,
-      // since Previous restores before this can run again) is what matters
-      // going forward, not the first rating's now-irrelevant history.
-      logInsertsRef.current[card.id] = logInsert;
-      setActions(a => ({ ...a, [card.id]: { previousState, rating: label, ratedAtIso: updated.last_reviewed_at } }));
-      // Stage 3 item 8 — "jump to source on a miss." A card graded Again
-      // or Hard that came from an AI-added entry pauses here instead of
-      // auto-advancing, so there's an actual moment to tap Source before
-      // the card is gone. Every other case (Good/Easy, no known source,
-      // or not a My Cards session at all) advances exactly as before —
-      // zero behaviour change for Imported Decks/Favorites, which never
-      // set isOwnCards or source_entry_id in the first place.
-      if (deck.isOwnCards && jumpToSourceEnabled && (label === 'again' || label === 'hard') && card.source_entry_id) {
-        setMissPause({ sourceEntryId: card.source_entry_id });
-      } else {
-        advance();
+    const patch = scheduler.calculateNextReview(card, label);
+    const updated = { ...card, ...patch };
+
+    // Same reason ReviewQueue.js keeps its cards array live after rating:
+    // ← lets you step back to this card and rate it again, and a re-rating
+    // has to act on the card's CURRENT (post-rating) scheduling state, not
+    // the stale pre-rating snapshot still sitting in the queue array.
+    setQueue(q => {
+      const next = [...q];
+      next[ratedIdx] = updated;
+      // My Cards only — "Again" cards come back later in the SAME
+      // session (Stage 1 item 1). Imported Decks/Favorites have no such
+      // behaviour today and this brief doesn't ask for it there, so it's
+      // gated strictly behind isOwnCards: the queue only ever grows for
+      // a My Cards session, never for the other two. Re-inserted a fixed
+      // number of cards ahead (not literally last) so it doesn't always
+      // land at the very end of a long queue; clamped to the queue's own
+      // length so it can never be inserted past the end.
+      if (deck.isOwnCards && label === 'again') {
+        const REQUEUE_AFTER = 8;
+        const insertAt = Math.min(ratedIdx + 1 + REQUEUE_AFTER, next.length);
+        next.splice(insertAt, 0, updated);
       }
-    } catch (e) {
-      setErr(e.message || 'Could not save rating');
+      return next;
+    });
+
+    const ratingId = newRatingId();
+    // apply_imported_card_ratings/apply_own_card_ratings (SUPABASE_
+    // MIGRATION_RATING_OUTBOX.sql) read exactly these newFields/logFields
+    // keys — see each RPC body. `deck_id` rides along in logFields purely
+    // for this client's own use (the subscribeSynced listener below, which
+    // needs it to know which deck's denormalized counts to refresh); the
+    // RPC itself only reads the columns imported_review_log actually has
+    // and ignores the rest.
+    const newFields = { state: patch.state, due_at: patch.due_at, interval_days: patch.interval_days,
+      ease_factor: patch.ease_factor, review_count: patch.review_count, lapse_count: patch.lapse_count };
+    const logFields = deck.isOwnCards
+      ? { prev_interval_days: card.interval_days ?? 0, new_interval_days: patch.interval_days,
+          time_spent_seconds: (Date.now() - cardShownAtRef.current) / 1000 }
+      : { deck_id: card.deck_id, prev_state: card.state, prev_interval_days: card.interval_days ?? 0,
+          new_interval_days: patch.interval_days, next_due_at: patch.due_at };
+
+    if (userId) {
+      enqueueRating(userId, {
+        id: ratingId,
+        kind: deck.isOwnCards ? 'own_card' : 'imported_card',
+        itemId: card.id,
+        rating: label,
+        reviewedAt: patch.last_reviewed_at,
+        newFields,
+        logFields,
+      });
     }
-    setRating(null);
+
+    // Record the undo entry right away — rate() can no longer fail
+    // (nothing here touches the network), so there's no "only after the
+    // write is confirmed saved" step left to wait on. Overwrites any
+    // earlier entry for this same card outright — exactly right for
+    // "rate, Previous, rate again": the second rating's own previousState
+    // (captured above, from whatever the card looked like at THIS moment
+    // — i.e. already back at its pre-first-rating values, since Previous
+    // restores before this can run again) is what matters going forward,
+    // not the first rating's now-irrelevant history.
+    setActions(a => ({ ...a, [card.id]: { previousState, rating: label, ratedAtIso: patch.last_reviewed_at, ratingId } }));
+
+    // Stage 3 item 8 — "jump to source on a miss." A card graded Again
+    // or Hard that came from an AI-added entry pauses here instead of
+    // auto-advancing, so there's an actual moment to tap Source before
+    // the card is gone. Every other case (Good/Easy, no known source,
+    // or not a My Cards session at all) advances exactly as before —
+    // zero behaviour change for Imported Decks/Favorites, which never
+    // set isOwnCards or source_entry_id in the first place.
+    if (deck.isOwnCards && jumpToSourceEnabled && (label === 'again' || label === 'hard') && card.source_entry_id) {
+      setMissPause({ sourceEntryId: card.source_entry_id });
+    } else {
+      advance();
+    }
   };
 
   // Optimistic toggle — flip the local Set immediately (the star reacts
@@ -506,41 +560,50 @@ export default function StudySession({ deck, userId, onExit }) {
   // "decrement the index." If the card being returned to has no recorded
   // action (never rated this session, or already undone and not re-rated
   // — see rate()'s own comment), this degrades to exactly the old plain
-  // navigation: nothing to undo, so nothing async happens and it's just as
-  // instant as before.
+  // navigation: nothing to undo, so nothing happens beyond that.
   //
-  // Deliberately NOT optimistic about the undo itself (unlike, say, the
-  // favorite-star toggle): this only navigates back and reveals the card
-  // once the restore has actually succeeded, so the user can never be
-  // looking at a "reverted" card whose underlying scheduling state wasn't
-  // really reverted. `restoring` disables Previous and the rating buttons
-  // for the (normally brief) time this takes, rather than letting a
-  // second action land on top of a restore still in flight.
-  const goPrev = async () => {
-    if (idx === 0 || restoring || rating) return;
+  // Instant ratings (lib/ratingOutbox.js), section 5's undo choice: if the
+  // rating being undone is still sitting in the outbox (never reached the
+  // server), drop it outright — zero network call, nothing was ever
+  // written server-side to correct. If it already synced, enqueue an
+  // undo correction instead (isUndo/undoOf) — the RPC marks that log row
+  // undone_at rather than deleting it (log history is never deleted) and
+  // restores the card's prior scheduling state via the same staleness-
+  // protected UPDATE every other outbox item goes through (its own
+  // reviewed_at is "now", always newer than the rating it's undoing, so
+  // the restore always applies). Either branch is synchronous and can't
+  // fail client-side, which is why Previous no longer has a `restoring`
+  // state or an error path here — the local card/action state updates
+  // immediately, same as rate() itself.
+  const goPrev = () => {
+    if (idx === 0) return;
     const targetIdx = idx - 1;
     const target = queue[targetIdx];
     const action = target ? actions[target.id] : null;
     if (!action) { setIdx(targetIdx); setRevealed(false); return; }
-    setRestoring(true);
-    setErr('');
-    try {
-      const restored = deck.isOwnCards
-        ? await ownCardsApi.unrateCard(target.id, action.previousState, action.ratedAtIso, logInsertsRef.current[target.id])
-        : await api.unrateCard(target.id, target.deck_id, action.previousState, action.ratedAtIso, logInsertsRef.current[target.id]);
-      setQueue(q => { const next = [...q]; next[targetIdx] = restored; return next; });
-      setActions(a => { const next = { ...a }; delete next[target.id]; return next; });
-      delete logInsertsRef.current[target.id];
-      setIdx(targetIdx);
-      setRevealed(false);
-    } catch (e) {
-      // Restore failed — stay exactly where we are (still on the LATER
-      // card, action entry untouched) rather than navigating to a card
-      // whose data might now be in an inconsistent state. The user can
-      // press Previous again to retry.
-      setErr(e.message || 'Could not undo the last rating. Still on the previous card, nothing changed. Try Previous again.');
+
+    const kind = deck.isOwnCards ? 'own_card' : 'imported_card';
+    const stillPending = getPendingRating(userId, kind, target.id);
+    if (stillPending && stillPending.id === action.ratingId) {
+      dropPendingRating(userId, kind, target.id);
+    } else {
+      enqueueRating(userId, {
+        id: newRatingId(),
+        kind,
+        itemId: target.id,
+        rating: action.rating,
+        reviewedAt: new Date().toISOString(),
+        newFields: action.previousState,
+        logFields: {},
+        isUndo: true,
+        undoOf: action.ratingId,
+      });
     }
-    setRestoring(false);
+
+    setQueue(q => { const next = [...q]; next[targetIdx] = { ...target, ...action.previousState }; return next; });
+    setActions(a => { const next = { ...a }; delete next[target.id]; return next; });
+    setIdx(targetIdx);
+    setRevealed(false);
   };
 
   // Exiting mid-session is a deliberate "leave for now", not "abandon my
@@ -549,8 +612,12 @@ export default function StudySession({ deck, userId, onExit }) {
   // resume it, same as recovering from an actual interruption would. Only
   // an actually-finished session (below) gets cleared: there's nothing
   // left to resume into once every card's been seen.
-  const exit = () => { onExit(); };
-  const finishedNormally = () => { clearSession(userId, deckKey); };
+  // Section 3 safety net — flush whatever's still queued the moment a
+  // session is paused, exited, or completed, rather than waiting for the
+  // next hide/app-start to catch it. Fire-and-forget, same as every other
+  // flushNow call site: nothing here ever awaits it.
+  const exit = () => { flushNow(userId); onExit(); };
+  const finishedNormally = () => { flushNow(userId); clearSession(userId, deckKey); };
 
   // Toggling the SAME flag again clears it (0) — same convention Anki
   // itself uses, so "flag this card red" and "unflag it" are the same
@@ -582,7 +649,7 @@ export default function StudySession({ deck, userId, onExit }) {
   // lightbox is open on top of it") — otherwise "a" while just looking at
   // an enlarged image would silently rate the card underneath it.
   const activeCard = queue && idx < queue.length ? queue[idx] : null;
-  useReviewKeyboard(!!activeCard && !paused && !lightboxSrc && !restoring && !missPause, {
+  useReviewKeyboard(!!activeCard && !paused && !lightboxSrc && !missPause, {
     flipped: revealed,
     onFlip: () => setRevealed(true),
     onAgain: () => rate('again'),
@@ -878,12 +945,12 @@ export default function StudySession({ deck, userId, onExit }) {
         ) : (
           <>
             <div className="mb-ss-icongroup">
-              <button className="mb-ss-iconbtn" onClick={goPrev} disabled={idx === 0 || restoring || !!rating}
+              <button className="mb-ss-iconbtn" onClick={goPrev} disabled={idx === 0}
                 title="Previous card" aria-label="Previous card"
-                style={iconBtnStyle({ opacity: (idx === 0 || restoring) ? 0.4 : 1, cursor: (idx === 0 || restoring) ? 'default' : 'pointer' })}>
+                style={iconBtnStyle({ opacity: idx === 0 ? 0.4 : 1, cursor: idx === 0 ? 'default' : 'pointer' })}>
                 <IconChevronLeft size={16} />
               </button>
-              <button className="mb-ss-iconbtn" onClick={() => setPaused(true)}
+              <button className="mb-ss-iconbtn" onClick={() => { flushNow(userId); setPaused(true); }}
                 title="Pause session" aria-label="Pause session" style={iconBtnStyle()}>
                 <IconPause size={13} />
               </button>
@@ -1064,7 +1131,7 @@ export default function StudySession({ deck, userId, onExit }) {
           // information, per the brief.
           <div style={{ display: 'flex', borderRadius: 12, overflow: 'hidden', boxShadow: `0 1px 3px ${t.shadow}` }}>
             {RATINGS.map(([key, label, tokenKey], i) => (
-              <button key={key} className="mb-ss-ratebtn" onClick={() => rate(key)} disabled={!!rating || restoring}
+              <button key={key} className="mb-ss-ratebtn" onClick={() => rate(key)}
                 style={{
                   flex: 1, minHeight: 54, padding: '10px 6px',
                   // A touch softer than the raw token — blended toward the
@@ -1074,7 +1141,6 @@ export default function StudySession({ deck, userId, onExit }) {
                   color: '#fff', border: 'none', cursor: 'pointer', fontFamily: 'Inter,sans-serif',
                   borderRight: i < RATINGS.length - 1 ? '1px solid rgba(255,255,255,0.22)' : 'none',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
-                  opacity: ((rating && rating !== key) || restoring) ? 0.5 : 1,
                 }}>
                 <span style={{ fontSize: 13, fontWeight: 700 }}>{label}</span>
                 <span style={{ fontSize: 10.5, fontWeight: 500, opacity: 0.78 }}>{intervals?.[key]?.label}</span>

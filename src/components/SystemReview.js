@@ -1,11 +1,11 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
 import { DIFF_COLOR } from '../lib/constants';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation, BREAKPOINT } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue, buildCycledQueueWithScheduled } from '../lib/reviewQueue';
 import { normalizeSections } from '../services/ai';
 import { loadSession, saveSession, clearSession, newSessionId } from '../lib/reviewSessionStore';
+import { enqueueRating, newRatingId, flushNow } from '../lib/ratingOutbox';
 import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
 import { IconX } from '../lib/icons';
 import RichRuns from '../lib/RichRuns';
@@ -255,31 +255,37 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
   const progress = total > 0 ? Math.round((reviewed/total)*100) : 0;
   const dc = DIFF_COLOR[card?.difficulty] || '#6b7280';
 
-  const rate = async (rating) => {
+  // Instant ratings — same shared outbox ReviewQueue.js's rate() now uses
+  // (lib/ratingOutbox.js), same reason: calcNext is already plain,
+  // synchronous JS, and the entries.update() this used to await was the
+  // only thing making this choppy. Math unchanged.
+  const rate = (rating) => {
     if (!card) return;
     const updates = calcNext(card, rating);
-    const { error } = await supabase.from('entries').update(updates).eq('id', card.id);
-    if (error) {
-      // Surface the failure instead of silently losing the review (e.g. missing DB columns).
-      alert(`Couldn't save this review: ${error.message}\n\nIf this mentions a missing column, run the SM-2 migration in Supabase.`);
-      return; // don't advance — let the user retry after fixing
-    }
+
+    setQueue(q => q.map((c, i) => (i === idx ? { ...c, ...updates } : c)));
     onReviewed({ ...card, ...updates });
-    // Same fire-and-forget analytics write ReviewQueue.js's rate() makes —
-    // keeps review_log complete across both review screens so Dashboard's
-    // "reviewed today" count doesn't undercount reviews done from here.
+
     if (userId) {
-      supabase.from('review_log').insert({
-        user_id: userId, entry_id: card.id, system: card.system, rating,
-      }).then(({ error: logError }) => {
-        if (logError && process.env.NODE_ENV !== 'production') {
-          // eslint-disable-next-line no-console
-          console.warn('[SystemReview] review_log insert failed — has SUPABASE_MIGRATION_INSIGHTS.sql been run?', logError.message);
-        }
+      enqueueRating(userId, {
+        id: newRatingId(),
+        kind: 'entry',
+        itemId: card.id,
+        rating,
+        reviewedAt: updates.last_reviewed,
+        newFields: {
+          review_count: updates.review_count,
+          last_reviewed: updates.last_reviewed,
+          review_interval: updates.review_interval,
+          ease_factor: updates.ease_factor,
+          next_review: updates.next_review,
+        },
+        logFields: { system: card.system },
       });
     }
+
     setReviewed(p => p+1);
-    if (idx+1 >= total) { setDone(true); clearSession(userId, sessionScope); }
+    if (idx+1 >= total) { setDone(true); clearSession(userId, sessionScope); flushNow(userId); }
     else { setIdx(p=>p+1); setFlipped(false); }
   };
 

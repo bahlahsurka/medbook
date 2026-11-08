@@ -17,6 +17,7 @@ import { limitsFor } from '../services/ai/PromptBuilder';
 import { handleBulletKeyDown, toggleBulletLines, handleRichPaste, handlePlainPaste,
   sanitizeForStorage, inlineTextWithMarks } from '../lib/bulletList';
 import { STUDY_SCOPE_CLASS, suppressContextMenu } from '../lib/studyInteraction';
+import { enqueueRating, newRatingId } from '../lib/ratingOutbox';
 
 
 // --- helpers -------------------------------------------------------------
@@ -765,36 +766,39 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   };
 
   // Marking reviewed must also advance the SM-2 schedule, otherwise the entry
-  // stays permanently "due" and the review queue never lets it go.
-  const markReviewed = async () => {
+  // stays permanently "due" and the review queue never lets it go. Same
+  // optimistic/outbox pattern as ReviewQueue.js/SystemReview.js's rate():
+  // computed locally, applied to in-memory state immediately, queued for
+  // the background flusher — no await on the network in this path. "Mark
+  // reviewed" has no rating UI, so it's logged as 'good', keeping
+  // review_log complete across every path an entry can be marked reviewed
+  // from.
+  const markReviewed = () => {
     const interval = Math.max(1, Math.round((entry.review_interval || 1) * (entry.ease_factor || 2.5)));
     const next = new Date();
     next.setDate(next.getDate() + interval);
-    const ok = await updateDB({
-      review_count:(entry.review_count||0)+1,
-      last_reviewed:new Date().toISOString(),
+    const updates = {
+      review_count: (entry.review_count || 0) + 1,
+      last_reviewed: new Date().toISOString(),
       review_interval: interval,
       ease_factor: entry.ease_factor || 2.5,
       next_review: next.toISOString(),
-    });
-    if (ok) {
-      fireReviewedFlash();
-      // Same fire-and-forget review_log write ReviewQueue.js/SystemReview.js
-      // make on a rating — "Mark reviewed" has no rating UI, so it's logged
-      // as 'good', keeping review_log complete across every path an entry
-      // can be marked reviewed from.
-      if (userId) {
-        supabase.from('review_log').insert({
-          user_id: userId, entry_id: entry.id, system: entry.system, rating: 'good',
-        }).then(({ error: logError }) => {
-          if (logError && process.env.NODE_ENV !== 'production') {
-            // eslint-disable-next-line no-console
-            console.warn('[DetailView] review_log insert failed — has SUPABASE_MIGRATION_INSIGHTS.sql been run?', logError.message);
-          }
-        });
-      }
+    };
+
+    onUpdated({ ...entry, ...updates });
+    fireReviewedFlash();
+
+    if (userId) {
+      enqueueRating(userId, {
+        id: newRatingId(),
+        kind: 'entry',
+        itemId: entry.id,
+        rating: 'good',
+        reviewedAt: updates.last_reviewed,
+        newFields: updates,
+        logFields: { system: entry.system },
+      });
     }
-    return ok;
   };
   const togglePin = () => updateDB({ pinned:!entry.pinned });
 

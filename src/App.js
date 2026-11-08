@@ -5,6 +5,7 @@ import { SYS_COLOR } from './lib/constants';
 import { useScrollRestore } from './lib/useScrollRestore';
 import { useDebouncedValue } from './lib/useDebouncedValue';
 import { useStudySession } from './lib/useStudySession';
+import { useRatingOutboxSync, mergeOutboxIntoRows } from './lib/ratingOutbox';
 import { useServiceWorkerUpdate } from './lib/useServiceWorkerUpdate';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation, BREAKPOINT } from './lib/theme';
 import { IconMenu, IconX, IconChevronLeft, IconPlus, IconInbox, IconSearch } from './lib/icons';
@@ -24,6 +25,7 @@ import QuickAdd from './components/QuickAdd';
 import SystemReview from './components/SystemReview';
 import SystemHome from './components/SystemHome';
 import FilterChips from './components/FilterChips';
+import PendingSyncIndicator from './components/PendingSyncIndicator';
 
 const ONBOARD_KEY = 'medbook_onboarded';
 
@@ -141,6 +143,7 @@ export default function App() {
   // the hook's own visibilitychange/pagehide/heartbeat handling already
   // takes care of pausing while backgrounded and persisting periodically.
   useStudySession(!!session && !isRecovery, session?.user?.id, 'app', session?.access_token);
+  useRatingOutboxSync(!!session && !isRecovery, session?.user?.id, session?.access_token);
 
   // A new deployed version has finished installing in the background (see
   // lib/useServiceWorkerUpdate.js's own comment for why this matters for a
@@ -256,9 +259,18 @@ export default function App() {
         .eq('user_id', uid)
         .order('created_at', { ascending: false });
       if (error) throw error;
+      // Instant ratings (lib/ratingOutbox.js) — a rating made just before a
+      // reload/kill may still be sitting in the local outbox, unsynced.
+      // Without this overlay, this fresh fetch would show that card as if
+      // it had never been rated until the background flush catches up —
+      // section 5's "reads must include unsynced ratings," applied at the
+      // one place entries are loaded from scratch (every other place
+      // `entries` state changes already goes through onReviewed/setEntries
+      // directly, which is already up to date in memory).
+      const merged = mergeOutboxIntoRows(uid, 'entry', data || [], 'id');
       const g = {};
       (systems || DEFAULT_SYSTEMS).forEach(s => { g[s.name] = []; });
-      (data || []).forEach(e => {
+      merged.forEach(e => {
         if (!g[e.system]) g[e.system] = [];
         g[e.system].push(e);
       });
@@ -613,6 +625,12 @@ export default function App() {
       }}
       className="mb-app-shell"
       style={{display:'flex',background:t.bg,overflow:'hidden'}}>
+
+      {/* Instant ratings (lib/ratingOutbox.js), section 6 — tiny, non-
+          intrusive, only shows itself once something's been pending a
+          while or a flush has actually failed. Mounted app-wide (not per
+          study screen) for the same reason useRatingOutboxSync is. */}
+      <PendingSyncIndicator userId={session.user.id} />
 
       {/* New version available — persistent until acted on, unlike the
           auto-dismissing toast below. Opposite corner so the two can never

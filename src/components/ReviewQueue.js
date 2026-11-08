@@ -9,6 +9,7 @@ import { buildCycledQueue } from '../lib/reviewQueue';
 import { normalizeSections } from '../services/ai';
 import { loadSession, saveSession, clearSession, newSessionId } from '../lib/reviewSessionStore';
 import { flushStudySessionNow } from '../lib/useStudySession';
+import { enqueueRating, newRatingId, flushNow, getPendingRating, dropPendingRating } from '../lib/ratingOutbox';
 import { computeOverallProgress, buildSystemRegister } from '../lib/syllabusProgress';
 import { OverallSyllabusProgress, SystemProgressRegister } from './SyllabusProgress';
 import { formatDueCount } from '../lib/dueCount';
@@ -850,30 +851,39 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     return upcoming[0] || null;
   }, [scopedEntries]);
 
-  const rate = async (rating) => {
+  // Instant ratings — tap advances to the next card in the same frame.
+  // calcNext is already plain, synchronous JS (no network); the only
+  // thing that used to make this choppy was awaiting the entries.update
+  // before advancing. Now that write (plus the review_log row) goes
+  // through the shared outbox instead: computed locally, applied to this
+  // screen's own `queue`/onReviewed state immediately, durably queued,
+  // and flushed in the background. See lib/ratingOutbox.js's own header
+  // comment for the full design; nothing about calcNext's math changed.
+  const rate = (rating) => {
     if (!card) return;
     const updates = calcNext(card, rating);
-    const { error } = await supabase.from('entries').update(updates).eq('id', card.id);
-    if (error) {
-      alert(`Couldn't save this review: ${error.message}\n\nIf this mentions a missing column, run the SM-2 migration in Supabase.`);
-      return;
-    }
+
+    setQueue(q => q.map((c, i) => (i === idx ? { ...c, ...updates } : c)));
     onReviewed({ ...card, ...updates });
-    // Real retention data for Insights — one row per rating. Fire-and-forget
-    // and never surfaced to the user: this is supplementary analytics, not
-    // part of the scheduling update above, so a missing table (migration
-    // not run yet) or a transient failure here must never block a review
-    // that already succeeded. See SUPABASE_MIGRATION_INSIGHTS.sql.
+
     if (userId) {
-      supabase.from('review_log').insert({
-        user_id: userId, entry_id: card.id, system: card.system, rating,
-      }).then(({ error: logError }) => {
-        if (logError && process.env.NODE_ENV !== 'production') {
-          // eslint-disable-next-line no-console
-          console.warn('[ReviewQueue] review_log insert failed — has SUPABASE_MIGRATION_INSIGHTS.sql been run?', logError.message);
-        }
+      enqueueRating(userId, {
+        id: newRatingId(),
+        kind: 'entry',
+        itemId: card.id,
+        rating,
+        reviewedAt: updates.last_reviewed,
+        newFields: {
+          review_count: updates.review_count,
+          last_reviewed: updates.last_reviewed,
+          review_interval: updates.review_interval,
+          ease_factor: updates.ease_factor,
+          next_review: updates.next_review,
+        },
+        logFields: { system: card.system },
       });
     }
+
     const newSessionDone = sessionDone + 1;
     setSess(newSessionDone);
     if (idx + 1 >= total) {
@@ -881,6 +891,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
       setTimerRunning(false);
       flushSessionLog(newSessionDone);
       clearSession(userId, SESSION_SCOPE); // completed — nothing left worth resuming into
+      flushNow(userId); // safety net: session just ended, don't wait for the next hide/app-start
     } else { setIdx(p => p + 1); setFlipped(false); }
   };
 

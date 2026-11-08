@@ -25,7 +25,6 @@ export const MOCK_MODE = false;
 
 import { supabase } from '../supabase';
 import mock from './mockData';
-import { scheduler } from '../srs/Scheduler';
 
 const PAGE_SIZE = 50;
 
@@ -465,123 +464,14 @@ export async function setCardFlag(cardId, flag) {
 }
 
 // Critical Bug Fix Batch 2 — the exact scheduling fields a rating can
-// change, and therefore the exact fields Previous needs to snapshot
-// beforehand and restore on undo. Shared by rateCard (what it patches) and
-// StudySession (what it captures as `previousState` before calling
-// rateCard, and what it hands back to unrateCard). One list, not
-// duplicated between the two, so a future scheduler field can't be added
-// to one side and silently forgotten on the other.
+// change, and therefore the exact fields StudySession.js's rate()/goPrev()
+// snapshot beforehand and restore on undo. One list, not duplicated across
+// call sites, so a future scheduler field can't be added to one side and
+// silently forgotten on the other. (rateCard/unrateCard, which used to
+// live here, were replaced by the instant-ratings outbox — see
+// lib/ratingOutbox.js and StudySession.js's rate()/goPrev() — but this
+// list is still exactly what that snapshot/restore needs.)
 export const SCHEDULING_FIELDS = ['state', 'due_at', 'interval_days', 'ease_factor', 'review_count', 'lapse_count', 'last_reviewed_at'];
-
-/**
- * Persist a rating via the existing scheduler — no interval math here.
- *
- * Returns `{ card, logInsert }`, not just the card row (Critical Bug Fix
- * Batch 2) — `logInsert` is the imported_review_log insert's own promise,
- * still fire-and-forget as far as THIS rating is concerned (nothing here
- * awaits it, so rating a card is exactly as fast as before), but exposed
- * so a same-session Previous can await it before deleting that specific
- * log row — undoing a rating whose log insert hasn't landed yet would
- * either delete nothing (leaving a false review event behind) or race the
- * insert outright. See unrateCard()'s own comment.
- */
-export async function rateCard(card, rating) {
-  const patch = scheduler.calculateNextReview(card, rating);
-  if (MOCK_MODE) return { card: { ...card, ...patch }, logInsert: Promise.resolve() };
-  const { data, error } = await supabase.from('imported_cards')
-    .update(patch).eq('id', card.id).select().single();
-  if (error) throw new Error(error.message);
-  // Fire-and-forget: the denormalized total/new/due_cards on imported_decks
-  // (what DeckBrowser actually renders — it never scans imported_cards
-  // itself) only ever got recomputed by the import pipeline. A rating
-  // changes a card's state/due_at without going anywhere near that, so
-  // counts silently went stale the moment anyone actually studied. Not
-  // awaited: refreshing counts shouldn't add latency to flipping cards,
-  // and a failure here shouldn't block a rating that already saved fine.
-  refreshDeckCountsAfterRating(card.deck_id).catch(() => {});
-  // Same fire-and-forget spirit as the count refresh above, and the same
-  // pattern ReviewQueue.js already uses for the main app's review_log:
-  // supplementary stats, never allowed to block or fail a rating that
-  // already saved. Powers the Stats screen (streak/retention/
-  // reviews-per-day); nothing else reads it.
-  //
-  // This table already existed on the live database before
-  // SUPABASE_MIGRATION_IMPORTED_REVIEW_LOG.sql was ever written — with a
-  // genuinely different, more detailed shape (prev_state/prev_interval_days/
-  // new_interval_days/next_due_at tracking full before/after scheduling
-  // history, no deck_id at all) than that migration assumed. `create table
-  // if not exists` silently no-ops against a same-named table regardless of
-  // its actual columns, so the migration reported success while changing
-  // nothing, and every insert kept failing on a deck_id column that was
-  // never actually going to exist. Matches the REAL table now — deck_id
-  // dropped (Stats has no per-deck breakdown to need it for), the
-  // richer before/after fields populated from data rateCard() already has
-  // in hand (the patch this function just computed, and the card's own
-  // pre-update values).
-  const logInsert = supabase.from('imported_review_log').insert({
-    user_id: card.user_id, card_id: card.id, rating,
-    prev_state: card.state, prev_interval_days: card.interval_days ?? 0,
-    new_interval_days: patch.interval_days, next_due_at: patch.due_at,
-    reviewed_at: patch.last_reviewed_at,
-  }).then(({ error: logError }) => {
-    if (logError && process.env.NODE_ENV !== 'production') {
-      // eslint-disable-next-line no-console
-      console.warn('[rateCard] imported_review_log insert failed', logError.message);
-    }
-  });
-  return { card: data, logInsert };
-}
-
-/**
- * Critical Bug Fix Batch 2 — reverses ONE specific rating from earlier in
- * the CURRENT session (what Previous needs: not "just move the index
- * back," but "restore the card's scheduling state to what it was before
- * its most recent current-session rating"). `previousState` is the exact
- * pre-rating snapshot the caller captured client-side before the original
- * rateCard() call — restoring it is a plain field-for-field UPDATE, not a
- * recomputation, so this can never itself produce a "wrong" interval:
- * whatever the row looked like before is exactly what it looks like after.
- *
- * `ratedAtIso` is the original rating's own `last_reviewed_at` timestamp
- * (what rateCard stamped as imported_review_log.reviewed_at) — used as a
- * precise natural key to delete ONLY that one log row, never a broader
- * card_id-only match that could reach into legitimate review history from
- * a previous day or a previous session ("older legitimate review history
- * must remain untouched" — a session-scoped delete-by-timestamp is what
- * makes that true by construction, not by convention). await the
- * caller-supplied `logInsert` promise BEFORE deleting — see rateCard's own
- * comment on why deleting before that insert lands would be a race, not a
- * safety margin.
- *
- * The card row restore is the half that MUST succeed for correctness (an
- * undone rating that leaves the wrong interval behind is the exact bug
- * this batch exists to fix) — it throws on failure, same as rateCard.
- * The log-row cleanup is best-effort, same fire-and-forget philosophy as
- * rateCard's own log insert: a failure here means Stats may still show a
- * rating that was actually undone until it's retried, not that the card's
- * actual scheduling is wrong.
- */
-export async function unrateCard(cardId, deckId, previousState, ratedAtIso, logInsert) {
-  if (logInsert) { try { await logInsert; } catch { /* rateCard already reports insert failures itself */ } }
-  if (MOCK_MODE) {
-    const existing = mock.cards.find(c => c.id === cardId);
-    if (existing) Object.assign(existing, previousState);
-    return { ...existing, ...previousState, id: cardId };
-  }
-  const { data, error } = await supabase.from('imported_cards')
-    .update(previousState).eq('id', cardId).select().single();
-  if (error) throw new Error(error.message);
-  refreshDeckCountsAfterRating(deckId).catch(() => {});
-  if (ratedAtIso) {
-    const { error: logError } = await supabase.from('imported_review_log')
-      .delete().eq('card_id', cardId).eq('reviewed_at', ratedAtIso);
-    if (logError && process.env.NODE_ENV !== 'production') {
-      // eslint-disable-next-line no-console
-      console.warn('[unrateCard] review_log cleanup failed (card row was still correctly restored)', logError.message);
-    }
-  }
-  return data;
-}
 
 /** Direct (own, not rolled-up) total/new/due for exactly one deck node. */
 async function directDeckCounts(id, nowIso = new Date().toISOString()) {
@@ -601,8 +491,16 @@ async function directDeckCounts(id, nowIso = new Date().toISOString()) {
  * refreshDeckCounts in api/import-process.mjs, just scoped to one branch
  * of the tree (walking up from a single leaf) instead of every deck a
  * full import touches, since a single rating only ever moves one card.
+ *
+ * Exported (not called from rateCard anymore — see StudySession.js's
+ * optimistic rate()): this reads imported_cards' CURRENT server state, so
+ * it's only correct once the rating that moved a card has actually synced.
+ * StudySession.js calls this from ratingOutbox's subscribeSynced('imported_
+ * card') callback instead of right after the local rate(), which is exactly
+ * why it has to be a separate exported step now rather than something
+ * rateCard triggers itself.
  */
-async function refreshDeckCountsAfterRating(deckId) {
+export async function refreshDeckCountsAfterRating(deckId) {
   const nowIso = new Date().toISOString();
   let id = deckId;
   const own = await directDeckCounts(id, nowIso);
