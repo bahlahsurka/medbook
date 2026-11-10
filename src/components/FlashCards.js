@@ -18,6 +18,7 @@ import StudyByTimePicker from './StudyByTimePicker';
 import WeakSpotsPanel from './WeakSpotsPanel';
 import { renderOwnCardText, stripOwnCardSyntax, findSimilarCard } from '../lib/ownCards/cardText';
 import { OWN_CARDS_DEFAULTS, studyMinutesToCardBudget } from '../lib/ownCards/settings';
+import { mergeOutboxIntoRows } from '../lib/ratingOutbox';
 
 // Sentinel key for cards with no system assigned (legacy cards, or anything
 // created before folders existed). Never stored in the DB as this string —
@@ -261,7 +262,12 @@ export default function FlashCards({ userId, userSystems }) {
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .then(({ data, error }) => {
-        if (!error) setCards(data || []);
+        // Instant ratings (lib/ratingOutbox.js) — a rating made just
+        // before a reload/kill, or whose background flush just hasn't
+        // landed yet, must still count toward srsCountsByFolder/Overall
+        // below (section 5's "reads must include unsynced ratings"),
+        // the same overlay App.js's loadEntries uses for entries.
+        if (!error) setCards(mergeOutboxIntoRows(userId, 'own_card', data || [], 'id'));
         setLoading(false);
       });
   }, [userId]);

@@ -20,12 +20,15 @@
 // separate backfill needed for that part.
 
 import { supabase } from '../supabase';
-import { scheduler } from '../srs/Scheduler';
 
-// Same fields rateCard can change, and therefore the exact snapshot Undo
+// Same fields a rating can change, and therefore the exact snapshot Undo
 // needs to restore — identical list to imported api.js's own
 // SCHEDULING_FIELDS, kept as a separate copy (not shared) since the two
 // tables are independent and must stay that way per the engine decision.
+// (rateCard/unrateCard, which used to live here, were replaced by the
+// instant-ratings outbox — see lib/ratingOutbox.js and StudySession.js's
+// rate()/goPrev() — but this list is still exactly what that snapshot/
+// restore needs.)
 export const SCHEDULING_FIELDS = ['state', 'due_at', 'interval_days', 'ease_factor', 'review_count', 'lapse_count', 'last_reviewed_at'];
 
 /**
@@ -98,57 +101,6 @@ export async function getCardsByIds(cardIds) {
   return data || [];
 }
 
-/**
- * Persist a rating via the existing scheduler — no separate interval math.
- * `timeSpentSeconds` is stats-only (written to flashcard_review_log, never
- * read back into scheduling) — per the brief, it must never influence the
- * fixed 40s/card "Study by time" planning rate.
- * Returns `{ card, logInsert }` — logInsert is the fire-and-forget log
- * insert's own promise, exposed (not awaited here) so Undo can await it
- * before deleting that exact row, same race-avoidance as imported
- * api.js's rateCard/unrateCard pair.
- */
-export async function rateCard(card, rating, timeSpentSeconds) {
-  const patch = scheduler.calculateNextReview(card, rating);
-  const { data, error } = await supabase.from('flashcards').update(patch).eq('id', card.id).select().single();
-  if (error) throw new Error(error.message);
-  const logInsert = supabase.from('flashcard_review_log').insert({
-    user_id: card.user_id, card_id: card.id, rating,
-    prev_interval_days: card.interval_days ?? 0,
-    new_interval_days: patch.interval_days,
-    time_spent_seconds: timeSpentSeconds ?? null,
-    reviewed_at: patch.last_reviewed_at,
-  }).then(({ error: logError }) => {
-    if (logError && process.env.NODE_ENV !== 'production') {
-      // eslint-disable-next-line no-console
-      console.warn('[ownCards.rateCard] flashcard_review_log insert failed', logError.message);
-    }
-  });
-  return { card: data, logInsert };
-}
-
-/**
- * Reverses one specific rating from earlier in the current session — same
- * contract as imported api.js's unrateCard: `previousState` is the exact
- * pre-rating snapshot the caller captured client-side, restored as a
- * plain field-for-field UPDATE (never a recomputation), so it can't itself
- * produce a wrong interval. `ratedAtIso` + `card_id` together are the
- * natural key used to delete ONLY that one log row.
- */
-export async function unrateCard(cardId, previousState, ratedAtIso, logInsert) {
-  if (logInsert) { try { await logInsert; } catch { /* rateCard already reports insert failures itself */ } }
-  const { data, error } = await supabase.from('flashcards').update(previousState).eq('id', cardId).select().single();
-  if (error) throw new Error(error.message);
-  if (ratedAtIso) {
-    const { error: logError } = await supabase.from('flashcard_review_log')
-      .delete().eq('card_id', cardId).eq('reviewed_at', ratedAtIso);
-    if (logError && process.env.NODE_ENV !== 'production') {
-      // eslint-disable-next-line no-console
-      console.warn('[ownCards.unrateCard] review_log cleanup failed (card row was still correctly restored)', logError.message);
-    }
-  }
-  return data;
-}
 
 /**
  * New/Learning/Due counts per folder, computed live from a caller-supplied
