@@ -36,7 +36,11 @@
 import { createClient } from '@supabase/supabase-js';
 import * as GroqService from '../src/services/ai/GroqService.js';
 import * as GeminiService from '../src/services/ai/GeminiService.js';
-import { buildAnalysisPrompt, buildSectionPrompt, limitsFor } from '../src/services/ai/PromptBuilder.js';
+import {
+  buildAnalysisPrompt, buildSectionPrompt,
+  buildGroqAnalysisPrompt, buildGroqSectionPrompt,
+  limitsFor,
+} from '../src/services/ai/PromptBuilder.js';
 import { parseAnalysis, ParseError } from '../src/services/ai/ResponseParser.js';
 
 // Maps a transport-level failure to an HTTP status the client can react to
@@ -76,7 +80,14 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'The Review is too short to analyse meaningfully. Write a bit more first.' });
   }
 
-  const prompt = sectionKey ? buildSectionPrompt(text, sectionKey) : buildAnalysisPrompt(text);
+  // Groq (openai/gpt-oss-20b, much weaker than Gemini) gets its own richer,
+  // more explicit prompt — see PromptBuilder.js's own comment on why: this
+  // is specifically what was raised to fix generic, templated-sounding
+  // output that barely changed between unrelated reviews. Gemini keeps the
+  // original prompt unchanged; it was never the one reported as the
+  // problem.
+  const groqPrompt = sectionKey ? buildGroqSectionPrompt(text, sectionKey) : buildGroqAnalysisPrompt(text);
+  const geminiPrompt = sectionKey ? buildSectionPrompt(text, sectionKey) : buildAnalysisPrompt(text);
 
   let provider = null;
   let model = null;
@@ -88,7 +99,7 @@ export default async function handler(req, res) {
   // ---- 1. Groq, unless it simply isn't configured ----
   if (GroqService.isConfigured()) {
     try {
-      rawText = await GroqService.generate(prompt);
+      rawText = await GroqService.generate(groqPrompt);
       provider = 'groq';
       model = GroqService.activeModel();
     } catch (e) {
@@ -116,7 +127,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: message, kind: 'config' });
     }
     try {
-      rawText = await GeminiService.generate(prompt);
+      rawText = await GeminiService.generate(geminiPrompt);
       provider = 'gemini';
       model = GeminiService.activeModel();
     } catch (e) {
