@@ -12,7 +12,7 @@
 // per click instead of 1), and nothing here should regress it just because
 // the provider changed.
 
-import { SYSTEM_INSTRUCTION, GROQ_RESPONSE_SCHEMA } from './PromptBuilder.js';
+import { GROQ_SYSTEM_INSTRUCTION, GROQ_RESPONSE_SCHEMA } from './PromptBuilder.js';
 
 const API_KEY = process.env.GROQ_API_KEY;
 const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
@@ -71,7 +71,7 @@ async function attempt(userPrompt, signal) {
       body: JSON.stringify({
         model: MODEL,
         messages: [
-          { role: 'system', content: SYSTEM_INSTRUCTION },
+          { role: 'system', content: GROQ_SYSTEM_INSTRUCTION },
           { role: 'user', content: userPrompt },
         ],
         response_format: {
@@ -83,7 +83,23 @@ async function attempt(userPrompt, signal) {
           },
         },
         temperature: 0.2,       // low: we're extracting, not brainstorming
-        max_completion_tokens: 2048,
+        // gpt-oss-20b is a reasoning model (console.groq.com/docs/reasoning)
+        // — 'high' spends more of its hidden reasoning pass actually working
+        // through the review before committing to an answer, which is
+        // exactly the lever for "half-baked"/generic output, not just
+        // prompt wording. Confirmed-valid values for this model are
+        // low/medium/high (default medium); it was previously left unset.
+        reasoning_effort: 'high',
+        // Groq counts the model's reasoning tokens against this SAME budget
+        // (console.groq.com/docs/reasoning: "the default may be too low for
+        // complex reasoning") — unlike Gemini's thinking budget, which is
+        // separate from maxOutputTokens. The old 2048 was almost certainly
+        // being eaten by reasoning before much was left for six structured
+        // sections plus flashcards, which is the likely real cause of the
+        // shallow output this was raised to fix. 8192 is a generous 4x
+        // headroom, still far under this model's 65,536-token output cap
+        // (console.groq.com/docs/model/openai/gpt-oss-20b).
+        max_completion_tokens: 8192,
       }),
     });
   } catch (e) {
