@@ -38,8 +38,15 @@ export function limitsFor(model) {
 
 /** Hard caps from the spec. Enforced in the prompt AND again in ResponseParser. */
 export const LIMITS = {
-  keyLearningPoints: 7,   // ~3-7
-  highYield:         5,   // max 5
+  // No cap — a review that genuinely supports more than 7 key points (or
+  // 5 high-yield facts) was silently having real, specific, extracted
+  // material discarded for no reason tied to the actual content, same
+  // issue flashcards' own cap had (see its comment below). The prompt
+  // still asks for CONCISE bullets and specifically warns against padding
+  // to hit a number — this only removes the hard truncation, not the
+  // quality bar.
+  keyLearningPoints: Infinity,
+  highYield:         Infinity,
   clinicalPearls:    3,   // max 3
   redFlags:          5,
   relatedTopics:     8,
@@ -71,8 +78,8 @@ ABSOLUTE RULES:
 - Do not explain basic concepts the student clearly already understands.
 
 SECTION DEFINITIONS:
-- keyLearningPoints: the most important concepts in the review. 3-7 concise bullets.
-- highYield: only the highest-yield facts likely to be directly tested. Max 5.
+- keyLearningPoints: the most important concepts in the review. No fixed count — include every genuinely distinct concept the review supports, however many that is. Concise bullets, not padding.
+- highYield: the highest-yield facts likely to be directly tested. No fixed count — include every one the review genuinely supports. Concise bullets, not padding.
 - clinicalPearls: small practical teaching points (e.g. "A normal chest x-ray does not exclude pulmonary embolism"). Max 3.
 - redFlags: ONLY findings indicating urgent diagnosis or management (e.g. hypotension, altered mental status, septic shock). Do NOT invent red flags. Empty array if none are supported.
 - relatedTopics: important related concepts worth linking to. Short noun phrases only.
@@ -170,20 +177,26 @@ Return ONLY the "${sectionKey}" section. All other sections must be empty arrays
 // model than Gemini and needs far more explicit guidance to avoid the
 // failure mode actually reported in production: vague, generic,
 // templated-sounding bullets that barely change between two completely
-// different reviews, rather than genuinely extracting what's specific to
-// THIS review. SYSTEM_INSTRUCTION/buildAnalysisPrompt above are untouched
-// and still exactly what Gemini (the fallback, and already good at this)
+// different reviews, AND sparse/incomplete sections that stop after one
+// or two bullets even when the review clearly supports more — reported
+// a second time, after the specificity-only instructions below (the
+// ABSOLUTE RULES / HOW TO THINK / CALIBRATION EXAMPLE sections) were
+// already live and genuinely weren't enough on their own. A weaker model
+// follows a full worked example far more reliably than abstract rules
+// about HOW to behave — see WORKED EXAMPLE below, added for exactly that
+// reason. SYSTEM_INSTRUCTION/buildAnalysisPrompt above are untouched and
+// still exactly what Gemini (the fallback, and already good at this)
 // gets — this is a parallel, Groq-only track, not a replacement.
 //
 // Every addition below is deliberately domain-general: it tells the model
-// WHAT KIND of specificity to look for (named entities, numbers, units,
-// mechanisms, time courses, explicit clinical reasoning) without assuming
+// WHAT KIND of specificity and completeness to aim for without assuming
 // or hinting at any particular topic — the whole point is that this has
 // to work the same way for a cardiology review and a dermatology review
-// and anything else a student writes about. The one worked example is
-// there purely to calibrate the STANDARD of specificity (concrete fact
-// with a number/mechanism vs. vague filler); it's not a hint about what
-// any real review will contain.
+// and anything else a student writes about. The worked example's own
+// content (DKA) is arbitrary and explicitly disclaimed as off-limits to
+// reuse — it exists purely to show the FORM and DEPTH expected, the same
+// way the calibration example exists purely to show the STANDARD of
+// specificity, not to hint at what any real review will contain.
 export const GROQ_SYSTEM_INSTRUCTION = `You are a senior internal medicine attending physician teaching a student preparing for USMLE Step 2 CK.
 
 You are given the student's own written review notes about a single question they have just studied. Your ONLY job is to ORGANISE the information that is already present in those notes into structured, high-yield study material.
@@ -200,20 +213,49 @@ ABSOLUTE RULES:
 
 HOW TO THINK BEFORE YOU ANSWER (do this silently, every single time, regardless of what the review is about):
 1. Reread the review notes once, start to finish.
-2. Mentally list every DISCRETE, CONCRETE thing they actually state: named diagnoses, drugs, doses, lab values, vital signs, time courses, mechanisms, imaging/exam findings, and any explicit clinical reasoning or decision the student wrote down.
-3. Build every section below ONLY from items on that list. If you cannot point to a specific line in the review that a bullet comes from, delete that bullet — it is almost certainly you falling back on generic textbook filler instead of this student's actual notes.
+2. Mentally list every DISCRETE, CONCRETE thing they actually state: named diagnoses, drugs, doses, lab values, vital signs, time courses, mechanisms, imaging/exam findings, and any explicit clinical reasoning or decision the student wrote down. A review with real substance usually yields SEVERAL such items, not one or two — look for all of them before you start writing sections.
+3. Build every section below ONLY from items on that list, and use as many of them as each section's range allows — see COMPLETENESS below. If you cannot point to a specific line in the review that a bullet comes from, delete that bullet — it is almost certainly you falling back on generic textbook filler instead of this student's actual notes.
 4. Before finalising, re-read your own draft bullets and ask: "Could this exact sentence have been written without ever reading this specific review?" If yes, it is too generic — go back to the review and replace it with the actual specific fact, number, or reasoning step the student wrote.
 
 WHY THIS MATTERS: each Analyze click is for a DIFFERENT review, often on a completely different topic. Two different reviews must NEVER come back looking like the same templated answer with the nouns swapped. Every bullet's exact wording is dictated entirely by what THIS review specifically says — not by a reusable pattern of "this class of topic usually involves X, Y, Z."
+
+COMPLETENESS (as important as specificity — a review has been reported coming back thin/incomplete even when it clearly supported more): keyLearningPoints and highYield have NO fixed count — extract every genuinely distinct, specific point the review supports, however many that turns out to be; a long, detailed review can easily support ten or more of either, and stopping at one or two just because that's a "normal" number is a failure of completeness, exactly as serious as being too generic. clinicalPearls/redFlags/relatedTopics still have a max — that max is how much room you have, not a target to undershoot, so use more of it whenever the review's own content supports more. The only correct reason for a short or empty section, in any of them, is that the review itself genuinely doesn't contain more to extract — never because you stopped early.
 
 CALIBRATION EXAMPLE (illustrates the STANDARD of specificity required — not a hint about the actual topic, which could be anything):
 - BAD (too generic, could apply to almost any review, delete and redo): "This condition has an important pathophysiology to understand for the exam."
 - GOOD (concrete, traceable to a specific stated fact, with the actual number/mechanism the student wrote): "Succinylcholine transiently raises serum potassium by ~0.5 mEq/L via sustained depolarization of extrajunctional ACh receptors — the review's own stated reason to avoid it in hyperkalemia."
 Every bullet you write must read like the GOOD example in kind — specific, numeric/mechanistic where the review supports it, and clearly traceable to this review's own text — never like the BAD example.
 
+WORKED EXAMPLE (shows the FORM and DEPTH expected — the content is an unrelated, arbitrary topic and carries NO information about the real review below; never reuse any fact, drug, value, or diagnosis from this example in your actual answer):
+
+Example review notes: "DKA presents with hyperglycemia (glucose often >250 mg/dL), metabolic acidosis (pH <7.3), and ketosis, usually with an anion gap >12. Initial management is IV isotonic saline before starting insulin, because insulin alone drives potassium into cells and can precipitate severe hypokalemia and arrhythmia if given first. Add potassium repletion once K+ <5.3 mEq/L with adequate urine output. Switch to dextrose-containing fluids once glucose drops below ~200 mg/dL while continuing insulin until the anion gap closes. Watch for cerebral edema in pediatric patients — headache and altered mental status, especially with overly rapid correction of free water deficit."
+
+Example correct output:
+{
+  "keyLearningPoints": [
+    "DKA diagnostic criteria: glucose often >250 mg/dL, pH <7.3, ketosis, anion gap >12",
+    "Treatment sequence: isotonic saline FIRST, then insulin — insulin first risks severe hypokalemia",
+    "Potassium repletion starts once K+ <5.3 mEq/L with adequate urine output",
+    "Switch to dextrose-containing fluids once glucose <~200 mg/dL while continuing insulin until anion gap closes"
+  ],
+  "highYield": [
+    "Insulin before fluids in DKA can precipitate life-threatening hypokalemia/arrhythmia",
+    "Anion gap closure, not glucose normalization, is the real endpoint for stopping insulin",
+    "Cerebral edema is a feared pediatric DKA complication, linked to overly rapid free-water correction"
+  ],
+  "clinicalPearls": ["A normalizing glucose does NOT mean DKA is resolved — the anion gap is the true treatment endpoint"],
+  "redFlags": ["New headache or altered mental status during DKA treatment, especially in a pediatric patient, suggests cerebral edema"],
+  "relatedTopics": ["Hyperosmolar hyperglycemic state", "Insulin-induced hypokalemia", "Anion gap acidosis"],
+  "flashcards": [
+    {"front": "In DKA, why is isotonic saline given before insulin?", "back": "Insulin alone drives potassium into cells, risking severe hypokalemia/arrhythmia if fluids haven't been started first."},
+    {"front": "What is the true treatment endpoint in DKA?", "back": "Closure of the anion gap — not normalization of glucose."}
+  ]
+}
+Notice how each section pulled out several DIFFERENT specific facts the example review actually stated, rather than one vague bullet per section — that depth and distinctiveness, built from the REAL review below, is what's required, not this example's content.
+
 SECTION DEFINITIONS:
-- keyLearningPoints: the most important concepts the review ACTUALLY discusses, in the review's own specific terms. 3-7 concise bullets.
-- highYield: only the highest-yield facts likely to be directly tested — the kind of specific, numeric, or named fact that could be the answer to a board question. Max 5.
+- keyLearningPoints: the most important concepts the review ACTUALLY discusses, in the review's own specific terms. No fixed count — include every genuinely distinct concept the review supports, however many that is. Concise bullets, not padding.
+- highYield: only the highest-yield facts likely to be directly tested — the kind of specific, numeric, or named fact that could be the answer to a board question. No fixed count — include every one the review genuinely supports. Concise bullets, not padding.
 - clinicalPearls: small practical teaching points genuinely stated or clearly implied by the review (e.g. "A normal chest x-ray does not exclude pulmonary embolism"). Max 3.
 - redFlags: ONLY findings indicating urgent diagnosis or management (e.g. hypotension, altered mental status, septic shock) that the review itself supports. Do NOT invent red flags. Empty array if none are supported.
 - relatedTopics: important related concepts worth linking to, named specifically (not generic category names). Short noun phrases only.
