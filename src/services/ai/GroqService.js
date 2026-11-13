@@ -85,30 +85,35 @@ async function attempt(userPrompt, signal) {
         temperature: 0.2,       // low: we're extracting, not brainstorming
         // gpt-oss-20b is a reasoning model (console.groq.com/docs/reasoning)
         // — reasoning spends more of its hidden pass actually working
-        // through the review before committing to an answer, which is a
-        // real lever for "half-baked"/generic output, not just prompt
-        // wording. 'high' ("a large number of reasoning tokens" per Groq's
-        // own docs) was tried first here and made things WORSE in
-        // production: it started intermittently exhausting the shared
-        // reasoning+output token budget before the model ever reached the
-        // structured JSON, which Groq's strict json_schema mode surfaces as
-        // a hard `json_validate_failed` error (handled below) instead of a
-        // normal truncated response. 'medium' is the documented middle
-        // ground ("a moderate number of reasoning tokens") — deeper than
-        // the old unset/implicit default behaved in practice, without
-        // reliably starving the actual answer.
-        reasoning_effort: 'medium',
+        // through the review before committing to an answer. 'high' ("a
+        // large number of reasoning tokens" per Groq's own docs) was tried
+        // first, then reverted to 'medium' after it started intermittently
+        // exhausting the shared reasoning+output token budget before the
+        // model reached the structured JSON (json_validate_failed, handled
+        // below). But 'medium' alone, even with a much richer prompt
+        // (PromptBuilder.js's GROQ_SYSTEM_INSTRUCTION), was reported as
+        // STILL mediocre/incomplete compared to Gemini — the real fix for
+        // json_validate_failed was always meant to be enough budget for
+        // reasoning AND the full answer together (see max_completion_tokens
+        // below and the invalid_output resample-then-fallback path this
+        // file now has), not giving up depth entirely. Back to 'high', now
+        // paired with a much larger budget and a safety net that was
+        // missing the first time this was tried.
+        reasoning_effort: 'high',
         // Groq counts the model's reasoning tokens against this SAME budget
         // (console.groq.com/docs/reasoning: "the default may be too low for
         // complex reasoning") — unlike Gemini's thinking budget, which is
-        // separate from maxOutputTokens. The old 2048 was almost certainly
-        // being eaten by reasoning before much was left for six structured
-        // sections plus flashcards. Raised further than the original fix
-        // (8192) to 16384 for extra headroom now that reasoning_effort is
-        // back to 'medium' but still genuinely spends reasoning tokens —
-        // still far under this model's 65,536-token output cap
-        // (console.groq.com/docs/model/openai/gpt-oss-20b).
-        max_completion_tokens: 16384,
+        // separate from maxOutputTokens. 32768 is double the previous
+        // 16384, specifically to give 'high' reasoning_effort genuine room
+        // to do its deeper pass AND still have plenty left for six
+        // structured sections plus flashcards — still exactly half this
+        // model's 65,536-token output cap (console.groq.com/docs/model/
+        // openai/gpt-oss-20b). If reasoning still occasionally eats the
+        // whole budget, that's exactly what the 'invalid_output' handling
+        // above (resample once, then fall back to Gemini) exists for —
+        // this is no longer an all-or-nothing bet on one request the way
+        // the first attempt at 'high' effectively was.
+        max_completion_tokens: 32768,
       }),
     });
   } catch (e) {
