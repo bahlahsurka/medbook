@@ -104,12 +104,25 @@ export default async function handler(req, res) {
       model = GroqService.activeModel();
     } catch (e) {
       lastError = e;
-      if (e.kind !== 'quota') {
-        // Not a quota exhaustion — surface it as-is, no Gemini attempt.
-        return res.status(statusForKind(e.kind)).json({ error: e.message, kind: e.kind, provider: 'groq' });
+      // Quota exhaustion and "the model's own output failed Groq's strict
+      // schema validation after a resample retry" (GroqService.js's own
+      // comment on why this is noise worth falling back on, not a config
+      // bug) both fall through to Gemini. Anything else — auth/config/
+      // malformed-request-shaped — surfaces as-is: asking a different
+      // provider the same broken question wouldn't fix it.
+      if (e.kind !== 'quota' && e.kind !== 'invalid_output') {
+        // `model` included even on failure — the client's usage readout
+        // (DetailView.js) updates provider/model/fallback from whatever
+        // the LAST completed call actually was, success or failure, so a
+        // failed response missing `model` left it showing a stale model
+        // name (and fallback flag) left over from some earlier, unrelated
+        // successful call. See index.js's own header comment: this was
+        // always supposed to update "on failure past the auth/validation
+        // stage" too.
+        return res.status(statusForKind(e.kind)).json({ error: e.message, kind: e.kind, provider: 'groq', model: GroqService.activeModel() });
       }
       fallback = true;
-      fallbackReason = 'groq_quota_exhausted';
+      fallbackReason = e.kind === 'invalid_output' ? 'groq_invalid_output' : 'groq_quota_exhausted';
     }
   } else {
     fallback = true;
@@ -131,8 +144,9 @@ export default async function handler(req, res) {
       provider = 'gemini';
       model = GeminiService.activeModel();
     } catch (e) {
+      // `model` on failure too — see the Groq error branch's own comment.
       return res.status(statusForKind(e.kind)).json({
-        error: e.message, kind: e.kind, provider: 'gemini', fallbackReason,
+        error: e.message, kind: e.kind, provider: 'gemini', model: GeminiService.activeModel(), fallbackReason,
       });
     }
   }

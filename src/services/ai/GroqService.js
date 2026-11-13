@@ -23,7 +23,7 @@ export class GroqError extends Error {
   constructor(message, kind) {
     super(message);
     this.name = 'GroqError';
-    this.kind = kind; // 'config' | 'quota' | 'auth' | 'network' | 'truncated' | 'empty' | 'api'
+    this.kind = kind; // 'config' | 'quota' | 'auth' | 'network' | 'truncated' | 'empty' | 'api' | 'invalid_output'
   }
 }
 
@@ -84,22 +84,31 @@ async function attempt(userPrompt, signal) {
         },
         temperature: 0.2,       // low: we're extracting, not brainstorming
         // gpt-oss-20b is a reasoning model (console.groq.com/docs/reasoning)
-        // — 'high' spends more of its hidden reasoning pass actually working
-        // through the review before committing to an answer, which is
-        // exactly the lever for "half-baked"/generic output, not just
-        // prompt wording. Confirmed-valid values for this model are
-        // low/medium/high (default medium); it was previously left unset.
-        reasoning_effort: 'high',
+        // — reasoning spends more of its hidden pass actually working
+        // through the review before committing to an answer, which is a
+        // real lever for "half-baked"/generic output, not just prompt
+        // wording. 'high' ("a large number of reasoning tokens" per Groq's
+        // own docs) was tried first here and made things WORSE in
+        // production: it started intermittently exhausting the shared
+        // reasoning+output token budget before the model ever reached the
+        // structured JSON, which Groq's strict json_schema mode surfaces as
+        // a hard `json_validate_failed` error (handled below) instead of a
+        // normal truncated response. 'medium' is the documented middle
+        // ground ("a moderate number of reasoning tokens") — deeper than
+        // the old unset/implicit default behaved in practice, without
+        // reliably starving the actual answer.
+        reasoning_effort: 'medium',
         // Groq counts the model's reasoning tokens against this SAME budget
         // (console.groq.com/docs/reasoning: "the default may be too low for
         // complex reasoning") — unlike Gemini's thinking budget, which is
         // separate from maxOutputTokens. The old 2048 was almost certainly
         // being eaten by reasoning before much was left for six structured
-        // sections plus flashcards, which is the likely real cause of the
-        // shallow output this was raised to fix. 8192 is a generous 4x
-        // headroom, still far under this model's 65,536-token output cap
+        // sections plus flashcards. Raised further than the original fix
+        // (8192) to 16384 for extra headroom now that reasoning_effort is
+        // back to 'medium' but still genuinely spends reasoning tokens —
+        // still far under this model's 65,536-token output cap
         // (console.groq.com/docs/model/openai/gpt-oss-20b).
-        max_completion_tokens: 8192,
+        max_completion_tokens: 16384,
       }),
     });
   } catch (e) {
@@ -115,11 +124,28 @@ async function attempt(userPrompt, signal) {
   if (!res.ok) {
     let message = '';
     let type = '';
+    let code = '';
     try {
       const body = await res.json();
       message = body?.error?.message || '';
       type = body?.error?.type || '';
+      code = body?.error?.code || '';
     } catch { /* non-JSON error body */ }
+
+    // Groq's strict json_schema mode can fail the MODEL's own output
+    // against the schema (HTTP 400, error.code 'json_validate_failed',
+    // message "Failed to generate JSON..."/"Failed to validate JSON...",
+    // the actual bad output in error.failed_generation) — a real,
+    // documented, somewhat common failure mode for gpt-oss under strict
+    // structured outputs, not a bug in our request. It's resampling noise
+    // more than a hard failure: the same request often succeeds on a
+    // fresh attempt. Retried once here (see generate()'s own comment),
+    // then left for api/analyze.mjs to fall back to Gemini exactly like a
+    // quota exhaustion — surfacing it as a raw error to the user when a
+    // working fallback provider is sitting right there would be wrong.
+    if (res.status === 400 && (code === 'json_validate_failed' || /failed to (generate|validate) json/i.test(message))) {
+      throw new GroqError('Groq produced output that did not match the required structure.', 'invalid_output');
+    }
 
     if (res.status === 429) {
       // Groq enforces RPM/RPD/TPM/TPD at the ORGANIZATION level (one shared
@@ -184,6 +210,8 @@ async function attempt(userPrompt, signal) {
   return text;
 }
 
+const INVALID_OUTPUT_MAX_RETRIES = 1; // one immediate resample — see attempt()'s own comment on why this is noise, not a capacity issue
+
 /**
  * Send a prompt, get raw text back.
  *
@@ -191,6 +219,11 @@ async function attempt(userPrompt, signal) {
  *   Normal success ......... 1 request
  *   Rate limited (429) ..... 1 request  (surface immediately, caller falls back)
  *   Overloaded (503/498) ... up to 3 requests, SAME model only
+ *   Invalid structured
+ *     output (400) ......... up to 2 requests, SAME model, no delay (resampling
+ *                             noise, not a capacity wait) — then surfaces as
+ *                             'invalid_output' for api/analyze.mjs to fall
+ *                             back to Gemini, same as a quota exhaustion.
  *
  * There is no 404-triggered model swap here the way Gemini has one: Groq's
  * model lineup for structured outputs is deliberately pinned to one known-
@@ -205,6 +238,7 @@ export async function generate(userPrompt, { signal } = {}) {
     throw new GroqError('No Groq API key found. Set GROQ_API_KEY in Vercel (server-side only, no REACT_APP_ prefix).', 'config');
   }
 
+  let invalidOutputRetries = 0;
   for (let i = 0; ; i++) {
     try {
       return await attempt(userPrompt, signal);
@@ -212,6 +246,10 @@ export async function generate(userPrompt, { signal } = {}) {
       if (e.name === 'AbortError') throw e;
       if (e.kind === 'overloaded' && i < OVERLOAD_RETRY_DELAYS_MS.length) {
         await sleep(OVERLOAD_RETRY_DELAYS_MS[i]);
+        continue;
+      }
+      if (e.kind === 'invalid_output' && invalidOutputRetries < INVALID_OUTPUT_MAX_RETRIES) {
+        invalidOutputRetries++;
         continue;
       }
       throw e;

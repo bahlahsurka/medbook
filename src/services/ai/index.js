@@ -66,11 +66,17 @@ async function callAnalyzeEndpoint(reviewText, sectionKey) {
   if (!res.ok) {
     const message = body?.error || `Analysis failed (HTTP ${res.status}).`;
     const kind = body?.kind || 'api';
-    // A failed call still tells us which provider actually tried (and, on
-    // a quota 429, which one ran out) — worth reflecting immediately
-    // rather than leaving the usage bar showing stale info from a
-    // previous successful call.
+    // A failed call still tells us which provider/model actually tried
+    // (and, on a quota 429 or Groq's own output failing its schema, which
+    // one ran out / failed) — worth reflecting immediately rather than
+    // leaving the usage bar showing provider/model/fallback left over
+    // from an earlier, unrelated SUCCESSFUL call (previously only
+    // `provider` was updated here, which could show something like "Groq
+    // (fallback) · gemini-3.6-flash" after a plain Groq failure that never
+    // touched Gemini at all).
     if (body?.provider) { lastProvider = body.provider; }
+    if (body?.model) { lastModel = body.model; }
+    lastFallback = !!body?.fallbackReason;
     throw new AIServiceError(message, kind);
   }
 
