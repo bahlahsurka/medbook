@@ -38,8 +38,15 @@ export function limitsFor(model) {
 
 /** Hard caps from the spec. Enforced in the prompt AND again in ResponseParser. */
 export const LIMITS = {
-  keyLearningPoints: 7,   // ~3-7
-  highYield:         5,   // max 5
+  // No cap — a review that genuinely supports more than 7 key points (or
+  // 5 high-yield facts) was silently having real, specific, extracted
+  // material discarded for no reason tied to the actual content, same
+  // issue flashcards' own cap had (see its comment below). The prompt
+  // still asks for CONCISE bullets and specifically warns against padding
+  // to hit a number — this only removes the hard truncation, not the
+  // quality bar.
+  keyLearningPoints: Infinity,
+  highYield:         Infinity,
   clinicalPearls:    3,   // max 3
   redFlags:          5,
   relatedTopics:     8,
@@ -71,8 +78,8 @@ ABSOLUTE RULES:
 - Do not explain basic concepts the student clearly already understands.
 
 SECTION DEFINITIONS:
-- keyLearningPoints: the most important concepts in the review. 3-7 concise bullets.
-- highYield: only the highest-yield facts likely to be directly tested. Max 5.
+- keyLearningPoints: the most important concepts in the review. No fixed count — include every genuinely distinct concept the review supports, however many that is. Concise bullets, not padding.
+- highYield: the highest-yield facts likely to be directly tested. No fixed count — include every one the review genuinely supports. Concise bullets, not padding.
 - clinicalPearls: small practical teaching points (e.g. "A normal chest x-ray does not exclude pulmonary embolism"). Max 3.
 - redFlags: ONLY findings indicating urgent diagnosis or management (e.g. hypotension, altered mental status, septic shock). Do NOT invent red flags. Empty array if none are supported.
 - relatedTopics: important related concepts worth linking to. Short noun phrases only.
@@ -212,7 +219,7 @@ HOW TO THINK BEFORE YOU ANSWER (do this silently, every single time, regardless 
 
 WHY THIS MATTERS: each Analyze click is for a DIFFERENT review, often on a completely different topic. Two different reviews must NEVER come back looking like the same templated answer with the nouns swapped. Every bullet's exact wording is dictated entirely by what THIS review specifically says — not by a reusable pattern of "this class of topic usually involves X, Y, Z."
 
-COMPLETENESS (as important as specificity — a review has been reported coming back thin/incomplete even when it clearly supported more): each section below gives a range (e.g. "3-7") or a max. That is not a target to undershoot — it is how much room you have. If the review's own content supports more distinct, specific points than you've drafted, keep going and use more of that room. Stopping at one or two keyLearningPoints, or leaving highYield nearly empty, when the review actually discusses several distinct facts is a failure of completeness, exactly as serious as being too generic. The only correct reason for a short or empty section is that the review itself genuinely doesn't contain more to extract — never because you stopped early.
+COMPLETENESS (as important as specificity — a review has been reported coming back thin/incomplete even when it clearly supported more): keyLearningPoints and highYield have NO fixed count — extract every genuinely distinct, specific point the review supports, however many that turns out to be; a long, detailed review can easily support ten or more of either, and stopping at one or two just because that's a "normal" number is a failure of completeness, exactly as serious as being too generic. clinicalPearls/redFlags/relatedTopics still have a max — that max is how much room you have, not a target to undershoot, so use more of it whenever the review's own content supports more. The only correct reason for a short or empty section, in any of them, is that the review itself genuinely doesn't contain more to extract — never because you stopped early.
 
 CALIBRATION EXAMPLE (illustrates the STANDARD of specificity required — not a hint about the actual topic, which could be anything):
 - BAD (too generic, could apply to almost any review, delete and redo): "This condition has an important pathophysiology to understand for the exam."
@@ -247,8 +254,8 @@ Example correct output:
 Notice how each section pulled out several DIFFERENT specific facts the example review actually stated, rather than one vague bullet per section — that depth and distinctiveness, built from the REAL review below, is what's required, not this example's content.
 
 SECTION DEFINITIONS:
-- keyLearningPoints: the most important concepts the review ACTUALLY discusses, in the review's own specific terms. 3-7 concise bullets.
-- highYield: only the highest-yield facts likely to be directly tested — the kind of specific, numeric, or named fact that could be the answer to a board question. Max 5.
+- keyLearningPoints: the most important concepts the review ACTUALLY discusses, in the review's own specific terms. No fixed count — include every genuinely distinct concept the review supports, however many that is. Concise bullets, not padding.
+- highYield: only the highest-yield facts likely to be directly tested — the kind of specific, numeric, or named fact that could be the answer to a board question. No fixed count — include every one the review genuinely supports. Concise bullets, not padding.
 - clinicalPearls: small practical teaching points genuinely stated or clearly implied by the review (e.g. "A normal chest x-ray does not exclude pulmonary embolism"). Max 3.
 - redFlags: ONLY findings indicating urgent diagnosis or management (e.g. hypotension, altered mental status, septic shock) that the review itself supports. Do NOT invent red flags. Empty array if none are supported.
 - relatedTopics: important related concepts worth linking to, named specifically (not generic category names). Short noun phrases only.
