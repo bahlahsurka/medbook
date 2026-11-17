@@ -2,8 +2,9 @@
 // a contentEditable surface, NOT a plain <textarea>. The storage format
 // hasn't changed: `notes` is still a plain string, with the SAME lightweight
 // marker syntax a rich paste has always produced — **bold**, {{i}}…{{/i}}
-// for italic, {{sm}}/{{lg}}/{{xl}}…{{/…}} for relative size — nothing about
-// the DB column, search, or highlight-offset math changed. What changed is
+// for italic, {{u}}…{{/u}} for underline, {{sm}}/{{lg}}/{{xl}}…{{/…}} for
+// relative size — nothing about the DB column, search, or highlight-offset
+// math changed. What changed is
 // the EDIT surface itself: it used to be a <textarea> that showed those
 // markers as literal "**"/"{{lg}}" characters while editing (a plain
 // <textarea> can't render inline formatting at all); it's now a real
@@ -192,8 +193,9 @@ export function toggleBulletLines(root) {
 
 // Inline text extraction that keeps formatting as plain-text markers
 // instead of flattening it away: <strong>/<b> as **bold**, <em>/<i> as
-// {{i}}…{{/i}}, and a relative font size (from a heading tag or an inline
-// font-size style/attribute) as {{sm}}/{{lg}}/{{xl}}…{{/…}}. Colour is
+// {{i}}…{{/i}}, <u>/<ins>/a text-decoration:underline style as {{u}}…{{/u}},
+// and a relative font size (from a heading tag or an inline font-size
+// style/attribute) as {{sm}}/{{lg}}/{{xl}}…{{/…}}. Colour is
 // deliberately NOT captured — a colour authored for the source's light
 // background can be unreadable against this app's dark mode (or vice
 // versa), so notes always render in the current theme's text colour,
@@ -204,6 +206,20 @@ export function toggleBulletLines(root) {
 // and walk them separately via collectLines.
 const BOLD_TAGS = /^(strong|b)$/i;
 const ITALIC_TAGS = /^(em|i)$/i;
+// <u>/<ins> are the HTML tags; text-decoration:underline catches a source
+// that encodes it purely as a style instead (e.g. some Word/Docs exports,
+// and a <span> written back by richMarkersToHtml itself for a `{{u}}`
+// marker — see that function). Checked independently of BOLD_TAGS/
+// ITALIC_TAGS below (its own `if`, not chained into their if/else-if)
+// since an element can be both, e.g. <u style="font-weight:bold">, or more
+// commonly two separately-nested tags — which recursion already handles
+// correctly either way.
+const UNDERLINE_TAGS = /^(u|ins)$/i;
+function isUnderlined(el) {
+  if (UNDERLINE_TAGS.test(el.tagName.toLowerCase())) return true;
+  const td = el.style && el.style.textDecoration;
+  return !!td && /underline/i.test(td);
+}
 
 // A size is only recorded as "small/large/extra-large" relative to normal
 // body text — never the source's literal pixel value, which could be
@@ -238,7 +254,8 @@ function detectSize(el) {
 }
 
 // Wraps `inner` (el's already-computed inner text) in whatever markers
-// el's OWN tag/style call for — bold/italic from its tag, size from either
+// el's OWN tag/style call for — bold/italic/underline from its tag (or,
+// for underline, its style), size from either
 // its tag (a heading) or its inline style. Used both for an inline child
 // (inlineTextWithMarks) and for a block-level element's own text
 // (collectLines' BLOCK_TAGS branch) — a block tag's own formatting
@@ -264,6 +281,10 @@ function wrapMarks(el, inner) {
   } else if (ITALIC_TAGS.test(tag)) {
     const t = inner.replace(/\s+/g, ' ');
     if (t) inner = `{{i}}${t}{{/i}}`;
+  }
+  if (isUnderlined(el)) {
+    const t = inner.replace(/\s+/g, ' ');
+    if (t) inner = `{{u}}${t}{{/u}}`;
   }
   const size = detectSize(el);
   if (size) {

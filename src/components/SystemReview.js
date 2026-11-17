@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 import { DIFF_COLOR } from '../lib/constants';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation, BREAKPOINT } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
@@ -9,6 +10,12 @@ import { enqueueRating, newRatingId, flushNow } from '../lib/ratingOutbox';
 import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
 import { IconX } from '../lib/icons';
 import RichRuns from '../lib/RichRuns';
+import { rawOffsetAt } from './DetailView';
+import { clearRange } from '../lib/useHighlight';
+import { adjustHighlights, matchHighlightShortcutEditing, matchRichShortcut,
+  toggleRichMarker, isRangeFullyMarked } from '../lib/highlights';
+import { STUDY_SCOPE_CLASS, suppressContextMenu } from '../lib/studyInteraction';
+import HLPopover from './HLPopover';
 
 // Renders notes with the same highlight colours the entry has in its
 // system view. Formatting and highlight colour are composed in ONE pass
@@ -294,6 +301,152 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
     else { setIdx(p=>p+1); setFlipped(false); }
   };
 
+  // ── View-mode highlighting + bold/underline of the revealed answer ──────
+  // Same model as ReviewQueue.js's own identical mechanism (see its header
+  // comment for the full "why"): selection is read in raw-string offsets
+  // via rawOffsetAt (RichRuns.js's data-raw-start annotation this walks is
+  // identical here, since this screen's RenderedNotes renders through the
+  // exact same RichRuns), synced on every selectionchange, and a floating
+  // HLPopover exposes highlight colors + bold/underline + remove/copy —
+  // ported here (previously DetailView.js view mode and ReviewQueue.js
+  // review mode only) so this third "reading" surface isn't left behind.
+  const notesRef = useRef(null);
+  const [selRect, setSelRect] = useState(null);
+  const [selRange, setSelRange] = useState(null); // { start, end }
+  const pointerDownRef = useRef(false);
+
+  const readCardSelection = () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !notesRef.current) return null;
+    const range = sel.getRangeAt(0);
+    if (!notesRef.current.contains(range.commonAncestorContainer)) return null;
+    const start = rawOffsetAt(range.startContainer, range.startOffset);
+    const end   = rawOffsetAt(range.endContainer, range.endOffset);
+    if (start == null || end == null || start >= end) return null;
+    const text = range.toString();
+    if (!text.trim()) return null;
+    const r = range.getBoundingClientRect();
+    if (!r || (r.width === 0 && r.height === 0)) return null;
+    return { start, end, rect: r, text };
+  };
+  const clearCardSelState = () => { setSelRect(null); setSelRange(null); };
+
+  useEffect(() => {
+    if (!flipped) { clearCardSelState(); return; }
+    const sync = () => {
+      const s = readCardSelection();
+      if (!s) { clearCardSelState(); return; }
+      setSelRange({ start: s.start, end: s.end });
+      if (!pointerDownRef.current) setSelRect(s.rect);
+    };
+    const onDown = () => { pointerDownRef.current = true; };
+    const onUp   = () => { pointerDownRef.current = false; sync(); };
+    const onScrollOrResize = () => {
+      const s = readCardSelection();
+      setSelRect(s ? s.rect : null);
+    };
+    document.addEventListener('selectionchange', sync);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchstart', onDown, { passive: true });
+    document.addEventListener('touchend', onUp);
+    window.addEventListener('scroll', onScrollOrResize, true);
+    window.addEventListener('resize', onScrollOrResize);
+    return () => {
+      document.removeEventListener('selectionchange', sync);
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('touchstart', onDown);
+      document.removeEventListener('touchend', onUp);
+      window.removeEventListener('scroll', onScrollOrResize, true);
+      window.removeEventListener('resize', onScrollOrResize);
+    };
+  }, [flipped, idx]);
+
+  const selHasHighlight = !!selRange && (card?.highlights || []).some(h => h.start < selRange.end && h.end > selRange.start);
+  const selIsBold = !!selRange && isRangeFullyMarked(card?.notes || '', selRange.start, selRange.end, 'bold');
+  const selIsUnderline = !!selRange && isRangeFullyMarked(card?.notes || '', selRange.start, selRange.end, 'underline');
+
+  const updateCardInPlace = (updates) => {
+    setQueue(q => q.map((c, i) => (i === idx ? { ...c, ...updates } : c)));
+    onReviewed({ ...card, ...updates });
+  };
+
+  const applyCardHL = (c) => {
+    const s = readCardSelection();
+    if (!s || !card) return;
+    const newHl = [...clearRange(card.highlights || [], s.start, s.end), { start: s.start, end: s.end, color: c }]
+      .sort((a, b) => a.start - b.start);
+    window.getSelection()?.removeAllRanges();
+    clearCardSelState();
+    supabase.from('entries').update({ highlights: newHl }).eq('id', card.id).then(()=>{});
+    updateCardInPlace({ highlights: newHl });
+  };
+  const removeCardHL = () => {
+    const s = readCardSelection();
+    if (!s || !card) return;
+    const newHl = clearRange(card.highlights || [], s.start, s.end);
+    window.getSelection()?.removeAllRanges();
+    clearCardSelState();
+    supabase.from('entries').update({ highlights: newHl }).eq('id', card.id).then(()=>{});
+    updateCardInPlace({ highlights: newHl });
+  };
+  const copyCardSelection = async () => {
+    const s = readCardSelection();
+    if (!s) return;
+    try { await navigator.clipboard.writeText(s.text); }
+    catch {
+      const ta = document.createElement('textarea');
+      ta.value = s.text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch {}
+      ta.remove();
+    }
+    window.getSelection()?.removeAllRanges();
+    clearCardSelState();
+  };
+  const toggleCardRich = (kind) => {
+    const s = readCardSelection();
+    if (!s || !card) return;
+    const newNotes = toggleRichMarker(card.notes || '', s.start, s.end, kind);
+    window.getSelection()?.removeAllRanges();
+    clearCardSelState();
+    if (newNotes === card.notes) return; // selection was empty/no-op
+    const newHl = adjustHighlights(card.notes || '', newNotes, card.highlights || []);
+    supabase.from('entries').update({ notes: newNotes, highlights: newHl }).eq('id', card.id).then(()=>{});
+    updateCardInPlace({ notes: newNotes, highlights: newHl });
+  };
+
+  // Bare mnemonic letters (a/h/g, Enter, Space) already mean Again/Hard/
+  // Good/Easy/flip (useReviewKeyboard above), so highlighting uses the
+  // Alt-gated variant (matchHighlightShortcutEditing — same letters
+  // ReviewQueue.js's review mode uses for the identical reason), and bold/
+  // underline use Ctrl+B/Ctrl+U (matchRichShortcut) — a modifier neither
+  // scheme uses, so it can't collide with either. useReviewKeyboard itself
+  // already bails out on any ctrl/meta/alt chord, so ratings are safe too.
+  useEffect(() => {
+    if (!flipped || lightboxIdx !== null) return;
+    const isTypingTarget = (el) => !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+    const onKeyDown = (e) => {
+      if (isTypingTarget(document.activeElement)) return;
+      const hl = matchHighlightShortcutEditing(e);
+      if (hl) {
+        if (!readCardSelection()) return;
+        e.preventDefault();
+        if (hl.remove) removeCardHL(); else applyCardHL(hl.color);
+        return;
+      }
+      const rich = matchRichShortcut(e);
+      if (rich) {
+        if (!readCardSelection()) return;
+        e.preventDefault();
+        toggleCardRich(rich.kind);
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [flipped, lightboxIdx, card]);
+
   // No entries at all in this system
   if (entries.length === 0) return (
     <div style={{position:'fixed',inset:0,background:t.overlay,zIndex:300,
@@ -432,6 +585,23 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
         <Lightbox images={card.images} start={lightboxIdx} onClose={()=>setLightboxIdx(null)} />
       )}
 
+      {/* Floating highlight/bold/underline bar — same selection toolbar
+          ReviewQueue.js's review mode uses, appearing once real text is
+          selected inside the revealed answer. */}
+      {flipped && selRect && (
+        <HLPopover
+          rect={selRect}
+          onApply={applyCardHL}
+          onRemove={removeCardHL}
+          onCopy={copyCardSelection}
+          hasHighlightInSelection={selHasHighlight}
+          onToggleBold={() => toggleCardRich('bold')}
+          onToggleUnderline={() => toggleCardRich('underline')}
+          isBold={selIsBold}
+          isUnderline={selIsUnderline}
+        />
+      )}
+
       {/* Wider than before (900 vs the old 580) — room for the card +
           supporting column, same two-column study surface ReviewQueue.js
           uses, just presented as a focused modal instead of a full page. */}
@@ -511,7 +681,9 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
                   <div>
                     <div style={{height:1,background:t.border,marginBottom:SPACE.lg}} />
                     {card.notes ? (
-                      <div style={{fontSize:FONT.size.lg,color:t.text2,lineHeight:1.75,
+                      <div ref={notesRef} className={STUDY_SCOPE_CLASS} data-selectable="true"
+                        onContextMenu={suppressContextMenu}
+                        style={{fontSize:FONT.size.lg,color:t.text2,lineHeight:1.75,
                         whiteSpace:'pre-wrap',marginBottom:SPACE.lg,maxWidth:620}}>
                         <RenderedNotes text={card.notes} highlights={card.highlights} isDark={isDark} />
                       </div>

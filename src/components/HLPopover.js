@@ -21,8 +21,16 @@ const MARGIN = 8;      // min distance from viewport edge
  * rt theme, warm cream/sage rather than the app's plain white/gray) passes
  * one so the popover reads as part of that surface instead of a stark,
  * mismatched box dropped on top of it.
+ *
+ * `onToggleBold`/`onToggleUnderline` write real bold/underline markers into
+ * the selection (same marker syntax edit mode's own typing/pasting already
+ * writes — see toggleRichMarker in lib/highlights.js), so they're optional:
+ * a caller can omit them to get the highlight-only bar as before. `isBold`/
+ * `isUnderline` reflect whether the CURRENT selection is already fully that
+ * style (via isRangeFullyMarked), same "active" semantics a word processor's
+ * toolbar button uses.
  */
-export default function HLPopover({ rect, onApply, onRemove, onCopy, hasHighlightInSelection, colors }) {
+export default function HLPopover({ rect, onApply, onRemove, onCopy, hasHighlightInSelection, onToggleBold, onToggleUnderline, isBold, isUnderline, colors }) {
   const { t: globalT, isDark } = useTheme();
   const t = colors || globalT;
   const ref = useRef(null);
@@ -117,6 +125,42 @@ export default function HLPopover({ rect, onApply, onRemove, onCopy, hasHighligh
           />
         );
       })}
+
+      {onToggleBold && (
+        <>
+          <div style={{ width: 1, height: 20, background: t.border, margin: '0 3px', flexShrink: 0 }} />
+
+          <button
+            onMouseDown={prevent}
+            onTouchStart={prevent}
+            onClick={onToggleBold}
+            aria-pressed={isBold}
+            title="Bold (Ctrl+B)"
+            style={{
+              ...btn,
+              width: 28, padding: 0, fontWeight: 800,
+              color: isBold ? t.surface : t.text2,
+              background: isBold ? t.text2 : 'transparent',
+            }}>
+            B
+          </button>
+
+          <button
+            onMouseDown={prevent}
+            onTouchStart={prevent}
+            onClick={onToggleUnderline}
+            aria-pressed={isUnderline}
+            title="Underline (Ctrl+U)"
+            style={{
+              ...btn,
+              width: 28, padding: 0, textDecoration: 'underline',
+              color: isUnderline ? t.surface : t.text2,
+              background: isUnderline ? t.text2 : 'transparent',
+            }}>
+            U
+          </button>
+        </>
+      )}
 
       <div style={{ width: 1, height: 20, background: t.border, margin: '0 3px', flexShrink: 0 }} />
 

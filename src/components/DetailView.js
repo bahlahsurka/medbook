@@ -3,7 +3,8 @@ import { supabase } from '../lib/supabase';
 import { compressImage } from '../lib/imageCompress';
 import { SYS_COLOR, DIFF_COLOR, DIFFICULTY } from '../lib/constants';
 import { toTitleCase } from '../lib/titleCase';
-import { adjustHighlights, matchHighlightShortcutView, richMarkersToHtml, markedTextToHtml } from '../lib/highlights';
+import { adjustHighlights, matchHighlightShortcutView, matchRichShortcut, toggleRichMarker,
+  isRangeFullyMarked, richMarkersToHtml, markedTextToHtml } from '../lib/highlights';
 import RichRuns from '../lib/RichRuns';
 import { useHighlight, clearRange } from '../lib/useHighlight';
 import { useTheme, SPACE, RADIUS, FONT, Z, MOTION, elevation } from '../lib/theme';
@@ -531,6 +532,11 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const selHasHighlight = !!selRange && viewHL.some(h => h.start < selRange.end && h.end > selRange.start);
   // The static toolbar needs to know whether a usable selection exists.
   const viewHasSel = !!selRange;
+  // Button "active" state for Bold/Underline — is the current selection
+  // ALREADY fully that formatting? (same question toggleViewRich asks
+  // itself to decide apply vs. remove, see isRangeFullyMarked's own doc).
+  const selIsBold = !!selRange && isRangeFullyMarked(entry.notes || '', selRange.start, selRange.end, 'bold');
+  const selIsUnderline = !!selRange && isRangeFullyMarked(entry.notes || '', selRange.start, selRange.end, 'underline');
 
   const copySelection = async () => {
     const s = readSelection();
@@ -883,28 +889,64 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     onUpdated({...entry,highlights:newHl});
   }, [readSelection, viewHL, clearSelState, entry, onUpdated]);
 
-  // Keyboard shortcut for the floating highlight bar in view mode — bare
+  // View-mode bold/underline toggle. Unlike applyViewHL/removeViewHL above
+  // (which only ever touch the highlights array), this one rewrites
+  // entry.notes itself — a real **bold**/{{u}} marker, the SAME kind edit
+  // mode's own typing/pasting already writes (see toggleRichMarker's own
+  // comment in lib/highlights.js for why: so this reads correctly
+  // everywhere else the note is shown too, not just here) — so the
+  // existing highlights need reconciling against that new text via
+  // adjustHighlights, the exact same "change the text, then adjust
+  // highlights against the diff" sequence saveEdit already uses below for
+  // an ordinary edit.
+  const toggleViewRich = useCallback((kind) => {
+    const s = readSelection();
+    if (!s) return;
+    const newNotes = toggleRichMarker(entry.notes || '', s.start, s.end, kind);
+    window.getSelection()?.removeAllRanges();
+    clearSelState();
+    if (newNotes === entry.notes) return; // selection was empty/no-op
+    const newHl = adjustHighlights(entry.notes || '', newNotes, viewHL);
+    setVHL(newHl);
+    supabase.from('entries').update({ notes: newNotes, highlights: newHl }).eq('id', entry.id).then(()=>{});
+    onUpdated({ ...entry, notes: newNotes, highlights: newHl });
+  }, [readSelection, viewHL, clearSelState, entry, onUpdated]);
+
+  // Keyboard shortcuts for the floating highlight bar in view mode — bare
   // mnemonic letters (y/g/b/p/o, r to remove) rather than a chord, since
   // the notes aren't editable here: pressing a letter can only ever mean
   // "I selected some text, now highlight it," never "type this letter."
-  // Works whether or not Highlight mode has been toggled on first —
-  // selecting text and pressing a letter is already unambiguous intent on
-  // its own. Still requires a real, live selection inside the notes
-  // (readSelection enforces that) and bails out entirely while some other
-  // input/textarea has focus, so it can never interfere with typing
-  // anywhere else on the page.
+  // Bold/underline use Ctrl+B/Ctrl+U instead (matchRichShortcut), same
+  // chord as everywhere else this feature works (ReviewQueue.js, and any
+  // real word processor) — it doesn't collide with the bare letters above
+  // precisely because it REQUIRES a modifier they don't.
+  // Both work whether or not Highlight mode has been toggled on first —
+  // selecting text and pressing the shortcut is already unambiguous
+  // intent on its own. Still requires a real, live selection inside the
+  // notes (readSelection enforces that) and bails out entirely while some
+  // other input/textarea has focus, so neither can ever interfere with
+  // typing anywhere else on the page.
   useEffect(() => {
     if (editing) return;
     const onKeyDown = (e) => {
       if (isTypingTarget(document.activeElement)) return;
-      const m = matchHighlightShortcutView(e);
-      if (!m || !readSelection()) return;
-      e.preventDefault();
-      if (m.remove) removeViewHL(); else applyViewHL(m.color);
+      const hl = matchHighlightShortcutView(e);
+      if (hl) {
+        if (!readSelection()) return;
+        e.preventDefault();
+        if (hl.remove) removeViewHL(); else applyViewHL(hl.color);
+        return;
+      }
+      const rich = matchRichShortcut(e);
+      if (rich) {
+        if (!readSelection()) return;
+        e.preventDefault();
+        toggleViewRich(rich.kind);
+      }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [editing, readSelection, applyViewHL, removeViewHL]);
+  }, [editing, readSelection, applyViewHL, removeViewHL, toggleViewRich]);
 
   const saveEdit = async () => {
     if (!editTitle.trim()) { setErr('Title required'); return; }
@@ -1176,6 +1218,10 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
           onRemove={removeViewHL}
           onCopy={copySelection}
           hasHighlightInSelection={selHasHighlight}
+          onToggleBold={() => toggleViewRich('bold')}
+          onToggleUnderline={() => toggleViewRich('underline')}
+          isBold={selIsBold}
+          isUnderline={selIsUnderline}
         />
       )}
 
@@ -1291,6 +1337,10 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                   onRemove={removeViewHL}
                   onClearAll={clearAllViewHL}
                   hasSelection={viewHasSel}
+                  onToggleBold={() => toggleViewRich('bold')}
+                  onToggleUnderline={() => toggleViewRich('underline')}
+                  isBold={selIsBold}
+                  isUnderline={selIsUnderline}
                 />
                 <div style={{fontSize:FONT.size.xs,color:t.text4,marginBottom:SPACE.sm}}>
                   Select text, then tap a colour here, or use the bar that pops up above your selection.

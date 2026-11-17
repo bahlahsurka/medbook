@@ -19,7 +19,8 @@ import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
 import RichRuns from '../lib/RichRuns';
 import { rawOffsetAt } from './DetailView';
 import { clearRange } from '../lib/useHighlight';
-import { adjustHighlights, matchHighlightShortcutEditing } from '../lib/highlights';
+import { adjustHighlights, matchHighlightShortcutEditing, matchRichShortcut,
+  toggleRichMarker, isRangeFullyMarked } from '../lib/highlights';
 import { STUDY_SCOPE_CLASS, suppressContextMenu } from '../lib/studyInteraction';
 import { toTitleCase } from '../lib/titleCase';
 import { sanitizeForStorage } from '../lib/bulletList';
@@ -704,6 +705,8 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   }, [flipped, editingCard, idx]);
 
   const selHasHighlight = !!selRange && (card?.highlights || []).some(h => h.start < selRange.end && h.end > selRange.start);
+  const selIsBold = !!selRange && isRangeFullyMarked(card?.notes || '', selRange.start, selRange.end, 'bold');
+  const selIsUnderline = !!selRange && isRangeFullyMarked(card?.notes || '', selRange.start, selRange.end, 'underline');
 
   const applyCardHL = (c) => {
     const s = readCardSelection();
@@ -739,6 +742,23 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     clearCardSelState();
   };
 
+  // Bold/underline toggle, mid-review — same real **bold**/{{u}} marker
+  // edit mode/pasting already write (see toggleRichMarker's own comment in
+  // lib/highlights.js), so existing highlights need reconciling against
+  // the new text via adjustHighlights, same as applyCardHL/removeCardHL's
+  // own highlights-only writes but with notes ALSO changing this time.
+  const toggleCardRich = (kind) => {
+    const s = readCardSelection();
+    if (!s || !card) return;
+    const newNotes = toggleRichMarker(card.notes || '', s.start, s.end, kind);
+    window.getSelection()?.removeAllRanges();
+    clearCardSelState();
+    if (newNotes === card.notes) return; // selection was empty/no-op
+    const newHl = adjustHighlights(card.notes || '', newNotes, card.highlights || []);
+    supabase.from('entries').update({ notes: newNotes, highlights: newHl }).eq('id', card.id).then(()=>{});
+    updateCardInPlace({ notes: newNotes, highlights: newHl });
+  };
+
   // Bare mnemonic letters (y/g/b/p/o/r) already mean "Good"/"Hard"/"Again"
   // in this screen's own rating shortcuts (useReviewKeyboard below), so the
   // view-mode shortcut used here is the Alt-gated variant
@@ -746,15 +766,28 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   // letters DetailView.js's EDIT mode uses for the identical reason.
   // useReviewKeyboard itself already bails out whenever e.altKey is set, so
   // there's no risk of a highlight shortcut also triggering a rating.
+  // Bold/underline use Ctrl+B/Ctrl+U (matchRichShortcut) instead — the
+  // SAME chord DetailView.js's view mode uses, since it requires a
+  // modifier neither the bare rating letters nor the Alt-gated highlight
+  // letters do, so it can never collide with either.
   useEffect(() => {
     if (!flipped || editingCard) return;
     const isTypingTarget = (el) => !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
     const onKeyDown = (e) => {
       if (isTypingTarget(document.activeElement)) return;
-      const m = matchHighlightShortcutEditing(e);
-      if (!m || !readCardSelection()) return;
-      e.preventDefault();
-      if (m.remove) removeCardHL(); else applyCardHL(m.color);
+      const hl = matchHighlightShortcutEditing(e);
+      if (hl) {
+        if (!readCardSelection()) return;
+        e.preventDefault();
+        if (hl.remove) removeCardHL(); else applyCardHL(hl.color);
+        return;
+      }
+      const rich = matchRichShortcut(e);
+      if (rich) {
+        if (!readCardSelection()) return;
+        e.preventDefault();
+        toggleCardRich(rich.kind);
+      }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
@@ -1441,6 +1474,10 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
           onRemove={removeCardHL}
           onCopy={copyCardSelection}
           hasHighlightInSelection={selHasHighlight}
+          onToggleBold={() => toggleCardRich('bold')}
+          onToggleUnderline={() => toggleCardRich('underline')}
+          isBold={selIsBold}
+          isUnderline={selIsUnderline}
           colors={hlPopoverColors}
         />
       )}
