@@ -1,6 +1,6 @@
-// Renders text containing rich-paste markers (bold/italic/size — see
-// lib/bulletList.js and lib/highlights.js's splitRich) as real inline
-// elements: <strong>/<em>/a resized <span>. The ONE implementation of this,
+// Renders text containing rich-paste markers (bold/italic/underline/size —
+// see lib/bulletList.js and lib/highlights.js's splitRich) as real inline
+// elements: <strong>/<em>/<u>/a resized <span>. The ONE implementation of this,
 // shared by every place a note's text is displayed — DetailView.js (both
 // its view-mode render and, via rawStart, its highlight-offset mapping),
 // ReviewQueue.js, SystemReview.js, and EntryCard.js's list-preview snippet
@@ -71,6 +71,7 @@ export default function RichRuns({ text, rawStart = 0, highlights, isDark }) {
       let el = r.t;
       if (r.bold) el = <strong style={{ color: t.text }}>{el}</strong>;
       if (r.italic) el = <em>{el}</em>;
+      if (r.underline) el = <u>{el}</u>;
       if (r.size) {
         const strong = r.size === 'lg' || r.size === 'xl';
         el = <span style={{ ...RICH_SIZE_STYLE[r.size], color: strong ? t.text : undefined }}>{el}</span>;

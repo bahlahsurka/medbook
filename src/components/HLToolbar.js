@@ -8,7 +8,7 @@ import { useTheme, RADIUS } from '../lib/theme';
  * This tells the browser "don't move focus away from the textarea"
  * so the text selection is still active when we read selectionStart/End.
  */
-export default function HLToolbar({ onApply, onRemove, onClearAll, hasSelection }) {
+export default function HLToolbar({ onApply, onRemove, onClearAll, hasSelection, onToggleBold, onToggleUnderline, isBold, isUnderline }) {
   const { t } = useTheme();
   const prevent = e => e.preventDefault();
 
@@ -42,6 +42,48 @@ export default function HLToolbar({ onApply, onRemove, onClearAll, hasSelection 
           }}
         />
       ))}
+
+      {onToggleBold && (
+        <>
+          <button
+            onMouseDown={prevent}
+            onTouchStart={prevent}
+            onClick={onToggleBold}
+            disabled={!hasSelection}
+            aria-pressed={isBold}
+            title={hasSelection ? 'Bold (Ctrl+B)' : 'Select text first'}
+            style={{
+              width: 34, height: 34, borderRadius: RADIUS.sm, fontWeight: 800,
+              border: `2px solid ${hasSelection ? t.text2 : t.border}`,
+              background: isBold ? t.text2 : t.surface3, flexShrink: 0,
+              color: isBold ? t.surface : t.text3,
+              cursor: hasSelection ? 'pointer' : 'not-allowed',
+              opacity: hasSelection ? 1 : 0.45,
+              transition: 'opacity .15s, border-color .15s'
+            }}>
+            B
+          </button>
+
+          <button
+            onMouseDown={prevent}
+            onTouchStart={prevent}
+            onClick={onToggleUnderline}
+            disabled={!hasSelection}
+            aria-pressed={isUnderline}
+            title={hasSelection ? 'Underline (Ctrl+U)' : 'Select text first'}
+            style={{
+              width: 34, height: 34, borderRadius: RADIUS.sm, textDecoration: 'underline',
+              border: `2px solid ${hasSelection ? t.text2 : t.border}`,
+              background: isUnderline ? t.text2 : t.surface3, flexShrink: 0,
+              color: isUnderline ? t.surface : t.text3,
+              cursor: hasSelection ? 'pointer' : 'not-allowed',
+              opacity: hasSelection ? 1 : 0.45,
+              transition: 'opacity .15s, border-color .15s'
+            }}>
+            U
+          </button>
+        </>
+      )}
 
       <button
         onMouseDown={prevent}
