@@ -32,6 +32,7 @@ import {
 } from '../src/services/ai/VisualizationPromptBuilder.js';
 import { validateMindMap, VisualizationValidationError } from '../src/services/ai/VisualizationValidator.js';
 import { computeContentHash } from '../src/services/ai/contentHash.js';
+import { findUncoveredStatements, SOURCE_COVERAGE_DISCLAIMER } from '../src/services/ai/sourceCoverage.js';
 
 // Same floor api/analyze.mjs enforces on the same underlying field
 // (entry.notes) — a Review too short to meaningfully analyze is equally
@@ -45,6 +46,45 @@ const MIN_NOTES_LENGTH = 40;
 // generated, not to the transport itself.
 const SCHEMA_NAME_FOR_TYPE = { mind_map: 'medbook_mind_map' };
 
+// A Mind Map's output (a graph with per-node explanations/sourceRefs) is
+// structurally more verbose than the flat six-section analysis, but a
+// SHORT review genuinely needs far less reasoning+output budget than a
+// long, dense one — see api/visualize.mjs's own reliability-fix history:
+// a generous FLAT budget for every request was pure waste on simple
+// entries (slower than it needed to be) without actually helping complex
+// ones any more than a scaled budget does. Tiers, not a formula, because
+// the exact relationship between notes length and tokens needed isn't
+// something to over-fit a formula to without real measurements — these
+// are deliberately coarse and easy to retune once real latency/usage
+// numbers (now captured — see GroqService.getLastUsage()) come back from
+// production.
+function tokenBudgetFor(notesLength) {
+  if (notesLength < 400) return 8192;
+  if (notesLength < 1200) return 16384;
+  return 24576; // still below the 32768 the six-section analysis task uses for its own, separate reasons
+}
+
+// Reusable "someone else is already generating this" response — kept as
+// one function since it's returned from two different call sites below
+// (an in-progress claim found on first look, and a 23505 insert race).
+function inProgressResponse(res) {
+  return res.status(409).json({
+    error: 'A Mind Map is already being generated for this entry — please wait a few seconds and try again.',
+    kind: 'in_progress',
+  });
+}
+
+// How long an unfinished "claim" row (graph_data still {}) is trusted to
+// mean "actively generating" rather than "abandoned after a failure" — see
+// the claim/dedup block below. Comfortably longer than this endpoint's own
+// realistic worst case after the 'medium' reasoning-effort and adaptive
+// token-budget changes, short enough that a genuinely abandoned claim
+// doesn't block retries for long.
+const CLAIM_STALE_MS = 45_000;
+function isRealDiagram(graphData) {
+  return !!graphData && Array.isArray(graphData.nodes) && graphData.nodes.length > 0;
+}
+
 // Maps a transport/validation-level failure to an HTTP status the client
 // can react to sensibly — same vocabulary api/analyze.mjs's statusForKind
 // uses for the kinds they share (quota/auth/config/overloaded), plus a few
@@ -53,6 +93,7 @@ function statusForKind(kind) {
   switch (kind) {
     case 'validation': return 400;
     case 'not_found': return 404;
+    case 'in_progress': return 409;
     case 'quota': return 429;
     case 'auth': return 401;
     case 'config': return 500;
@@ -60,6 +101,26 @@ function statusForKind(kind) {
     case 'invalid_diagram': return 502;
     default: return 502; // network / truncated / empty / api / invalid_output
   }
+}
+
+// Clear, plain-language copy per failure kind for the client to show
+// as-is — api/analyze.mjs's own `error` message was already written to be
+// shown directly (never a raw Groq string), and this keeps that same
+// discipline explicit in one place rather than trusting every call site to
+// phrase its own message well. Never includes an API key, a model
+// identifier string from Groq's internals beyond MODEL (already public
+// via activeModel()), or any part of a raw provider response body.
+const USER_MESSAGE_FOR_KIND = {
+  invalid_output: 'The AI had trouble structuring this diagram — this happens occasionally with gpt-oss on more complex reviews. Try again, or try Regenerate.',
+  invalid_diagram: 'The generated diagram didn’t pass our structural checks, so nothing was saved. Try again — this is usually a one-off.',
+  overloaded: 'Groq is temporarily overloaded. Try again in a moment.',
+  quota: 'Groq’s shared daily limit has been reached for now. Try again later.',
+  truncated: 'The response was cut short before finishing. Try again, or try a shorter Review.',
+  network: 'Network error reaching the Visual Learning service. Check your connection and try again.',
+  in_progress: 'A Mind Map is already being generated for this entry — please wait a few seconds and try again.',
+};
+function userMessageFor(kind, fallback) {
+  return USER_MESSAGE_FOR_KIND[kind] || fallback;
 }
 
 // Not a medical claim, just an accurate description of what the 200 response
@@ -153,12 +214,48 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: `Could not check for an existing diagram: ${existingErr.message}`, kind: 'api' });
   }
 
-  if (existing && existing.source_content_hash === contentHash && !wantsRegenerate) {
+  if (existing && isRealDiagram(existing.graph_data) && existing.source_content_hash === contentHash && !wantsRegenerate) {
     return res.status(200).json({
       cached: true,
       visualization: toResponseShape(existing),
       disclaimer: STRUCTURAL_VALIDATION_DISCLAIMER,
+      coverage: coverageResponse(notes, existing.graph_data),
+      timing: { totalMs: 0 }, // no Groq call on this path, by construction — not a measurement, a fact
     });
+  }
+
+  // ---- Dedup: claim this (entry_id, viz_type) slot BEFORE calling Groq,
+  // so a second concurrent request for the exact same thing (a double
+  // click, two open tabs) doesn't also pay for its own Groq call. Uses
+  // only existing columns — graph_data left at its own default ('{}') is
+  // the "claimed, not yet generated" sentinel (isRealDiagram() above is
+  // what tells a claim apart from a real cached diagram), and updated_at
+  // is what lets a genuinely abandoned claim (the generation that claimed
+  // it crashed or errored) self-heal via CLAIM_STALE_MS rather than
+  // wedging this slot shut forever. No schema change — see the audit's
+  // own "no schema change unless absolutely necessary" guidance. ----
+  if (existing && !isRealDiagram(existing.graph_data)) {
+    const claimAgeMs = Date.now() - new Date(existing.updated_at || existing.created_at).getTime();
+    if (claimAgeMs < CLAIM_STALE_MS) return inProgressResponse(res);
+    // Stale/abandoned claim — re-claim it below rather than leaving it
+    // wedged for every future request to also bounce off.
+  }
+  if (!existing) {
+    const { error: claimErr } = await userClient.from('entry_visualizations').insert({
+      entry_id: entryId, user_id: user.id, viz_type: vizType,
+      source_content_hash: contentHash, extra_context: trimmedExtraContext || null,
+      graph_data: {},
+    });
+    if (claimErr) {
+      // 23505 = unique_violation — a concurrent request claimed this
+      // exact slot in the gap between our SELECT above and this INSERT.
+      if (claimErr.code === '23505') return inProgressResponse(res);
+      return res.status(502).json({ error: `Could not start generation: ${claimErr.message}`, kind: 'api' });
+    }
+  } else {
+    await userClient.from('entry_visualizations')
+      .update({ source_content_hash: contentHash, extra_context: trimmedExtraContext || null, graph_data: {}, updated_at: new Date().toISOString() })
+      .eq('entry_id', entryId).eq('viz_type', vizType);
   }
 
   // ---- Generate. Groq only in this phase — see this file's header
@@ -173,6 +270,8 @@ export default async function handler(req, res) {
   }
 
   const prompt = buildMindMapPrompt(notes, trimmedExtraContext);
+  const requestsBefore = GroqService.getRequestCount();
+  const generationStartedAt = Date.now();
   let rawText;
   let model;
   try {
@@ -180,20 +279,35 @@ export default async function handler(req, res) {
       systemInstruction: MINDMAP_SYSTEM_INSTRUCTION,
       responseSchema: GROQ_MINDMAP_SCHEMA,
       schemaName: SCHEMA_NAME_FOR_TYPE[vizType],
+      maxCompletionTokens: tokenBudgetFor(notes.length),
+      // 'high' (the six-section analysis task's own tuning) measurably
+      // increases both latency and the chance of exhausting the shared
+      // reasoning+output budget before finishing the (more complex, more
+      // nested) Mind Map structure — see GroqService.js's own comment on
+      // this task's reasoningEffort. 'medium' is the deliberate fix for
+      // both the speed complaint and a real contributor to the
+      // "did not match the required structure" failures.
+      reasoningEffort: 'medium',
     });
     model = GroqService.activeModel();
   } catch (e) {
     return res.status(statusForKind(e.kind)).json({
-      error: e.message, kind: e.kind || 'api', provider: 'groq', model: GroqService.activeModel(),
+      error: userMessageFor(e.kind, e.message), kind: e.kind || 'api', provider: 'groq', model: GroqService.activeModel(),
+      timing: { totalMs: Date.now() - generationStartedAt, retries: GroqService.getRequestCount() - requestsBefore - 1 },
     });
   }
+  const totalGenerationMs = Date.now() - generationStartedAt;
+  const retries = GroqService.getRequestCount() - requestsBefore - 1;
 
   let diagram;
   try {
     diagram = validateMindMap(rawText, { allowAiContext: !!trimmedExtraContext });
   } catch (e) {
     if (e instanceof VisualizationValidationError) {
-      return res.status(statusForKind(e.kind)).json({ error: e.message, kind: e.kind, provider: 'groq', model });
+      return res.status(statusForKind(e.kind)).json({
+        error: userMessageFor(e.kind, e.message), kind: e.kind, provider: 'groq', model,
+        timing: { totalMs: totalGenerationMs, retries },
+      });
     }
     throw e;
   }
@@ -221,14 +335,34 @@ export default async function handler(req, res) {
     .single();
 
   if (saveErr) {
-    return res.status(502).json({ error: `Diagram generated but could not be saved: ${saveErr.message}`, kind: 'api' });
+    return res.status(502).json({
+      error: 'The diagram was generated but could not be saved. Try again.', kind: 'api',
+      timing: { totalMs: totalGenerationMs, retries },
+    });
   }
 
   return res.status(200).json({
     cached: false,
     visualization: toResponseShape(saved),
     disclaimer: STRUCTURAL_VALIDATION_DISCLAIMER,
+    coverage: coverageResponse(notes, diagram),
+    timing: { totalMs: totalGenerationMs, retries },
+    usage: GroqService.getLastUsage(),
   });
+}
+
+/**
+ * Runs the source-coverage heuristic and wraps it with its own disclaimer
+ * — see sourceCoverage.js's header for what this is and isn't. Computed
+ * fresh against the CURRENT notes on every response (cache hit or not),
+ * so it can never silently go stale the way a value computed only at
+ * generation time would once the Review is edited afterward.
+ */
+function coverageResponse(notes, graphData) {
+  return {
+    uncoveredStatements: findUncoveredStatements(notes, graphData),
+    disclaimer: SOURCE_COVERAGE_DISCLAIMER,
+  };
 }
 
 /** DB row -> API shape — camelCase, and never leaks user_id to the response body. */

@@ -102,9 +102,15 @@ describe('validateMindMap — structural rejections', () => {
     expect(() => validateMindMap(raw(d))).toThrow(/category/i);
   });
 
-  test('rejects an edge with an unrecognized relationship', () => {
+  test('accepts a free-text relationship not in the reference vocabulary (not an enum — see generation-reliability fix)', () => {
     const d = validDiagram();
-    d.edges[0].relationship = 'made_up_relationship';
+    d.edges[0].relationship = 'some_arbitrary_but_descriptive_label';
+    expect(() => validateMindMap(raw(d))).not.toThrow();
+  });
+
+  test('rejects an edge with an empty relationship label', () => {
+    const d = validDiagram();
+    d.edges[0].relationship = '';
     expect(() => validateMindMap(raw(d))).toThrow(/relationship/i);
   });
 

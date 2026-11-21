@@ -26,11 +26,11 @@ export class VisualizationValidationError extends Error {
 
 const MINDMAP_NODE_CATEGORIES = new Set(['central_topic', 'branch', 'subtopic', 'red_flag', 'high_yield']);
 const MINDMAP_SOURCE_TYPES = new Set(['entry', 'ai_context']);
-const MINDMAP_RELATIONSHIPS = new Set([
-  'causes', 'treats', 'prevents', 'diagnoses', 'is_a', 'part_of',
-  'associated_with', 'contrasts_with', 'precedes', 'requires',
-  'contraindicates', 'presents_with', 'related_to',
-]);
+// `relationship` is intentionally NOT an enum here (or in the Groq schema
+// — see VisualizationPromptBuilder.js's GROQ_MINDMAP_SCHEMA comment for
+// the generation-reliability reasoning): it's a free-text display label
+// nothing downstream branches on, so this validator only requires it be a
+// real, non-empty string, same as `label`.
 
 /**
  * Models sometimes wrap JSON in markdown fences or add a stray sentence
@@ -166,8 +166,8 @@ export function validateMindMap(rawText, { allowAiContext = false } = {}) {
     if (source === target) {
       throw new VisualizationValidationError(`Edge at index ${i} connects node "${source}" to itself.`);
     }
-    if (!MINDMAP_RELATIONSHIPS.has(relationship)) {
-      throw new VisualizationValidationError(`Edge at index ${i} has an unrecognized relationship "${relationship}".`);
+    if (!nonEmptyString(relationship)) {
+      throw new VisualizationValidationError(`Edge at index ${i} is missing a relationship label.`);
     }
     if (typeof label !== 'string') {
       throw new VisualizationValidationError(`Edge at index ${i} has an invalid label.`);
@@ -179,7 +179,7 @@ export function validateMindMap(rawText, { allowAiContext = false } = {}) {
       ? sourceNode.sourceType
       : 'mixed';
 
-    return { source, target, relationship, label: label.trim(), provenance };
+    return { source, target, relationship: relationship.trim(), label: label.trim(), provenance };
   });
 
   // A diagram with more than one node but nothing connecting them isn't a
