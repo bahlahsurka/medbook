@@ -24,9 +24,23 @@
 // object itself, so the same {centralTopic, nodes, edges} this module
 // receives is exactly what a caller can still send back to the API
 // unmodified (e.g. to re-render after a theme change, no re-fetch needed).
+//
+// The base ring radius SCALES WITH TOTAL NODE COUNT rather than being one
+// flat constant — a flat 240px/depth was the direct cause of the
+// "excessive empty space, widely separated nodes" complaint on small
+// diagrams: a 5-6 node Mind Map doesn't need the same canvas footprint as
+// a 20-node one just because both have a depth-2 ring. fitView() can
+// shrink an oversized layout to fit the viewport, but that only makes the
+// SAME proportion of empty space smaller, not less empty — the fix has to
+// be in the layout's own scale, not downstream of it.
+const MIN_ARC_SPACING = 70; // px of arc length to reserve per sibling at a ring
 
-const BASE_RADIUS_PER_DEPTH = 240; // px between successive depth rings
-const MIN_ARC_SPACING = 90;        // px of arc length to reserve per sibling at a ring
+function baseRadiusForNodeCount(totalNodes) {
+  if (totalNodes <= 4) return 130;
+  if (totalNodes <= 8) return 170;
+  if (totalNodes <= 15) return 210;
+  return 250;
+}
 
 /**
  * @param {{ nodes: Array, edges: Array }} diagram — already validated
@@ -100,9 +114,10 @@ export function computeMindMapLayout(diagram) {
     const d = depth.get(n.id);
     countsByDepth.set(d, (countsByDepth.get(d) || 0) + 1);
   }
+  const baseRadiusPerDepth = baseRadiusForNodeCount(nodes.length);
   function radiusForDepth(d) {
     if (d === 0) return 0;
-    const base = BASE_RADIUS_PER_DEPTH * d;
+    const base = baseRadiusPerDepth * d;
     const countAtRing = countsByDepth.get(d) || 1;
     const circumferenceNeeded = countAtRing * MIN_ARC_SPACING;
     const radiusNeeded = circumferenceNeeded / (2 * Math.PI);

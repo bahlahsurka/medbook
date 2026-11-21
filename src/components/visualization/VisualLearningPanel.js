@@ -12,7 +12,7 @@
 // Deliberately makes NO request on mount — see the module-level comment
 // on `status` below. The only two things that ever trigger a network call
 // are the explicit Generate and Regenerate buttons.
-import { useState, useRef, lazy, Suspense, useCallback } from 'react';
+import { useState, useRef, useEffect, lazy, Suspense, useCallback } from 'react';
 import { useTheme, SPACE, RADIUS, FONT, elevation } from '../../lib/theme';
 import { IconSparkle } from '../../lib/icons';
 import VisualizationService, { VisualizationServiceError } from '../../services/visualization';
@@ -44,21 +44,35 @@ function VisualLearningPanelContent({ entryId }) {
   // satisfies "do not make automatic API calls simply because an entry
   // was opened" — there is no mount effect here at all.
   const [status, setStatus] = useState('idle');
-  const [result, setResult] = useState(null); // { cached, visualization, disclaimer }
+  const [result, setResult] = useState(null); // { cached, visualization, disclaimer, coverage, timing, usage }
   const [error, setError] = useState('');
+  const [errorKind, setErrorKind] = useState('');
   const [showContextInput, setShowContextInput] = useState(false);
   const [extraContext, setExtraContext] = useState('');
+  const [showCoverage, setShowCoverage] = useState(false);
 
   // Same debounce reasoning as DetailView.js's analyzeInFlight — a ref,
   // not state, so a second fast click is dropped synchronously rather
   // than racing setStatus('loading')'s own re-render.
   const requestInFlight = useRef(false);
 
+  // "Immediate loading feedback and meaningful progress states" — a plain
+  // spinner says nothing about WHY a request that can genuinely take
+  // several seconds (gpt-oss's own reasoning pass, not something this
+  // app controls) hasn't returned yet. Ticks while `status==='loading'`
+  // only; harmless if generation finishes before the first tick.
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    if (status !== 'loading') { setElapsedSec(0); return; }
+    const id = setInterval(() => setElapsedSec(s => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [status]);
+
   const run = useCallback(async (regenerate) => {
     if (requestInFlight.current) return;
     requestInFlight.current = true;
     setStatus('loading');
-    setError('');
+    setError(''); setErrorKind('');
     try {
       const res = await VisualizationService.generateMindMap(entryId, { extraContext: extraContext.trim(), regenerate });
       setResult(res);
@@ -66,6 +80,7 @@ function VisualLearningPanelContent({ entryId }) {
     } catch (e) {
       const message = e instanceof VisualizationServiceError ? e.message : 'Something went wrong generating the Mind Map.';
       setError(message);
+      setErrorKind(e instanceof VisualizationServiceError ? e.kind : '');
       setStatus('error');
     } finally {
       requestInFlight.current = false;
@@ -91,7 +106,7 @@ function VisualLearningPanelContent({ entryId }) {
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: SPACE.sm, flexWrap: 'wrap' }}>
             <span style={{ fontSize: FONT.size.xs, color: t.text4 }}>
-              {result.cached ? '✓ Loaded from cache' : '✓ Generated just now'}
+              {result.cached ? '✓ Loaded from cache (instant)' : `✓ Generated${result.timing?.totalMs ? ` in ${(result.timing.totalMs / 1000).toFixed(1)}s` : ''}`}
               {result.visualization?.aiModel ? ` · ${result.visualization.aiModel}` : ''}
             </span>
             <button onClick={() => run(true)} disabled={status === 'loading'} style={regenerateButtonStyle(t)}>
@@ -102,6 +117,25 @@ function VisualLearningPanelContent({ entryId }) {
           <Suspense fallback={<RendererFallback t={t} />}>
             <MindMapRenderer diagram={result.visualization.graphData} />
           </Suspense>
+
+          {result.coverage?.uncoveredStatements?.length > 0 && (
+            <div style={{ marginTop: SPACE.sm }}>
+              <button onClick={() => setShowCoverage(s => !s)}
+                style={{ background: 'none', border: 'none', color: t.warn, fontSize: FONT.size.xs,
+                  cursor: 'pointer', padding: 0, fontWeight: FONT.weight.semibold, fontFamily: 'Inter,sans-serif' }}>
+                ⚠ {result.coverage.uncoveredStatements.length} statement{result.coverage.uncoveredStatements.length !== 1 ? 's' : ''} from your Review may not be shown {showCoverage ? '▾' : '▸'}
+              </button>
+              {showCoverage && (
+                <div style={{ background: t.warnBg, border: `1px solid ${t.warnBorder}`, borderRadius: RADIUS.md,
+                  padding: '10px 12px', marginTop: 6, fontSize: 11.5, color: t.text2 }}>
+                  <ul style={{ margin: '0 0 8px', paddingLeft: 16 }}>
+                    {result.coverage.uncoveredStatements.map((s, i) => <li key={i} style={{ marginBottom: 4 }}>{s}</li>)}
+                  </ul>
+                  <div style={{ color: t.text4, fontSize: FONT.size.micro, lineHeight: 1.5 }}>{result.coverage.disclaimer}</div>
+                </div>
+              )}
+            </div>
+          )}
 
           {result.disclaimer && (
             <div style={{ fontSize: FONT.size.micro, color: t.text4, marginTop: SPACE.sm, lineHeight: 1.5 }}>
@@ -119,8 +153,12 @@ function VisualLearningPanelContent({ entryId }) {
           )}
 
           {error && (
-            <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: RADIUS.md,
-              padding: '10px 14px', fontSize: 12.5, color: t.danger, marginBottom: SPACE.md }}>
+            <div style={{
+              background: errorKind === 'in_progress' ? t.navActiveBg : t.dangerBg,
+              border: `1px solid ${errorKind === 'in_progress' ? t.navActiveBorder : t.dangerBorder}`,
+              borderRadius: RADIUS.md, padding: '10px 14px', fontSize: 12.5,
+              color: errorKind === 'in_progress' ? t.navActiveText : t.danger, marginBottom: SPACE.md,
+            }}>
               {error}
             </div>
           )}
@@ -153,12 +191,17 @@ function VisualLearningPanelContent({ entryId }) {
               <>
                 <span style={{ display: 'inline-block', width: 10, height: 10, border: `2px solid ${t.border}`,
                   borderTop: `2px solid ${t.text3}`, borderRadius: RADIUS.circle, animation: 'medbook-spin .7s linear infinite' }} />
-                Generating…
+                {elapsedSec < 6 ? 'Generating…' : `Still working… (${elapsedSec}s)`}
               </>
             ) : (
               <><IconSparkle size={12} /> Generate Mind Map</>
             )}
           </button>
+          {status === 'loading' && elapsedSec >= 6 && (
+            <div style={{ fontSize: FONT.size.micro, color: t.text4, marginTop: 6 }}>
+              More complex reviews can take longer to organise into a diagram.
+            </div>
+          )}
         </>
       )}
     </div>

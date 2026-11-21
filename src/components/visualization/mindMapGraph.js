@@ -23,7 +23,7 @@ function pickHandle(dx, dy) {
 // data-layer half is the provenance field itself).
 function edgeStyleFor(t, provenance) {
   if (provenance === 'entry') {
-    return { stroke: t.borderStrong, strokeWidth: 1.6 };
+    return { stroke: t.borderStrong, strokeWidth: 1.8 };
   }
   return { stroke: t.text4, strokeWidth: 1.4, strokeDasharray: '5 4' };
 }

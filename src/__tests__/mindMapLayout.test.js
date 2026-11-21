@@ -101,6 +101,23 @@ describe('computeMindMapLayout', () => {
     expect(crowdedRadius).toBeGreaterThan(sparseRadius);
   });
 
+  test('a small diagram (few total nodes) gets a visibly smaller base radius than a large one, at the SAME single-child depth-1 ring (regression: "excessive empty space, widely separated nodes")', () => {
+    const small = diagram(
+      [n('central', 'central_topic'), n('only', 'branch')],
+      [{ source: 'central', target: 'only', relationship: 'related_to', label: '' }]
+    );
+    const large = diagram(
+      [n('central', 'central_topic'), n('only', 'branch'), ...Array.from({ length: 16 }, (_, i) => n(`pad${i}`, 'subtopic'))],
+      [
+        { source: 'central', target: 'only', relationship: 'related_to', label: '' },
+        ...Array.from({ length: 16 }, (_, i) => ({ source: 'only', target: `pad${i}`, relationship: 'related_to', label: '' })),
+      ]
+    );
+    const smallRadius = Math.hypot(...Object.values(computeMindMapLayout(small).get('only')).slice(0, 2));
+    const largeRadius = Math.hypot(...Object.values(computeMindMapLayout(large).get('only')).slice(0, 2));
+    expect(smallRadius).toBeLessThan(largeRadius);
+  });
+
   test('an empty node list returns an empty map rather than throwing', () => {
     const pos = computeMindMapLayout({ centralTopic: '', nodes: [], edges: [] });
     expect(pos.size).toBe(0);

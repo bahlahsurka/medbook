@@ -44,10 +44,23 @@ function toolbarButtonStyle(t) {
   return {
     background: t.surface2, border: `1px solid ${t.border}`, borderRadius: RADIUS.sm,
     color: t.text3, fontSize: FONT.size.xs, fontWeight: FONT.weight.semibold,
-    fontFamily: 'Inter,sans-serif', padding: '6px 10px', cursor: 'pointer',
+    fontFamily: 'Inter,sans-serif', padding: '8px 12px', cursor: 'pointer',
     display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap',
+    minHeight: 34, // a comfortable touch target, not just a desktop click target
   };
 }
+
+// Legend text labels take real horizontal room a narrow phone viewport
+// doesn't have to spare over the canvas itself — below ~480px wide, keep
+// only the colour swatches (still communicates "these are different
+// categories") and drop the label text, rather than wrapping into several
+// cramped rows that eat into the diagram.
+const RESPONSIVE_CSS = `
+  @media (max-width: 480px) {
+    .mb-mindmap-legend-label { display: none; }
+    .mb-mindmap-legend { gap: 6px !important; padding: 6px 8px !important; }
+  }
+`;
 
 /** Toolbar + detail panel live inside the provider so useReactFlow() works. */
 function MindMapCanvas({ diagram, isFullscreen, onToggleFullscreen }) {
@@ -73,6 +86,7 @@ function MindMapCanvas({ diagram, isFullscreen, onToggleFullscreen }) {
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <style>{RESPONSIVE_CSS}</style>
       <ReactFlow
         nodes={flowNodes}
         edges={flowEdges}
@@ -118,7 +132,7 @@ function MindMapCanvas({ diagram, isFullscreen, onToggleFullscreen }) {
         {CATEGORY_LEGEND.map(l => (
           <span key={l.category} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: FONT.size.micro, color: t.text4 }}>
             <span style={{ width: 10, height: 10, borderRadius: 3, flexShrink: 0, ...legendSwatchStyle(t, l.category) }} />
-            {l.label}
+            <span className="mb-mindmap-legend-label">{l.label}</span>
           </span>
         ))}
       </div>
@@ -172,7 +186,11 @@ export default function MindMapRenderer({ diagram }) {
 
   if (!isFullscreen) {
     return (
-      <div style={{ width: '100%', height: 480, borderRadius: RADIUS.lg, overflow: 'hidden', border: `1px solid ${t.border}` }}>
+      // clamp() rather than a flat 480px — a short mobile viewport (landscape
+      // phone, a small tablet split-screen) shouldn't be forced into the same
+      // fixed height a full desktop window gets; Fullscreen remains the
+      // recommended way to view a complex diagram on a small screen either way.
+      <div style={{ width: '100%', height: 'clamp(320px, 65vh, 480px)', borderRadius: RADIUS.lg, overflow: 'hidden', border: `1px solid ${t.border}` }}>
         {canvas}
       </div>
     );
