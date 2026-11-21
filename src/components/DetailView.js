@@ -13,6 +13,7 @@ import { IconChevronLeft, IconChevronRight, IconEdit, IconCheck, IconTrash, Icon
 import HLToolbar from './HLToolbar';
 import HLPopover from './HLPopover';
 import AISections from './AISections';
+import VisualLearningPanel from './visualization/VisualLearningPanel';
 import AIService, { normalizeSections, isAllEmpty } from '../services/ai';
 import { limitsFor } from '../services/ai/PromptBuilder';
 import { handleBulletKeyDown, toggleBulletLines, handleRichPaste, handlePlainPaste,
@@ -1474,6 +1475,20 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             </div>
           )}
         </div>
+      )}
+
+      {/* ---- Visual Learning (Phase 2 preview) --------------------------------
+          Deliberately its OWN card, not folded into the AI Analysis card
+          above — "clearly separated", per the brief, and literally true:
+          this never reads or writes entry.ai_sections, and the AI Analysis
+          card above is completely untouched by this addition. Gated on
+          entry.notes existing (same as AI Analysis) but NOT on
+          AIService.isConfigured() — Visual Learning has its own provider
+          check (VisualizationService.isConfigured(), via the same
+          REACT_APP_AI_ENABLED signal) rather than depending on the AI
+          Analysis service module at all. */}
+      {entry.notes && (
+        <VisualLearningPanel entryId={entry.id} />
       )}
 
       </div>{/* /.mb-detail-main */}
