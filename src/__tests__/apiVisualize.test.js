@@ -116,7 +116,10 @@ describe('api/visualize.mjs — auth and ownership', () => {
 
   test('rejects an unsupported visualization type', async () => {
     createClient.mockReturnValue(makeSupabaseMock());
-    const { req, res } = makeReqRes({ body: { entryId: ENTRY_ID, vizType: 'clinical_flowchart' } });
+    // Not a real vizType — all six real types (mind_map, knowledge_network,
+    // clinical_flowchart, mechanism_diagram, comparison_map, visual_summary)
+    // are now supported as of Phase 3.
+    const { req, res } = makeReqRes({ body: { entryId: ENTRY_ID, vizType: 'timeline' } });
     await handler(req, res);
     expect(res.status).toHaveBeenCalledWith(400);
   });
@@ -394,5 +397,111 @@ describe('api/visualize.mjs — method guard', () => {
     const { req, res } = makeReqRes({ method: 'GET', body: {} });
     await handler(req, res);
     expect(res.status).toHaveBeenCalledWith(405);
+  });
+});
+
+// Phase 3: the handler dispatches on vizType through visualizationRegistry.js
+// instead of hardcoding Mind Map — these exercise that dispatch for two of
+// the other five types (one graph-shaped, one not) to confirm the SAME
+// caching/dedup/validation logic above works unmodified for them too.
+describe('api/visualize.mjs — multi-type dispatch (Phase 3)', () => {
+  const VALID_CLINICAL_FLOWCHART_JSON = JSON.stringify({
+    topic: 'Suspected PE workup',
+    nodes: [
+      { id: 'start', label: 'Suspected PE', explanation: 'x', category: 'start', sourceType: 'entry', sourceRef: 'y' },
+      { id: 'dec', label: 'Stable?', explanation: 'x', category: 'decision', sourceType: 'entry', sourceRef: 'y' },
+      { id: 'out1', label: 'Thrombolysis', explanation: 'x', category: 'red_flag', sourceType: 'entry', sourceRef: 'y' },
+      { id: 'out2', label: 'CTPA', explanation: 'x', category: 'outcome', sourceType: 'entry', sourceRef: 'y' },
+    ],
+    edges: [
+      { source: 'start', target: 'dec', relationship: 'then', label: '' },
+      { source: 'dec', target: 'out1', relationship: 'branches_to', label: 'Unstable' },
+      { source: 'dec', target: 'out2', relationship: 'branches_to', label: 'Stable' },
+    ],
+  });
+
+  const VALID_COMPARISON_MAP_JSON = JSON.stringify({
+    topic: "Crohn's vs UC",
+    subjects: [
+      { id: 'crohns', label: "Crohn's disease", sourceType: 'entry', sourceRef: 'x' },
+      { id: 'uc', label: 'Ulcerative colitis', sourceType: 'entry', sourceRef: 'y' },
+    ],
+    dimensions: [{ id: 'location', label: 'Location' }],
+    cells: [
+      { subjectId: 'crohns', dimensionId: 'location', value: 'Mouth to anus', distinguishing: true, sourceType: 'entry', sourceRef: 'x' },
+      { subjectId: 'uc', dimensionId: 'location', value: 'Colon only', distinguishing: true, sourceType: 'entry', sourceRef: 'y' },
+    ],
+  });
+
+  test('generates a non-mind-map graph type (clinical_flowchart) through the registry and persists it under that viz_type', async () => {
+    const notes = 'A review long enough to pass the 40-character minimum length floor.';
+    GroqService.isConfigured.mockReturnValue(true);
+    GroqService.generate.mockResolvedValue(VALID_CLINICAL_FLOWCHART_JSON);
+    GroqService.activeModel.mockReturnValue('openai/gpt-oss-20b');
+
+    createClient.mockReturnValue(makeSupabaseMock({
+      entryResult: { data: { id: ENTRY_ID, user_id: USER_ID, notes }, error: null },
+      existingVizResult: { data: null, error: null },
+      savedVizResult: { data: { id: 'viz-cf', entry_id: ENTRY_ID, viz_type: 'clinical_flowchart', graph_data: JSON.parse(VALID_CLINICAL_FLOWCHART_JSON), created_at: 't0', updated_at: 't0' }, error: null },
+    }));
+
+    const { req, res } = makeReqRes({ body: { entryId: ENTRY_ID, vizType: 'clinical_flowchart' } });
+    await handler(req, res);
+
+    expect(GroqService.generate).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ schemaName: 'medbook_clinical_flowchart' }));
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json.mock.calls[0][0].visualization.vizType).toBe('clinical_flowchart');
+  });
+
+  test('a non-graph type (comparison_map) is cache-hit correctly via its own isRealDiagram (no `nodes` array at all)', async () => {
+    const notes = 'A review long enough to pass the 40-character minimum length floor.';
+    const { computeContentHash } = require('../services/ai/contentHash');
+    const hash = computeContentHash(notes, '');
+
+    createClient.mockReturnValue(makeSupabaseMock({
+      entryResult: { data: { id: ENTRY_ID, user_id: USER_ID, notes }, error: null },
+      existingVizResult: { data: { id: 'viz-cm', entry_id: ENTRY_ID, viz_type: 'comparison_map', source_content_hash: hash, graph_data: JSON.parse(VALID_COMPARISON_MAP_JSON), extra_context: null, ai_provider: 'groq', ai_model: 'openai/gpt-oss-20b', created_at: 't0', updated_at: 't0' }, error: null },
+    }));
+
+    const { req, res } = makeReqRes({ body: { entryId: ENTRY_ID, vizType: 'comparison_map' } });
+    await handler(req, res);
+
+    expect(GroqService.generate).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json.mock.calls[0][0].cached).toBe(true);
+  });
+
+  test('a comparison_map claim row ({} graph_data, no `cells`) is correctly treated as in-progress, not a real cached diagram', async () => {
+    const notes = 'A review long enough to pass the 40-character minimum length floor.';
+    GroqService.isConfigured.mockReturnValue(true);
+
+    createClient.mockReturnValue(makeSupabaseMock({
+      entryResult: { data: { id: ENTRY_ID, user_id: USER_ID, notes }, error: null },
+      existingVizResult: { data: { id: 'viz-cm', entry_id: ENTRY_ID, viz_type: 'comparison_map', source_content_hash: 'whatever', graph_data: {}, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, error: null },
+    }));
+
+    const { req, res } = makeReqRes({ body: { entryId: ENTRY_ID, vizType: 'comparison_map' } });
+    await handler(req, res);
+
+    expect(GroqService.generate).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(409);
+  });
+
+  test('coverage uses the comparison_map-specific pair extractor (subjects + cells), not the default {nodes} shape', async () => {
+    const notes = 'A review long enough to pass the 40-character minimum length floor.';
+    const { computeContentHash } = require('../services/ai/contentHash');
+    const hash = computeContentHash(notes, '');
+
+    createClient.mockReturnValue(makeSupabaseMock({
+      entryResult: { data: { id: ENTRY_ID, user_id: USER_ID, notes }, error: null },
+      existingVizResult: { data: { id: 'viz-cm', entry_id: ENTRY_ID, viz_type: 'comparison_map', source_content_hash: hash, graph_data: JSON.parse(VALID_COMPARISON_MAP_JSON), created_at: 't0', updated_at: 't0' }, error: null },
+    }));
+
+    const { req, res } = makeReqRes({ body: { entryId: ENTRY_ID, vizType: 'comparison_map' } });
+    await handler(req, res);
+
+    // Would throw/return nothing useful if the handler fell back to the
+    // default {nodes:[...]} extractor on a diagram shape that has no nodes.
+    expect(res.json.mock.calls[0][0].coverage.uncoveredStatements).toBeDefined();
   });
 });

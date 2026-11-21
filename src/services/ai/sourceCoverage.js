@@ -62,24 +62,40 @@ function overlapRatio(clauseWords, nodeWords) {
   return hits / clauseWords.size;
 }
 
+// Default extractor: the {nodes:[{explanation,sourceRef}]} shape Mind Map,
+// Knowledge Network, Clinical Flowchart, and Mechanism Diagram all share.
+// Comparison Map and Visual Summary have genuinely different shapes (a
+// table, a flat highlight list) — api/visualize.mjs passes its own
+// `extractPairs` for those instead of forcing them into this shape.
+function defaultExtractPairs(diagram) {
+  return (diagram?.nodes || []).map(n => [n.explanation, n.sourceRef]);
+}
+
 /**
  * @param {string} notes — the original, untouched entry text.
- * @param {{nodes: Array}} diagram — a validated diagram.
- * @param {number} [threshold=0.35] — minimum word-overlap ratio against
- *   some node's (explanation + sourceRef) for a clause to count as
- *   "represented". Loose on purpose — see this module's own header.
+ * @param {object} diagram — a validated diagram of ANY visualization type.
+ * @param {{threshold?:number, extractPairs?:(diagram)=>Array<[string,string]>}} [options]
+ *   `threshold` (default 0.35): minimum word-overlap ratio against some
+ *   pair's combined text for a clause to count as "represented". Loose on
+ *   purpose — see this module's own header. `extractPairs`: pulls
+ *   [explanation-like, sourceRef-like] text pairs out of a diagram shape
+ *   other than the default {nodes:[...]} one — see comparisonMapValidator.js/
+ *   visualSummaryValidator.js's own callers for the two cases that need this.
  * @returns {string[]} up to 8 clauses from `notes` that look clinically
- *   meaningful and don't clear the overlap threshold against any node.
+ *   meaningful and don't clear the overlap threshold against any pair.
  */
-export function findUncoveredStatements(notes, diagram, threshold = 0.35) {
-  const nodeWordSets = (diagram?.nodes || []).map(n => significantWords(`${n.explanation} ${n.sourceRef}`));
-  if (nodeWordSets.length === 0) return [];
+export function findUncoveredStatements(notes, diagram, options = {}) {
+  const threshold = options.threshold ?? 0.35;
+  const extractPairs = options.extractPairs || defaultExtractPairs;
+
+  const pairWordSets = extractPairs(diagram).map(([a, b]) => significantWords(`${a || ''} ${b || ''}`));
+  if (pairWordSets.length === 0) return [];
 
   const flagged = [];
   for (const clause of splitIntoClauses(notes)) {
     if (!CLINICAL_SIGNAL_RE.test(clause)) continue;
     const clauseWords = significantWords(clause);
-    const covered = nodeWordSets.some(nw => overlapRatio(clauseWords, nw) >= threshold);
+    const covered = pairWordSets.some(pw => overlapRatio(clauseWords, pw) >= threshold);
     if (!covered) flagged.push(clause);
     if (flagged.length >= 8) break; // a long, cluttered list stops being useful to a human
   }

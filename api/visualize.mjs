@@ -1,14 +1,22 @@
 // api/visualize.mjs
 //
-// Visual Learning (Phase 1) backend: generates an interactive Mind Map from
-// an entry's Review text via Groq. Deliberately its own endpoint, not an
-// addition to api/analyze.mjs — same separation VisualizationPromptBuilder.js/
-// VisualizationValidator.js already keep from the AI Analysis pipeline.
-// The only thing genuinely shared with analyze.mjs is GroqService.js's
-// transport (auth header, retry/backoff, error-kind mapping) — the prompt,
-// schema, validation, caching, and database model here are all new and
-// independent, so this feature can never accidentally corrupt or depend on
-// entries.ai_sections / the flashcards pipeline.
+// Visual Learning backend: generates an interactive diagram (one of six
+// types — see visualizationRegistry.js) from an entry's Review text via
+// Groq. Deliberately its own endpoint, not an addition to api/analyze.mjs —
+// same separation VisualizationPromptBuilder.js/VisualizationValidator.js
+// already keep from the AI Analysis pipeline. The only thing genuinely
+// shared with analyze.mjs is GroqService.js's transport (auth header,
+// retry/backoff, error-kind mapping) — the prompt, schema, validation,
+// caching, and database model here are all new and independent, so this
+// feature can never accidentally corrupt or depend on entries.ai_sections /
+// the flashcards pipeline.
+//
+// Everything below this header is type-agnostic by design: it dispatches
+// on vizType through visualizationRegistry.js's lookup table (buildPrompt/
+// systemInstruction/schema/schemaName/validate/isRealDiagram/
+// extractCoveragePairs) rather than branching per type inline, so adding a
+// 7th visualization type later means adding one entry to that registry —
+// nothing in this file needs to change.
 //
 // Differs from api/analyze.mjs in one deliberate way: analyze.mjs trusts
 // whatever reviewText the client sends. This endpoint does NOT — it takes
@@ -26,36 +34,27 @@
 
 import { createClient } from '@supabase/supabase-js';
 import * as GroqService from '../src/services/ai/GroqService.js';
-import {
-  buildMindMapPrompt, MINDMAP_SYSTEM_INSTRUCTION, GROQ_MINDMAP_SCHEMA,
-  SUPPORTED_VIZ_TYPES,
-} from '../src/services/ai/VisualizationPromptBuilder.js';
-import { validateMindMap, VisualizationValidationError } from '../src/services/ai/VisualizationValidator.js';
+import { VisualizationValidationError } from '../src/services/ai/VisualizationValidator.js';
 import { computeContentHash } from '../src/services/ai/contentHash.js';
 import { findUncoveredStatements, SOURCE_COVERAGE_DISCLAIMER } from '../src/services/ai/sourceCoverage.js';
+import { SUPPORTED_VIZ_TYPES, getVisualizationDefinition } from '../src/services/ai/visualizationRegistry.js';
 
 // Same floor api/analyze.mjs enforces on the same underlying field
 // (entry.notes) — a Review too short to meaningfully analyze is equally
 // too short to meaningfully diagram.
 const MIN_NOTES_LENGTH = 40;
 
-// One schema name per visualization type, passed through to Groq's
-// response_format.json_schema.name (purely a label Groq logs/validates
-// against, not a lookup key) — kept here, next to SUPPORTED_VIZ_TYPES,
-// rather than inside GroqService.js, since it's specific to WHAT is being
-// generated, not to the transport itself.
-const SCHEMA_NAME_FOR_TYPE = { mind_map: 'medbook_mind_map' };
-
-// A Mind Map's output (a graph with per-node explanations/sourceRefs) is
-// structurally more verbose than the flat six-section analysis, but a
-// SHORT review genuinely needs far less reasoning+output budget than a
-// long, dense one — see api/visualize.mjs's own reliability-fix history:
-// a generous FLAT budget for every request was pure waste on simple
-// entries (slower than it needed to be) without actually helping complex
-// ones any more than a scaled budget does. Tiers, not a formula, because
-// the exact relationship between notes length and tokens needed isn't
-// something to over-fit a formula to without real measurements — these
-// are deliberately coarse and easy to retune once real latency/usage
+// Every visualization type's output (a graph or grid with per-node/per-cell
+// explanations/sourceRefs) is structurally more verbose than the flat
+// six-section analysis, but a SHORT review genuinely needs far less
+// reasoning+output budget than a long, dense one — see this file's own
+// reliability-fix history (from the Mind Map-only era, equally true for
+// all six types): a generous FLAT budget for every request was pure waste
+// on simple entries (slower than it needed to be) without actually helping
+// complex ones any more than a scaled budget does. Tiers, not a formula,
+// because the exact relationship between notes length and tokens needed
+// isn't something to over-fit a formula to without real measurements —
+// these are deliberately coarse and easy to retune once real latency/usage
 // numbers (now captured — see GroqService.getLastUsage()) come back from
 // production.
 function tokenBudgetFor(notesLength) {
@@ -69,7 +68,7 @@ function tokenBudgetFor(notesLength) {
 // (an in-progress claim found on first look, and a 23505 insert race).
 function inProgressResponse(res) {
   return res.status(409).json({
-    error: 'A Mind Map is already being generated for this entry — please wait a few seconds and try again.',
+    error: 'This visualization is already being generated for this entry — please wait a few seconds and try again.',
     kind: 'in_progress',
   });
 }
@@ -79,11 +78,9 @@ function inProgressResponse(res) {
 // the claim/dedup block below. Comfortably longer than this endpoint's own
 // realistic worst case after the 'medium' reasoning-effort and adaptive
 // token-budget changes, short enough that a genuinely abandoned claim
-// doesn't block retries for long.
+// doesn't block retries for long. Shared across all six types — none of
+// them have a reason to need a different value.
 const CLAIM_STALE_MS = 45_000;
-function isRealDiagram(graphData) {
-  return !!graphData && Array.isArray(graphData.nodes) && graphData.nodes.length > 0;
-}
 
 // Maps a transport/validation-level failure to an HTTP status the client
 // can react to sensibly — same vocabulary api/analyze.mjs's statusForKind
@@ -117,7 +114,7 @@ const USER_MESSAGE_FOR_KIND = {
   quota: 'Groq’s shared daily limit has been reached for now. Try again later.',
   truncated: 'The response was cut short before finishing. Try again, or try a shorter Review.',
   network: 'Network error reaching the Visual Learning service. Check your connection and try again.',
-  in_progress: 'A Mind Map is already being generated for this entry — please wait a few seconds and try again.',
+  in_progress: 'This visualization is already being generated for this entry — please wait a few seconds and try again.',
 };
 function userMessageFor(kind, fallback) {
   return USER_MESSAGE_FOR_KIND[kind] || fallback;
@@ -166,6 +163,11 @@ export default async function handler(req, res) {
       kind: 'validation',
     });
   }
+  // Looked up once, used for every type-specific step below (prompt,
+  // schema, validator, "is this a real diagram" check, coverage pair
+  // extraction) — see visualizationRegistry.js's own header for why this
+  // table exists instead of a six-way if/else repeated at each step.
+  const vizDef = getVisualizationDefinition(vizType);
   const trimmedExtraContext = String(extraContext || '').trim();
   const wantsRegenerate = regenerate === true;
 
@@ -214,12 +216,12 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: `Could not check for an existing diagram: ${existingErr.message}`, kind: 'api' });
   }
 
-  if (existing && isRealDiagram(existing.graph_data) && existing.source_content_hash === contentHash && !wantsRegenerate) {
+  if (existing && vizDef.isRealDiagram(existing.graph_data) && existing.source_content_hash === contentHash && !wantsRegenerate) {
     return res.status(200).json({
       cached: true,
       visualization: toResponseShape(existing),
       disclaimer: STRUCTURAL_VALIDATION_DISCLAIMER,
-      coverage: coverageResponse(notes, existing.graph_data),
+      coverage: coverageResponse(notes, existing.graph_data, vizDef),
       timing: { totalMs: 0 }, // no Groq call on this path, by construction — not a measurement, a fact
     });
   }
@@ -228,13 +230,15 @@ export default async function handler(req, res) {
   // so a second concurrent request for the exact same thing (a double
   // click, two open tabs) doesn't also pay for its own Groq call. Uses
   // only existing columns — graph_data left at its own default ('{}') is
-  // the "claimed, not yet generated" sentinel (isRealDiagram() above is
-  // what tells a claim apart from a real cached diagram), and updated_at
-  // is what lets a genuinely abandoned claim (the generation that claimed
-  // it crashed or errored) self-heal via CLAIM_STALE_MS rather than
-  // wedging this slot shut forever. No schema change — see the audit's
-  // own "no schema change unless absolutely necessary" guidance. ----
-  if (existing && !isRealDiagram(existing.graph_data)) {
+  // the "claimed, not yet generated" sentinel (vizDef.isRealDiagram() is
+  // what tells a claim apart from a real cached diagram, per-type since
+  // Comparison Map/Visual Summary have no `nodes` array to check), and
+  // updated_at is what lets a genuinely abandoned claim (the generation
+  // that claimed it crashed or errored) self-heal via CLAIM_STALE_MS
+  // rather than wedging this slot shut forever. No schema change — see
+  // the audit's own "no schema change unless absolutely necessary"
+  // guidance; this dedup mechanism works unmodified for all six types. ----
+  if (existing && !vizDef.isRealDiagram(existing.graph_data)) {
     const claimAgeMs = Date.now() - new Date(existing.updated_at || existing.created_at).getTime();
     if (claimAgeMs < CLAIM_STALE_MS) return inProgressResponse(res);
     // Stale/abandoned claim — re-claim it below rather than leaving it
@@ -269,24 +273,25 @@ export default async function handler(req, res) {
     });
   }
 
-  const prompt = buildMindMapPrompt(notes, trimmedExtraContext);
+  const prompt = vizDef.buildPrompt(notes, trimmedExtraContext);
   const requestsBefore = GroqService.getRequestCount();
   const generationStartedAt = Date.now();
   let rawText;
   let model;
   try {
     rawText = await GroqService.generate(prompt, {
-      systemInstruction: MINDMAP_SYSTEM_INSTRUCTION,
-      responseSchema: GROQ_MINDMAP_SCHEMA,
-      schemaName: SCHEMA_NAME_FOR_TYPE[vizType],
+      systemInstruction: vizDef.systemInstruction,
+      responseSchema: vizDef.schema,
+      schemaName: vizDef.schemaName,
       maxCompletionTokens: tokenBudgetFor(notes.length),
       // 'high' (the six-section analysis task's own tuning) measurably
       // increases both latency and the chance of exhausting the shared
-      // reasoning+output budget before finishing the (more complex, more
-      // nested) Mind Map structure — see GroqService.js's own comment on
-      // this task's reasoningEffort. 'medium' is the deliberate fix for
-      // both the speed complaint and a real contributor to the
-      // "did not match the required structure" failures.
+      // reasoning+output budget before finishing a structurally nested
+      // diagram — see GroqService.js's own comment on this task's
+      // reasoningEffort. 'medium' is the deliberate fix for both the
+      // speed complaint and a real contributor to the "did not match the
+      // required structure" failures, and applies equally to all six
+      // types — none of them are flatter than Mind Map was.
       reasoningEffort: 'medium',
     });
     model = GroqService.activeModel();
@@ -301,7 +306,7 @@ export default async function handler(req, res) {
 
   let diagram;
   try {
-    diagram = validateMindMap(rawText, { allowAiContext: !!trimmedExtraContext });
+    diagram = vizDef.validate(rawText, { allowAiContext: !!trimmedExtraContext });
   } catch (e) {
     if (e instanceof VisualizationValidationError) {
       return res.status(statusForKind(e.kind)).json({
@@ -345,7 +350,7 @@ export default async function handler(req, res) {
     cached: false,
     visualization: toResponseShape(saved),
     disclaimer: STRUCTURAL_VALIDATION_DISCLAIMER,
-    coverage: coverageResponse(notes, diagram),
+    coverage: coverageResponse(notes, diagram, vizDef),
     timing: { totalMs: totalGenerationMs, retries },
     usage: GroqService.getLastUsage(),
   });
@@ -356,11 +361,14 @@ export default async function handler(req, res) {
  * — see sourceCoverage.js's header for what this is and isn't. Computed
  * fresh against the CURRENT notes on every response (cache hit or not),
  * so it can never silently go stale the way a value computed only at
- * generation time would once the Review is edited afterward.
+ * generation time would once the Review is edited afterward. `vizDef`
+ * supplies the right pair-extractor for this type's actual shape — the
+ * default {nodes:[...]} one for the four graph-based types, a dedicated
+ * one for Comparison Map/Visual Summary (see visualizationRegistry.js).
  */
-function coverageResponse(notes, graphData) {
+function coverageResponse(notes, graphData, vizDef) {
   return {
-    uncoveredStatements: findUncoveredStatements(notes, graphData),
+    uncoveredStatements: findUncoveredStatements(notes, graphData, { extractPairs: vizDef.extractCoveragePairs }),
     disclaimer: SOURCE_COVERAGE_DISCLAIMER,
   };
 }

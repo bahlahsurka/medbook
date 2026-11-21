@@ -9,7 +9,7 @@ import RichRuns from '../lib/RichRuns';
 import { useHighlight, clearRange } from '../lib/useHighlight';
 import { useTheme, SPACE, RADIUS, FONT, Z, MOTION, elevation } from '../lib/theme';
 import { IconChevronLeft, IconChevronRight, IconEdit, IconCheck, IconTrash, IconPin,
-  IconImages, IconSparkle, IconX, IconDownload, IconChart, IconListBullet } from '../lib/icons';
+  IconImages, IconSparkle, IconBrainSpark, IconX, IconDownload, IconChart, IconListBullet } from '../lib/icons';
 import HLToolbar from './HLToolbar';
 import HLPopover from './HLPopover';
 import AISections from './AISections';
@@ -1381,8 +1381,8 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
 
           <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:SPACE.lg,flexWrap:'wrap'}}>
             <div style={{fontSize:FONT.size.micro,color:t.text4,letterSpacing:.8,fontWeight:FONT.weight.semibold,
-              textTransform:'uppercase',flex:1,display:'flex',alignItems:'center',gap:6}}>
-              <IconSparkle size={11} style={{color:t.text4,flexShrink:0}} /> AI Analysis
+              textTransform:'uppercase',flex:1,display:'flex',alignItems:'center',gap:7}}>
+              <IconBrainSpark size={13} style={{color:t.text4,flexShrink:0}} /> AI Analysis
             </div>
             {aiSavedFlash && <SavedChip t={t} />}
             {aiDirty && (
