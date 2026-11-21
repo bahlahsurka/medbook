@@ -88,4 +88,14 @@ describe('buildFlowGraph', () => {
       expect(['top', 'right', 'bottom', 'left']).toContain(e.targetHandle);
     }
   });
+
+  test('Phase 4: a node carrying a `position` field overrides the computed radial layout for that node only', () => {
+    const central = n('central', 'central_topic');
+    const branch = { ...n('branch'), position: { x: 999, y: -123 } };
+    const dWithOverride = diagram([central, branch], [{ source: 'central', target: 'branch', relationship: 'x', label: '' }]);
+    const { flowNodes } = buildFlowGraph(dWithOverride, LIGHT_T, {});
+    expect(flowNodes.find(fn => fn.id === 'branch').position).toEqual({ x: 999, y: -123 });
+    // The un-overridden central node still gets its normal computed position.
+    expect(flowNodes.find(fn => fn.id === 'central').position).toEqual({ x: 0, y: 0 });
+  });
 });

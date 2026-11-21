@@ -49,4 +49,10 @@ describe('buildMechanismDiagramFlowGraph', () => {
       expect(typeof n.data.style).toBe('object');
     }
   });
+
+  test('Phase 4: a node carrying a `position` field overrides the computed sequential layout for that node only', () => {
+    const withOverride = { ...DIAGRAM, nodes: DIAGRAM.nodes.map(n => (n.id === 'mech' ? { ...n, position: { x: 12, y: 34 } } : n)) };
+    const { flowNodes } = buildMechanismDiagramFlowGraph(withOverride, FAKE_THEME);
+    expect(flowNodes.find(n => n.id === 'mech').position).toEqual({ x: 12, y: 34 });
+  });
 });

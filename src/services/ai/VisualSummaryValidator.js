@@ -37,7 +37,11 @@ export function validateVisualSummary(rawText, { allowAiContext = false } = {}) 
     if (!nonEmptyString(detail)) throw new VisualizationValidationError(`Highlight "${id}" is missing a detail sentence.`);
     if (!IMPORTANCE_SET.has(importance)) throw new VisualizationValidationError(`Highlight "${id}" has an unrecognized importance "${importance}".`);
     if (!CATEGORY_SET.has(category)) throw new VisualizationValidationError(`Highlight "${id}" has an unrecognized category "${category}".`);
-    if (sourceType !== 'entry' && sourceType !== 'ai_context') {
+    // 'user_added' (Phase 4) is never something Groq produces, but this
+    // validator also re-validates a user's edited summary before saving
+    // it (api/visualize-edit.mjs) — a highlight the user typed in
+    // directly needs its own honest classification.
+    if (sourceType !== 'entry' && sourceType !== 'ai_context' && sourceType !== 'user_added') {
       throw new VisualizationValidationError(`Highlight "${id}" has an unrecognized source classification "${sourceType}".`);
     }
     if (!nonEmptyString(sourceRef)) throw new VisualizationValidationError(`Highlight "${id}" is missing its supporting source reference.`);

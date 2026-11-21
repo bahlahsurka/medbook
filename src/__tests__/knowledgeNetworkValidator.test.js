@@ -69,4 +69,11 @@ describe('validateKnowledgeNetwork — structural rejections', () => {
     d.edges.push({ source: 'hyperkalemia', target: 'ctx', relationship: 'related_to', label: '' });
     expect(() => validateKnowledgeNetwork(raw(d), { allowAiContext: false })).toThrow(/additional context was requested/i);
   });
+
+  test('Phase 4: accepts a user_added node regardless of allowAiContext (shared validateCommonNodes helper)', () => {
+    const d = validDiagram();
+    d.nodes.push({ id: 'mine', label: 'My note', explanation: 'x', category: 'concept', sourceType: 'user_added', sourceRef: 'Added by you during editing' });
+    d.edges.push({ source: 'hyperkalemia', target: 'mine', relationship: 'related_to', label: '' });
+    expect(() => validateKnowledgeNetwork(raw(d), { allowAiContext: false })).not.toThrow();
+  });
 });

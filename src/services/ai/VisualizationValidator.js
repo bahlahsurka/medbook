@@ -25,7 +25,14 @@ export class VisualizationValidationError extends Error {
 }
 
 const MINDMAP_NODE_CATEGORIES = new Set(['central_topic', 'branch', 'subtopic', 'red_flag', 'high_yield']);
-const MINDMAP_SOURCE_TYPES = new Set(['entry', 'ai_context']);
+// 'user_added' (Phase 4) is never something Groq itself produces — the
+// schema Groq must satisfy still only offers 'entry'/'ai_context' — but
+// this validator is ALSO reused as-is to re-validate a user's edited
+// diagram before saving it (see api/visualize-edit.mjs), and a node the
+// user typed in directly during editing is neither from the review nor
+// from supplied AI context, so it needs its own honest classification
+// rather than being forced to masquerade as one of the other two.
+const MINDMAP_SOURCE_TYPES = new Set(['entry', 'ai_context', 'user_added']);
 // `relationship` is intentionally NOT an enum here (or in the Groq schema
 // — see VisualizationPromptBuilder.js's GROQ_MINDMAP_SCHEMA comment for
 // the generation-reliability reasoning): it's a free-text display label

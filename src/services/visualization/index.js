@@ -25,7 +25,11 @@ export class VisualizationServiceError extends Error {
 // fresh checkout with no keys set up.
 const ENABLED = process.env.REACT_APP_AI_ENABLED === 'true';
 
-async function callVisualizeEndpoint(payload) {
+// Shared by every endpoint under this service (generate, recommend, and
+// Phase 4's save/restore) — one place for the auth/network/error-shape
+// handling every one of them needs identically, rather than three
+// near-identical copies.
+async function postJson(path, payload, failureNoun) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) {
     throw new VisualizationServiceError('You need to be signed in to use Visual Learning.', 'auth');
@@ -33,7 +37,7 @@ async function callVisualizeEndpoint(payload) {
 
   let res;
   try {
-    res = await fetch('/api/visualize', {
+    res = await fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
       body: JSON.stringify(payload),
@@ -46,10 +50,14 @@ async function callVisualizeEndpoint(payload) {
   try { body = await res.json(); } catch { /* non-JSON error body */ }
 
   if (!res.ok) {
-    const message = body?.error || `Visualization request failed (HTTP ${res.status}).`;
+    const message = body?.error || `${failureNoun} failed (HTTP ${res.status}).`;
     throw new VisualizationServiceError(message, body?.kind || 'api');
   }
-  return body; // { cached, visualization, disclaimer }
+  return body;
+}
+
+function callVisualizeEndpoint(payload) {
+  return postJson('/api/visualize', payload, 'Visualization request'); // { cached, visualization, disclaimer }
 }
 
 const VisualizationService = {
@@ -89,28 +97,39 @@ const VisualizationService = {
    */
   async recommend(entryId) {
     if (!entryId) throw new VisualizationServiceError('Missing entry id.', 'validation');
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new VisualizationServiceError('You need to be signed in to use Visual Learning.', 'auth');
+    return postJson('/api/visualize-recommend', { entryId }, 'Recommendation request'); // { recommended, rationale }
+  },
 
-    let res;
-    try {
-      res = await fetch('/api/visualize-recommend', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ entryId }),
-      });
-    } catch {
-      throw new VisualizationServiceError('Network error reaching MedBook\'s Visual Learning endpoint. Check your connection.', 'network');
-    }
+  /**
+   * Phase 4: saves a user's edited diagram for one entry+type, re-validated
+   * server-side against the exact same structural rules a fresh Groq
+   * generation of that type must pass (so a saved edit can never persist a
+   * dangling edge or an invalid node reference). Never calls Groq.
+   *
+   * @param {string} vizType
+   * @param {string} entryId
+   * @param {object} editedGraphData — the user's in-memory draft diagram.
+   * @param {{baseUpdatedAt?: string}} [options] — the `updatedAt` this
+   *   draft was loaded from, for the server's optimistic-concurrency check.
+   * @returns {Promise<{action:'save', visualization:object}>}
+   */
+  async saveEdit(vizType, entryId, editedGraphData, { baseUpdatedAt } = {}) {
+    if (!entryId) throw new VisualizationServiceError('Missing entry id.', 'validation');
+    if (!vizType) throw new VisualizationServiceError('Missing visualization type.', 'validation');
+    return postJson('/api/visualize-edit', { entryId, vizType, action: 'save', editedGraphData, baseUpdatedAt }, 'Save');
+  },
 
-    let body = null;
-    try { body = await res.json(); } catch { /* non-JSON error body */ }
-
-    if (!res.ok) {
-      const message = body?.error || `Recommendation request failed (HTTP ${res.status}).`;
-      throw new VisualizationServiceError(message, body?.kind || 'api');
-    }
-    return body; // { recommended, rationale }
+  /**
+   * Phase 4: reverts a diagram to the original AI-generated version —
+   * never calls Groq, purely a database update of the already-stored
+   * original.
+   *
+   * @returns {Promise<{action:'restore', visualization:object}>}
+   */
+  async restoreOriginal(vizType, entryId, { baseUpdatedAt } = {}) {
+    if (!entryId) throw new VisualizationServiceError('Missing entry id.', 'validation');
+    if (!vizType) throw new VisualizationServiceError('Missing visualization type.', 'validation');
+    return postJson('/api/visualize-edit', { entryId, vizType, action: 'restore', baseUpdatedAt }, 'Restore');
   },
 };
 

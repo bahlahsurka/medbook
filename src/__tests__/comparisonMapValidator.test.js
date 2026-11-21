@@ -83,4 +83,11 @@ describe('validateComparisonMap — structural rejections', () => {
     d.subjects[1].sourceType = 'ai_context';
     expect(() => validateComparisonMap(raw(d), { allowAiContext: false })).toThrow(/additional context was requested/i);
   });
+
+  test('Phase 4: accepts a user_added subject/cell regardless of allowAiContext', () => {
+    const d = validDiagram();
+    d.subjects[1].sourceType = 'user_added';
+    d.cells.forEach(c => { if (c.subjectId === d.subjects[1].id) c.sourceType = 'user_added'; });
+    expect(() => validateComparisonMap(raw(d), { allowAiContext: false })).not.toThrow();
+  });
 });

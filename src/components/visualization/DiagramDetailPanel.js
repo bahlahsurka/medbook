@@ -36,7 +36,9 @@ export default function DiagramDetailPanel({ node, onClose }) {
       </div>
       {node.extra}
       <div style={{ fontSize: FONT.size.micro, color: t.text4, borderTop: `1px solid ${t.border}`, paddingTop: 8 }}>
-        {node.sourceType === 'ai_context' ? 'From supplementary context, not the entry itself' : 'From the entry'}
+        {node.sourceType === 'ai_context' ? 'From supplementary context, not the entry itself'
+          : node.sourceType === 'user_added' ? 'Added by you during editing'
+          : 'From the entry'}
         {node.sourceRef && (
           <div style={{ marginTop: 4, fontStyle: 'italic', color: t.text3 }}>"{node.sourceRef}"</div>
         )}

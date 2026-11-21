@@ -38,9 +38,16 @@ function edgeStyleFor(t, provenance) {
  */
 export function buildFlowGraph(diagram, t, { selectedId } = {}) {
   const positions = computeMindMapLayout(diagram);
+  // Phase 4: a node the user has dragged during editing carries its own
+  // `position` field (see graphDiagramEdits.js's moveNode) that overrides
+  // computeMindMapLayout's own radial placement for THAT node only — a
+  // diagram with no dragged nodes yet (every pre-Phase-4 diagram) lays out
+  // exactly as before, since no node has this field at all.
+  const positionOf = (n) => n?.position || positions.get(n?.id) || { x: 0, y: 0 };
+  const byId = new Map((diagram?.nodes || []).map(n => [n.id, n]));
 
   const flowNodes = (diagram?.nodes || []).map(n => {
-    const pos = positions.get(n.id) || { x: 0, y: 0 };
+    const pos = positionOf(n);
     return {
       id: n.id,
       type: 'mindMapNode',
@@ -55,8 +62,8 @@ export function buildFlowGraph(diagram, t, { selectedId } = {}) {
   });
 
   const flowEdges = (diagram?.edges || []).map((e, i) => {
-    const sourcePos = positions.get(e.source) || { x: 0, y: 0 };
-    const targetPos = positions.get(e.target) || { x: 0, y: 0 };
+    const sourcePos = positionOf(byId.get(e.source));
+    const targetPos = positionOf(byId.get(e.target));
     const dx = targetPos.x - sourcePos.x;
     const dy = targetPos.y - sourcePos.y;
     return {

@@ -67,4 +67,10 @@ describe('validateVisualSummary — structural rejections', () => {
     d.highlights[0].sourceType = 'ai_context';
     expect(() => validateVisualSummary(raw(d), { allowAiContext: false })).toThrow(/additional context was requested/i);
   });
+
+  test('Phase 4: accepts a user_added highlight regardless of allowAiContext', () => {
+    const d = validDiagram();
+    d.highlights[0].sourceType = 'user_added';
+    expect(() => validateVisualSummary(raw(d), { allowAiContext: false })).not.toThrow();
+  });
 });

@@ -55,7 +55,11 @@ export function validateCommonNodes(rawNodes, { categories, allowAiContext, Erro
     if (!nonEmptyString(label)) throw new ErrorCtor(`Node "${id}" is missing a label.`);
     if (!nonEmptyString(explanation)) throw new ErrorCtor(`Node "${id}" is missing an explanation.`);
     if (!categories.has(category)) throw new ErrorCtor(`Node "${id}" has an unrecognized category "${category}".`);
-    if (sourceType !== 'entry' && sourceType !== 'ai_context') {
+    // 'user_added' (Phase 4) is never something Groq produces, but this
+    // same validator re-validates a user's edited diagram before saving
+    // it (api/visualize-edit.mjs) — a node the user typed in directly
+    // during editing needs its own honest classification.
+    if (sourceType !== 'entry' && sourceType !== 'ai_context' && sourceType !== 'user_added') {
       throw new ErrorCtor(`Node "${id}" has an unrecognized source classification "${sourceType}".`);
     }
     if (!nonEmptyString(sourceRef)) throw new ErrorCtor(`Node "${id}" is missing its supporting source reference.`);

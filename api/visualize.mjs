@@ -38,6 +38,7 @@ import { VisualizationValidationError } from '../src/services/ai/VisualizationVa
 import { computeContentHash } from '../src/services/ai/contentHash.js';
 import { findUncoveredStatements, SOURCE_COVERAGE_DISCLAIMER } from '../src/services/ai/sourceCoverage.js';
 import { SUPPORTED_VIZ_TYPES, getVisualizationDefinition } from '../src/services/ai/visualizationRegistry.js';
+import { unwrapGraphData, toVisualizationResponseShape } from '../src/services/ai/visualizationStorage.js';
 
 // Same floor api/analyze.mjs enforces on the same underlying field
 // (entry.notes) — a Review too short to meaningfully analyze is equally
@@ -216,12 +217,20 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: `Could not check for an existing diagram: ${existingErr.message}`, kind: 'api' });
   }
 
-  if (existing && vizDef.isRealDiagram(existing.graph_data) && existing.source_content_hash === contentHash && !wantsRegenerate) {
+  // Phase 4: `existing.graph_data` may be the empty claim sentinel, a raw
+  // diagram (legacy or freshly generated, never edited), or a Phase 4
+  // envelope ({original, current, edited} — see visualizationStorage.js)
+  // once a user has saved an edit for this entry+type. unwrapGraphData()
+  // is what lets every check below ignore which shape it's looking at and
+  // just ask about the CURRENT diagram, exactly as before Phase 4.
+  const existingCurrent = existing ? unwrapGraphData(existing.graph_data).current : null;
+
+  if (existing && vizDef.isRealDiagram(existingCurrent) && existing.source_content_hash === contentHash && !wantsRegenerate) {
     return res.status(200).json({
       cached: true,
-      visualization: toResponseShape(existing),
+      visualization: toVisualizationResponseShape(existing),
       disclaimer: STRUCTURAL_VALIDATION_DISCLAIMER,
-      coverage: coverageResponse(notes, existing.graph_data, vizDef),
+      coverage: coverageResponse(notes, existingCurrent, vizDef),
       timing: { totalMs: 0 }, // no Groq call on this path, by construction — not a measurement, a fact
     });
   }
@@ -238,7 +247,7 @@ export default async function handler(req, res) {
   // rather than wedging this slot shut forever. No schema change — see
   // the audit's own "no schema change unless absolutely necessary"
   // guidance; this dedup mechanism works unmodified for all six types. ----
-  if (existing && !vizDef.isRealDiagram(existing.graph_data)) {
+  if (existing && !vizDef.isRealDiagram(existingCurrent)) {
     const claimAgeMs = Date.now() - new Date(existing.updated_at || existing.created_at).getTime();
     if (claimAgeMs < CLAIM_STALE_MS) return inProgressResponse(res);
     // Stale/abandoned claim — re-claim it below rather than leaving it
@@ -348,7 +357,7 @@ export default async function handler(req, res) {
 
   return res.status(200).json({
     cached: false,
-    visualization: toResponseShape(saved),
+    visualization: toVisualizationResponseShape(saved),
     disclaimer: STRUCTURAL_VALIDATION_DISCLAIMER,
     coverage: coverageResponse(notes, diagram, vizDef),
     timing: { totalMs: totalGenerationMs, retries },
@@ -370,21 +379,5 @@ function coverageResponse(notes, graphData, vizDef) {
   return {
     uncoveredStatements: findUncoveredStatements(notes, graphData, { extractPairs: vizDef.extractCoveragePairs }),
     disclaimer: SOURCE_COVERAGE_DISCLAIMER,
-  };
-}
-
-/** DB row -> API shape — camelCase, and never leaks user_id to the response body. */
-function toResponseShape(row) {
-  return {
-    id: row.id,
-    entryId: row.entry_id,
-    vizType: row.viz_type,
-    graphData: row.graph_data,
-    extraContext: row.extra_context,
-    aiProvider: row.ai_provider,
-    aiModel: row.ai_model,
-    sourceContentHash: row.source_content_hash,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
   };
 }

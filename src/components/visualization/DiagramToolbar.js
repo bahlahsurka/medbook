@@ -6,6 +6,10 @@
 // "avoid unrelated refactoring" brief); every NEW renderer uses this one
 // instead of re-writing the same five buttons a fourth time. Must be
 // rendered INSIDE a <ReactFlowProvider> (uses useReactFlow()).
+//
+// Phase 4: `onAddNode`, when passed, adds one more button ("+ Add node")
+// for editable mode — omitted (as every pre-Phase-4 call site still does)
+// it renders exactly as before, so view mode is pixel-identical.
 import { useCallback } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { useTheme, SPACE, RADIUS, FONT } from '../../lib/theme';
@@ -19,7 +23,7 @@ function toolbarButtonStyle(t) {
   };
 }
 
-export default function DiagramToolbar({ isFullscreen, onToggleFullscreen }) {
+export default function DiagramToolbar({ isFullscreen, onToggleFullscreen, onAddNode }) {
   const { t } = useTheme();
   const { zoomIn, zoomOut, fitView, setViewport } = useReactFlow();
   const resetView = useCallback(() => setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 250 }), [setViewport]);
@@ -33,6 +37,12 @@ export default function DiagramToolbar({ isFullscreen, onToggleFullscreen }) {
       <button style={toolbarButtonStyle(t)} onClick={onToggleFullscreen} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
         {isFullscreen ? '⤡ Exit' : '⤢ Fullscreen'}
       </button>
+      {onAddNode && (
+        <button style={{ ...toolbarButtonStyle(t), background: t.navActiveBg, border: `1px solid ${t.navActiveBorder}`, color: t.navActiveText }}
+          onClick={onAddNode} title="Add a new node">
+          + Add node
+        </button>
+      )}
     </div>
   );
 }

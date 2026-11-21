@@ -150,4 +150,11 @@ describe('validateMindMap — structural rejections', () => {
     d.edges.push({ source: 'mgmt', target: 'ctx', relationship: 'related_to', label: '' });
     expect(() => validateMindMap(raw(d), { allowAiContext: true })).not.toThrow();
   });
+
+  test('Phase 4: accepts a user_added node regardless of allowAiContext — re-validating an edited diagram must not block a user\'s own additions', () => {
+    const d = validDiagram();
+    d.nodes.push({ id: 'mine', label: 'My note', explanation: 'x', category: 'subtopic', sourceType: 'user_added', sourceRef: 'Added by you during editing' });
+    d.edges.push({ source: 'mgmt', target: 'mine', relationship: 'related_to', label: '' });
+    expect(() => validateMindMap(raw(d), { allowAiContext: false })).not.toThrow();
+  });
 });

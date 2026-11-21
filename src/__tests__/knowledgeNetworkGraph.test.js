@@ -38,4 +38,10 @@ describe('buildKnowledgeNetworkFlowGraph', () => {
     const { flowEdges } = await buildKnowledgeNetworkFlowGraph(DIAGRAM, FAKE_THEME);
     expect(flowEdges.some(e => e.source === 'a' && e.target === 'c')).toBe(true);
   });
+
+  test('Phase 4: a node carrying a `position` field overrides ELK\'s own computed placement for that node only', async () => {
+    const withOverride = { ...DIAGRAM, nodes: DIAGRAM.nodes.map(n => (n.id === 'b' ? { ...n, position: { x: 555, y: 42 } } : n)) };
+    const { flowNodes } = await buildKnowledgeNetworkFlowGraph(withOverride, FAKE_THEME);
+    expect(flowNodes.find(n => n.id === 'b').position).toEqual({ x: 555, y: 42 });
+  });
 });

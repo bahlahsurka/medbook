@@ -49,4 +49,10 @@ describe('buildClinicalFlowchartFlowGraph', () => {
     const byId = Object.fromEntries(flowNodes.map(n => [n.id, n]));
     expect(byId.start.position.y).toBeLessThan(byId.dec.position.y);
   });
+
+  test('Phase 4: a node carrying a `position` field overrides ELK\'s own computed placement for that node only', async () => {
+    const withOverride = { ...DIAGRAM, nodes: DIAGRAM.nodes.map(n => (n.id === 'out1' ? { ...n, position: { x: -77, y: 300 } } : n)) };
+    const { flowNodes } = await buildClinicalFlowchartFlowGraph(withOverride, FAKE_THEME);
+    expect(flowNodes.find(n => n.id === 'out1').position).toEqual({ x: -77, y: 300 });
+  });
 });

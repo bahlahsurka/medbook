@@ -18,6 +18,7 @@ import { useState, useRef, useEffect, lazy, Suspense, useCallback, useMemo } fro
 import { useTheme, SPACE, RADIUS, FONT, elevation } from '../../lib/theme';
 import { IconSparkle, IconNetwork } from '../../lib/icons';
 import VisualizationService, { VisualizationServiceError } from '../../services/visualization';
+import { cloneDiagram } from './graphDiagramEdits';
 
 // One metadata entry per supported type — the selector, the idle-state
 // description, and the Generate button's label all read from this instead
@@ -26,13 +27,17 @@ import VisualizationService, { VisualizationServiceError } from '../../services/
 // SUPPORTED_VIZ_TYPES (that file is server-only, so this is a deliberate,
 // small, client-side duplication of the six keys — not worth importing a
 // server module into the bundle just to avoid repeating six strings).
+// `family` picks which Phase 4 editing UI a type gets: the four graph-
+// shaped types edit in place inside their own existing Renderer (passed
+// `editable`+`onDraftChange`); the other two swap in a dedicated
+// purpose-built editor component instead of a graph editor.
 const VISUALIZATION_TYPES = [
-  { key: 'mind_map', label: 'Mind Map', description: 'A central topic with its branches, red flags, and high-yield facts.' },
-  { key: 'knowledge_network', label: 'Knowledge Network', description: 'Related concepts cross-linked by multiple kinds of relationships.' },
-  { key: 'clinical_flowchart', label: 'Clinical Flowchart', description: 'A step-by-step clinical decision pathway, with clear branch conditions.' },
-  { key: 'mechanism_diagram', label: 'Mechanism Diagram', description: 'A cause → mechanism → consequence chain showing how it happens.' },
-  { key: 'comparison_map', label: 'Comparison Map', description: 'A side-by-side grid comparing related conditions, drugs, or treatments.' },
-  { key: 'visual_summary', label: 'Visual Summary', description: 'A compact, prioritized set of highlights for quick revision.' },
+  { key: 'mind_map', label: 'Mind Map', description: 'A central topic with its branches, red flags, and high-yield facts.', family: 'graph' },
+  { key: 'knowledge_network', label: 'Knowledge Network', description: 'Related concepts cross-linked by multiple kinds of relationships.', family: 'graph' },
+  { key: 'clinical_flowchart', label: 'Clinical Flowchart', description: 'A step-by-step clinical decision pathway, with clear branch conditions.', family: 'graph' },
+  { key: 'mechanism_diagram', label: 'Mechanism Diagram', description: 'A cause → mechanism → consequence chain showing how it happens.', family: 'graph' },
+  { key: 'comparison_map', label: 'Comparison Map', description: 'A side-by-side grid comparing related conditions, drugs, or treatments.', family: 'comparison' },
+  { key: 'visual_summary', label: 'Visual Summary', description: 'A compact, prioritized set of highlights for quick revision.', family: 'summary' },
 ];
 const TYPE_BY_KEY = Object.fromEntries(VISUALIZATION_TYPES.map(t => [t.key, t]));
 
@@ -47,7 +52,27 @@ const RENDERER_BY_TYPE = {
   visual_summary: lazy(() => import('./VisualSummaryRenderer')),
 };
 
-const EMPTY_TYPE_STATE = { status: 'idle', result: null, error: '', errorKind: '', startedAt: 0 };
+// Phase 4: the two non-graph types get their own dedicated editor
+// component instead of reusing their Renderer with an `editable` prop —
+// see ComparisonMapEditor.js/VisualSummaryEditor.js's own headers for why
+// (a grid/card-list editor is a genuinely different UI, not a graph
+// canvas in disguise). The four graph types don't appear here at all —
+// their existing Renderer handles both modes itself.
+const EDITOR_BY_TYPE = {
+  comparison_map: lazy(() => import('./ComparisonMapEditor')),
+  visual_summary: lazy(() => import('./VisualSummaryEditor')),
+};
+
+// `editMode`/`draft`/`isDirty`/`saveStatus`/`saveError`/`confirmAction`
+// are the Phase 4 additions — everything else is unchanged from Phase 3.
+// `draft` lives ONLY in this component's React state until an explicit
+// Save Changes click; nothing here ever persists a drag, a keystroke, or
+// any other intermediate edit on its own.
+const EMPTY_TYPE_STATE = {
+  status: 'idle', result: null, error: '', errorKind: '', startedAt: 0,
+  editMode: false, draft: null, isDirty: false,
+  saveStatus: 'idle', saveError: '', confirmAction: null,
+};
 
 function RendererFallback({ t }) {
   return (
@@ -151,10 +176,85 @@ function VisualLearningPanelContent({ entryId }) {
     }
   }, [entryId]);
 
+  // ---- Phase 4: editing. `draft` is a deep clone of whatever's currently
+  // displayed — mutated locally by the renderer/editor's own onDraftChange
+  // calls, never touching `result` (and therefore the server) until Save
+  // Changes succeeds. ----
+  const startEdit = useCallback((key) => {
+    const typeState = getTypeState(key);
+    const sourceDiagram = typeState.result?.visualization?.graphData;
+    updateTypeState(key, { editMode: true, draft: cloneDiagram(sourceDiagram), isDirty: false, saveStatus: 'idle', saveError: '', confirmAction: null });
+  }, [getTypeState, updateTypeState]);
+
+  const changeDraft = useCallback((key, nextDraft) => {
+    updateTypeState(key, { draft: nextDraft, isDirty: true });
+  }, [updateTypeState]);
+
+  const performDiscard = useCallback((key) => {
+    updateTypeState(key, { editMode: false, draft: null, isDirty: false, saveStatus: 'idle', saveError: '', confirmAction: null });
+  }, [updateTypeState]);
+
+  const requestDiscard = useCallback((key) => {
+    const typeState = getTypeState(key);
+    if (!typeState.isDirty) { performDiscard(key); return; } // nothing to lose — no confirmation needed
+    updateTypeState(key, { confirmAction: 'discard' });
+  }, [getTypeState, performDiscard, updateTypeState]);
+
+  const saveInFlight = useRef(new Set());
+  const performSave = useCallback(async (key) => {
+    if (saveInFlight.current.has(key)) return;
+    const typeState = getTypeState(key);
+    saveInFlight.current.add(key);
+    updateTypeState(key, { saveStatus: 'saving', saveError: '' });
+    try {
+      const res = await VisualizationService.saveEdit(key, entryId, typeState.draft, { baseUpdatedAt: typeState.result?.visualization?.updatedAt });
+      updateTypeState(key, {
+        result: { ...typeState.result, visualization: res.visualization },
+        editMode: false, draft: null, isDirty: false, saveStatus: 'saved', saveError: '', confirmAction: null,
+      });
+    } catch (e) {
+      // The draft is left exactly as it was — a failed save must never
+      // lose the user's in-memory edits.
+      const message = e instanceof VisualizationServiceError ? e.message : 'Something went wrong saving your changes.';
+      updateTypeState(key, { saveStatus: 'error', saveError: message });
+    } finally {
+      saveInFlight.current.delete(key);
+    }
+  }, [entryId, getTypeState, updateTypeState]);
+
+  const restoreInFlight = useRef(new Set());
+  const performRestore = useCallback(async (key) => {
+    if (restoreInFlight.current.has(key)) return;
+    const typeState = getTypeState(key);
+    restoreInFlight.current.add(key);
+    updateTypeState(key, { saveStatus: 'saving', saveError: '' });
+    try {
+      // Never calls Groq — see api/visualize-edit.mjs's own header.
+      const res = await VisualizationService.restoreOriginal(key, entryId, { baseUpdatedAt: typeState.result?.visualization?.updatedAt });
+      updateTypeState(key, {
+        result: { ...typeState.result, visualization: res.visualization },
+        editMode: false, draft: null, isDirty: false, saveStatus: 'saved', saveError: '', confirmAction: null,
+      });
+    } catch (e) {
+      const message = e instanceof VisualizationServiceError ? e.message : 'Something went wrong restoring the original.';
+      updateTypeState(key, { saveStatus: 'error', saveError: message });
+    } finally {
+      restoreInFlight.current.delete(key);
+    }
+  }, [entryId, getTypeState, updateTypeState]);
+
+  const requestRestore = useCallback((key) => {
+    updateTypeState(key, { confirmAction: 'restore' }); // always confirm — restoring discards the saved edited version outright
+  }, [updateTypeState]);
+
+  const cancelConfirm = useCallback((key) => updateTypeState(key, { confirmAction: null }), [updateTypeState]);
+
   const current = getTypeState(selectedType);
   const currentMeta = TYPE_BY_KEY[selectedType];
   const Renderer = RENDERER_BY_TYPE[selectedType];
+  const Editor = EDITOR_BY_TYPE[selectedType];
   const elapsedSec = current.status === 'loading' ? Math.max(0, Math.floor((Date.now() - current.startedAt) / 1000)) : 0;
+  const isBusy = current.saveStatus === 'saving';
 
   return (
     <div className="mb-detail-card" style={{ background: t.surface, border: `1px solid ${t.border}`,
@@ -227,15 +327,82 @@ function VisualLearningPanelContent({ entryId }) {
             <span style={{ fontSize: FONT.size.xs, color: t.text4 }}>
               {current.result.cached ? '✓ Loaded from cache (instant)' : `✓ Generated${current.result.timing?.totalMs ? ` in ${(current.result.timing.totalMs / 1000).toFixed(1)}s` : ''}`}
               {current.result.visualization?.aiModel ? ` · ${current.result.visualization.aiModel}` : ''}
+              {current.result.visualization?.isEdited && !current.editMode && (
+                <span style={{ marginLeft: 6, color: t.navActiveText, fontWeight: FONT.weight.semibold }}>· Edited by you</span>
+              )}
             </span>
-            <button onClick={() => run(selectedType, true)} disabled={current.status === 'loading'} style={regenerateButtonStyle(t)}>
-              ↻ Regenerate
-            </button>
+
+            {/* Compact editing toolbar — Edit/Save/Discard/Restore. Save/
+                Discard/Restore only ever appear once editing is actually
+                active or there's something to restore, so view mode stays
+                exactly as clean as Phase 3 shipped it. */}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginLeft: 'auto' }}>
+              {current.editMode ? (
+                <>
+                  {current.isDirty && <span style={{ fontSize: FONT.size.micro, color: t.warn, alignSelf: 'center', fontWeight: FONT.weight.semibold }}>● Unsaved changes</span>}
+                  <button onClick={() => performSave(selectedType)} disabled={isBusy} style={saveButtonStyle(t, isBusy)}>
+                    {isBusy ? 'Saving…' : '✓ Save Changes'}
+                  </button>
+                  <button onClick={() => requestDiscard(selectedType)} disabled={isBusy} style={regenerateButtonStyle(t)}>Discard Changes</button>
+                </>
+              ) : (
+                <>
+                  <button onClick={() => startEdit(selectedType)} style={regenerateButtonStyle(t)}>✎ Edit</button>
+                  <button onClick={() => run(selectedType, true)} disabled={current.status === 'loading'} style={regenerateButtonStyle(t)}>↻ Regenerate</button>
+                </>
+              )}
+              {current.result.visualization?.isEdited && (
+                <button onClick={() => requestRestore(selectedType)} disabled={isBusy} style={regenerateButtonStyle(t)}>⟲ Restore Original AI Version</button>
+              )}
+            </div>
           </div>
 
-          <Suspense fallback={<RendererFallback t={t} />}>
-            <Renderer diagram={current.result.visualization.graphData} />
-          </Suspense>
+          {/* Inline confirmation — shown instead of acting immediately
+              whenever discarding/restoring would lose something real. */}
+          {current.confirmAction && (
+            <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: RADIUS.md,
+              padding: '10px 12px', marginBottom: SPACE.sm, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: FONT.size.xs, color: t.danger, flex: 1 }}>
+                {current.confirmAction === 'discard'
+                  ? 'Discard your unsaved changes? This can\'t be undone.'
+                  : 'Restore the original AI version? Your saved edits will be replaced and can\'t be recovered.'}
+              </span>
+              <button
+                onClick={() => (current.confirmAction === 'discard' ? performDiscard(selectedType) : performRestore(selectedType))}
+                style={{ ...saveButtonStyle(t, false), background: t.danger, border: `1px solid ${t.danger}`, color: '#fff' }}>
+                Yes, {current.confirmAction === 'discard' ? 'discard' : 'restore'}
+              </button>
+              <button onClick={() => cancelConfirm(selectedType)} style={regenerateButtonStyle(t)}>Cancel</button>
+            </div>
+          )}
+
+          {current.saveStatus === 'error' && (
+            <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: RADIUS.md,
+              padding: '10px 14px', fontSize: 12.5, color: t.danger, marginBottom: SPACE.sm }}>
+              {current.saveError} Your edits are still here — try saving again.
+            </div>
+          )}
+          {current.saveStatus === 'saved' && !current.editMode && (
+            <div style={{ fontSize: FONT.size.xs, color: t.ok, marginBottom: SPACE.sm }}>✓ Saved</div>
+          )}
+
+          {current.editMode ? (
+            currentMeta.family === 'graph' ? (
+              <Suspense fallback={<RendererFallback t={t} />}>
+                <Renderer diagram={current.draft} editable onDraftChange={next => changeDraft(selectedType, next)} />
+              </Suspense>
+            ) : (
+              <div style={{ width: '100%', height: 'clamp(320px, 65vh, 480px)', borderRadius: RADIUS.lg, overflow: 'hidden', border: `1px solid ${t.accent}55` }}>
+                <Suspense fallback={<RendererFallback t={t} />}>
+                  <Editor diagram={current.draft} onDraftChange={next => changeDraft(selectedType, next)} />
+                </Suspense>
+              </div>
+            )
+          ) : (
+            <Suspense fallback={<RendererFallback t={t} />}>
+              <Renderer diagram={current.result.visualization.graphData} />
+            </Suspense>
+          )}
 
           {current.result.coverage?.uncoveredStatements?.length > 0 && (
             <div style={{ marginTop: SPACE.sm }}>
@@ -339,7 +506,16 @@ function regenerateButtonStyle(t) {
   return {
     fontSize: FONT.size.xs, fontWeight: FONT.weight.semibold, fontFamily: 'Inter,sans-serif',
     background: t.surface3, border: `1px solid ${t.border}`, color: t.text3,
-    borderRadius: RADIUS.sm - 1, padding: '5px 10px', cursor: 'pointer', marginLeft: 'auto',
+    borderRadius: RADIUS.sm - 1, padding: '5px 10px', cursor: 'pointer', minHeight: 30,
+  };
+}
+
+function saveButtonStyle(t, busy) {
+  return {
+    fontSize: FONT.size.xs, fontWeight: FONT.weight.semibold, fontFamily: 'Inter,sans-serif',
+    background: busy ? t.surface3 : t.okBg, border: `1px solid ${busy ? t.border : t.okBorder}`,
+    color: busy ? t.text4 : t.ok, borderRadius: RADIUS.sm - 1, padding: '5px 10px',
+    cursor: busy ? 'default' : 'pointer', minHeight: 30,
   };
 }
 

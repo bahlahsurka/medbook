@@ -25,9 +25,15 @@ export function buildMechanismDiagramFlowGraph(diagram, t) {
   const nodes = diagram?.nodes || [];
   const edges = diagram?.edges || [];
   const positions = computeSequentialLayout(nodes.map(n => ({ id: n.id })), edges);
+  // Phase 4: a node the user has dragged during editing carries its own
+  // `position` field (graphDiagramEdits.js's moveNode) that overrides the
+  // computed sequential-layout placement for THAT node only — a diagram
+  // with no dragged nodes yet lays out exactly as before.
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const positionOf = (id) => byId.get(id)?.position || positions.get(id) || { x: 0, y: 0 };
 
   const flowNodes = nodes.map(n => {
-    const pos = positions.get(n.id) || { x: 0, y: 0 };
+    const pos = positionOf(n.id);
     return {
       id: n.id,
       type: 'graphNode',
@@ -40,7 +46,6 @@ export function buildMechanismDiagramFlowGraph(diagram, t) {
     };
   });
 
-  const positionOf = (id) => positions.get(id) || { x: 0, y: 0 };
   const flowEdges = edges.map((e, i) => {
     const s = positionOf(e.source), tp = positionOf(e.target);
     const dx = tp.x - s.x, dy = tp.y - s.y;

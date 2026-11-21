@@ -10,7 +10,11 @@
 import { VisualizationValidationError, stripToJson, nonEmptyString } from './visualizationValidationHelpers.js';
 
 function validateSourceFields(obj, label, ErrorCtor, allowAiContext) {
-  if (obj.sourceType !== 'entry' && obj.sourceType !== 'ai_context') {
+  // 'user_added' (Phase 4) is never something Groq produces, but this
+  // validator also re-validates a user's edited grid before saving it
+  // (api/visualize-edit.mjs) — a subject/cell the user typed in directly
+  // needs its own honest classification.
+  if (obj.sourceType !== 'entry' && obj.sourceType !== 'ai_context' && obj.sourceType !== 'user_added') {
     throw new ErrorCtor(`${label} has an unrecognized source classification "${obj.sourceType}".`);
   }
   if (!nonEmptyString(obj.sourceRef)) throw new ErrorCtor(`${label} is missing its supporting source reference.`);
