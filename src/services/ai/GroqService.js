@@ -50,13 +50,33 @@ export function resetRequestCount() { requestCount = 0; }
 const OVERLOAD_RETRY_DELAYS_MS = [1000, 2000]; // 503/498: usually clears in seconds
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-/** One attempt. Throws GroqError on any failure. */
-async function attempt(userPrompt, signal) {
+/**
+ * One attempt. Throws GroqError on any failure.
+ *
+ * `task` carries everything that varies by WHAT is being asked of the model
+ * (system instruction, schema, schema name, token budget) — defaulted to
+ * MedBook's existing six-section Review analysis so every pre-existing
+ * caller (api/analyze.mjs, passing none of this) gets byte-identical
+ * behavior. A second task (api/visualize.mjs's Mind Map generation) passes
+ * its own values instead, reusing this same transport/retry/error-mapping
+ * logic rather than duplicating it — see this file's own header comment on
+ * why that retry discipline is worth never re-deriving by hand. Adding a
+ * THIRD task later (another visualization type, or another provider
+ * following this same shape) needs no change here at all.
+ */
+async function attempt(userPrompt, signal, task = {}) {
+  const {
+    systemInstruction = GROQ_SYSTEM_INSTRUCTION,
+    responseSchema = GROQ_RESPONSE_SCHEMA,
+    schemaName = 'medbook_review_analysis',
+    maxCompletionTokens = 32768,
+  } = task;
+
   const n = ++requestCount;
   const startedAt = Date.now();
   if (DEV) {
     // eslint-disable-next-line no-console
-    console.log(`[Groq] request #${n} → ${MODEL} (prompt ${userPrompt.length} chars)`);
+    console.log(`[Groq] request #${n} → ${MODEL} (prompt ${userPrompt.length} chars, schema ${schemaName})`);
   }
 
   let res;
@@ -71,15 +91,15 @@ async function attempt(userPrompt, signal) {
       body: JSON.stringify({
         model: MODEL,
         messages: [
-          { role: 'system', content: GROQ_SYSTEM_INSTRUCTION },
+          { role: 'system', content: systemInstruction },
           { role: 'user', content: userPrompt },
         ],
         response_format: {
           type: 'json_schema',
           json_schema: {
-            name: 'medbook_review_analysis',
+            name: schemaName,
             strict: true,
-            schema: GROQ_RESPONSE_SCHEMA,
+            schema: responseSchema,
           },
         },
         temperature: 0.2,       // low: we're extracting, not brainstorming
@@ -112,8 +132,10 @@ async function attempt(userPrompt, signal) {
         // whole budget, that's exactly what the 'invalid_output' handling
         // above (resample once, then fall back to Gemini) exists for —
         // this is no longer an all-or-nothing bet on one request the way
-        // the first attempt at 'high' effectively was.
-        max_completion_tokens: 32768,
+        // the first attempt at 'high' effectively was. (This default is
+        // this specific analysis task's own tuning — see `task` above;
+        // another task can pass its own budget instead.)
+        max_completion_tokens: maxCompletionTokens,
       }),
     });
   } catch (e) {
@@ -237,16 +259,24 @@ const INVALID_OUTPUT_MAX_RETRIES = 1; // one immediate resample — see attempt(
  * A 404 here means real misconfiguration (a typo'd GROQ_MODEL), not the
  * kind of upstream deprecation Gemini's alias chases, so it surfaces as a
  * 'config' error instead of silently trying something else.
+ *
+ * `systemInstruction`/`responseSchema`/`schemaName`/`maxCompletionTokens`
+ * are all optional and default to the existing Review-analysis task
+ * unchanged — see attempt()'s own comment. A caller doing something other
+ * than six-section analysis (e.g. api/visualize.mjs's Mind Map generation)
+ * passes its own values; everything else below (retry/backoff/error
+ * mapping) applies identically regardless of which task this is.
  */
-export async function generate(userPrompt, { signal } = {}) {
+export async function generate(userPrompt, { signal, systemInstruction, responseSchema, schemaName, maxCompletionTokens } = {}) {
   if (!isConfigured()) {
     throw new GroqError('No Groq API key found. Set GROQ_API_KEY in Vercel (server-side only, no REACT_APP_ prefix).', 'config');
   }
+  const task = { systemInstruction, responseSchema, schemaName, maxCompletionTokens };
 
   let invalidOutputRetries = 0;
   for (let i = 0; ; i++) {
     try {
-      return await attempt(userPrompt, signal);
+      return await attempt(userPrompt, signal, task);
     } catch (e) {
       if (e.name === 'AbortError') throw e;
       if (e.kind === 'overloaded' && i < OVERLOAD_RETRY_DELAYS_MS.length) {
