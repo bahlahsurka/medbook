@@ -43,24 +43,32 @@ const CLINICAL_SIGNAL_RE = new RegExp(
   'i'
 );
 
-function splitIntoClauses(text) {
+// Exported (Phase 5) purely so keyPointsFidelity.js can reuse these exact
+// string-matching primitives for Key Points' own fidelity checks without
+// duplicating them — a pure, additive export with zero change to any
+// existing behavior or caller here. CLINICAL_SIGNAL_RE/splitIntoClauses/
+// significantWords/overlapRatio are unchanged; findUncoveredStatements
+// below still behaves identically for every Visual Learning caller.
+export function splitIntoClauses(text) {
   return String(text || '')
     .split(/(?<=[.!?;])\s+|\n+/)
     .map(s => s.trim())
     .filter(s => s.length > 12); // skip fragments too short to be a standalone statement
 }
 
-function significantWords(text) {
+export function significantWords(text) {
   const words = String(text || '').toLowerCase().match(/[a-z0-9]+/g) || [];
   return new Set(words.filter(w => w.length > 2 && !STOPWORDS.has(w)));
 }
 
-function overlapRatio(clauseWords, nodeWords) {
+export function overlapRatio(clauseWords, nodeWords) {
   if (clauseWords.size === 0) return 0;
   let hits = 0;
   for (const w of clauseWords) if (nodeWords.has(w)) hits++;
   return hits / clauseWords.size;
 }
+
+export { CLINICAL_SIGNAL_RE };
 
 // Default extractor: the {nodes:[{explanation,sourceRef}]} shape Mind Map,
 // Knowledge Network, Clinical Flowchart, and Mechanism Diagram all share.
