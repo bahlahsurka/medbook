@@ -741,8 +741,11 @@ export default function App() {
               .mb-app-header:has(#mb-study-toolbar-slot > *) .mb-portal-header-label { display: none; }
               /* The flashcard study toolbar is sized to fill this row exactly
                  on phones, so the text-size button steps aside while a study
-                 session is running there (it's back on the deck screens). */
+                 session is running there (it's back on the deck screens).
+                 During a review session it stays, as a compact icon-only pill. */
               .mb-app-header--cards:has(#mb-study-toolbar-slot > *) .mb-zoom-wrap { display: none !important; }
+              .mb-app-header:has(#mb-study-toolbar-slot > *) .mb-zoom-pct { display: none; }
+              .mb-app-header:has(#mb-study-toolbar-slot > *) .mb-zoom-btn { padding: 0 8px !important; }
             }
           `}</style>
           <button className="mb-headerbtn" onClick={()=>setSB(p=>!p)} title={sidebarOpen?'Close sidebar':'Open sidebar'}
@@ -773,6 +776,10 @@ export default function App() {
                 overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{activeSystem}</span>
             </>
           )}
+
+          {/* Universal text size — right after the page title, as a
+              highlighted blue pill so it can't be mistaken for Search. */}
+          <ZoomControl />
 
           {/* Plain spacer for every view except 'cards' — there, it doubles
               as a portal target StudySession renders its own toolbar into
@@ -825,8 +832,6 @@ export default function App() {
             </button>
           )}
 
-          {/* Universal text size (magnifier) — always the last item. */}
-          <ZoomControl />
         </div>
 
         {/* Content — scrollRef attached here for scroll restoration.

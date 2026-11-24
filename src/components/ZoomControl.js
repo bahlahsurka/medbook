@@ -16,7 +16,16 @@ export default function ZoomControl() {
   const { t } = useTheme();
   const zoom = useUiZoom();
   const [open, setOpen] = useState(false);
+  const [alignRight, setAlignRight] = useState(false);
   const ref = useRef(null);
+  const toggle = () => {
+    if (!open && ref.current) {
+      // Open toward whichever side has room for the 220px panel.
+      const r = ref.current.getBoundingClientRect();
+      setAlignRight(r.left + 228 > window.innerWidth);
+    }
+    setOpen(o => !o);
+  };
 
   useEffect(() => {
     if (!open) return undefined;
@@ -47,23 +56,22 @@ export default function ZoomControl() {
 
   return (
     <span ref={ref} className="mb-zoom-wrap" style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}>
-      {/* Phones: icon only in the top bar (the % shows in the panel), so a
-          review/study session toolbar sharing this row still fits. */}
-      <style>{'@media (max-width: 480px) { .mb-zoom-pct { display: none; } .mb-zoom-btn { padding: 0 !important; } }'}</style>
-      <button className="mb-headerbtn mb-zoom-btn" onMouseDown={keepFocus} onClick={() => setOpen(o => !o)}
+      <style>{'.mb-zoom-btn:hover { filter: brightness(1.08); } .mb-zoom-btn:active { transform: scale(0.96); }'}</style>
+      <button className="mb-zoom-btn" onMouseDown={keepFocus} onClick={toggle}
         aria-label={`Text size (${pct(zoom)})`} title={`Text size (${pct(zoom)})`}
         aria-haspopup="dialog" aria-expanded={open}
-        style={{ background: changed ? t.navActiveBg : 'none', border: `1px solid ${changed ? t.navActiveBorder : 'transparent'}`,
-          color: changed ? t.navActiveText : t.text3, cursor: 'pointer', borderRadius: RADIUS.sm,
-          height: 30, minWidth: 30, padding: changed ? '0 7px' : 0, display: 'flex', alignItems: 'center',
-          justifyContent: 'center', gap: 4, fontSize: 12, fontWeight: 700, fontFamily: 'Inter,sans-serif' }}>
-        <IconZoom size={17} />
-        {changed && <span className="mb-zoom-pct">{pct(zoom)}</span>}
+        style={{ background: t.accent, border: `1px solid ${t.accent}`, color: '#fff', cursor: 'pointer',
+          borderRadius: RADIUS.pill, height: 30, padding: '0 11px 0 9px', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', gap: 5, fontSize: 12.5, fontWeight: 700, fontFamily: 'Inter,sans-serif',
+          boxShadow: `0 2px 8px -2px ${t.accent}99`, whiteSpace: 'nowrap',
+          transition: 'filter 120ms ease, transform 120ms ease' }}>
+        <IconZoom size={16} />
+        <span className="mb-zoom-pct">{pct(zoom)}</span>
       </button>
 
       {open && (
         <div role="dialog" aria-label="Text size" style={{
-          position: 'absolute', right: 0, top: 'calc(100% + 8px)', zIndex: Z.dropdown + 100, width: 220,
+          position: 'absolute', ...(alignRight ? { right: 0 } : { left: 0 }), top: 'calc(100% + 8px)', zIndex: Z.dropdown + 100, width: 220,
           background: t.surface, border: `1px solid ${t.border}`, borderRadius: RADIUS.lg,
           boxShadow: elevation(t, 'lg'), padding: 14, fontFamily: 'Inter,sans-serif',
         }}>
