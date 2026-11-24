@@ -55,7 +55,7 @@ export function ReviewVisualLearningButton({ entryId, onOpen, colors }) {
   );
 }
 
-export function ReviewVisualLearningDrawer({ entryId, entryTitle, onClose }) {
+export function ReviewVisualLearningDrawer({ entryId, entryTitle, entryNotes, onClose }) {
   const { t } = useTheme();
   const panelRef = useRef(null);
   const onCloseRef = useRef(onClose);
@@ -119,7 +119,7 @@ export function ReviewVisualLearningDrawer({ entryId, entryTitle, onClose }) {
         </div>
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: `${SPACE.lg}px ${SPACE.lg}px ${SPACE.xl}px` }}>
           <Suspense fallback={null}>
-            <VisualLearningPanel key={entryId} entryId={entryId} mode="saved" />
+            <VisualLearningPanel key={entryId} entryId={entryId} mode="saved" notes={entryNotes} />
           </Suspense>
         </div>
       </div>

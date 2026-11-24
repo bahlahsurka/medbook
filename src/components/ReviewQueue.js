@@ -17,6 +17,7 @@ import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
 import { ReviewVisualLearningButton, ReviewVisualLearningDrawer } from './ReviewVisualLearning';
 import VisualizationService from '../services/visualization';
 import { getSavedKeyPoints, isKeyPointsStale } from '../lib/keyPoints';
+import { useContentHash } from '../lib/contentHash';
 import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
   IconX, IconEdit } from '../lib/icons';
 import RichRuns from '../lib/RichRuns';
@@ -606,7 +607,8 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   // live further down past those early returns.
   const cardAiSections = useMemo(() => normalizeSections(card?.ai_sections), [card]);
   const cardKeyPoints = useMemo(() => getSavedKeyPoints(card?.ai_sections), [card]);
-  const cardKeyPointsStale = isKeyPointsStale(cardKeyPoints, card?.notes);
+  const cardNotesHash = useContentHash(card?.notes || '');
+  const cardKeyPointsStale = isKeyPointsStale(cardKeyPoints, card?.notes, cardNotesHash);
   const cardHasKeyPoints = hasKeyPoints(cardAiSections, cardKeyPoints);
   const cardHasImages = card?.images?.length > 0;
 
@@ -1482,7 +1484,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
         <Lightbox images={card.images} start={lightboxIdx} onClose={()=>setLightboxIdx(null)} />
       )}
       {vlOpen && card && (
-        <ReviewVisualLearningDrawer entryId={card.id} entryTitle={card.title} onClose={closeVl} />
+        <ReviewVisualLearningDrawer entryId={card.id} entryTitle={card.title} entryNotes={card.notes || ''} onClose={closeVl} />
       )}
 
       {/* Floating highlight bar — appears only once real text is selected

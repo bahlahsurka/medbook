@@ -38,17 +38,21 @@ const OLD_REAL_DIAGRAM = {
   edges: [],
 };
 
+// Every write the handler makes to entry_visualizations, in order.
+const writes = [];
+
 function makeQueryChain({ selectResult, upsertResult, insertResult = { error: null }, updateResult = { error: null } }) {
   const selectChain = {
     eq: () => selectChain,
     maybeSingle: async () => selectResult,
   };
-  const updateChain = { eq: () => updateChain };
+  const deleteChain = { eq: () => deleteChain, then: (r) => r({ error: null }) };
   return {
     select: () => selectChain,
-    upsert: () => ({ select: () => ({ single: async () => upsertResult }) }),
-    insert: async () => insertResult,
-    update: () => ({ eq: () => ({ eq: async () => updateResult }) }),
+    upsert: (payload) => { writes.push(['upsert', payload]); return { select: () => ({ single: async () => upsertResult }) }; },
+    insert: async (payload) => { writes.push(['insert', payload]); return insertResult; },
+    update: (payload) => { writes.push(['update', payload]); return { eq: () => ({ eq: async () => updateResult }) }; },
+    delete: () => { writes.push(['delete']); return deleteChain; },
   };
 }
 
@@ -78,6 +82,7 @@ function makeReqRes({ body, auth = 'Bearer test-token', method = 'POST' } = {}) 
 
 beforeEach(() => {
   jest.clearAllMocks();
+  writes.length = 0;
   GroqService.getRequestCount.mockReturnValue(0);
   GroqService.getLastUsage.mockReturnValue(null);
   process.env.REACT_APP_SUPABASE_URL = 'https://example.supabase.co';
@@ -158,24 +163,55 @@ describe('api/visualize.mjs — caching', () => {
     expect(payload.coverage).toBeDefined();
   });
 
-  test('cache miss: stale hash (notes changed since last generation) -> regenerates via Groq', async () => {
+  test('stale hash (Review edited since) -> returns the saved diagram flagged stale; no Groq call, nothing overwritten', async () => {
     const notes = 'A DIFFERENT review long enough to pass the 40-character minimum length floor.';
     GroqService.isConfigured.mockReturnValue(true);
-    GroqService.generate.mockResolvedValue(VALID_DIAGRAM_JSON);
-    GroqService.activeModel.mockReturnValue('openai/gpt-oss-20b');
-
     createClient.mockReturnValue(makeSupabaseMock({
       entryResult: { data: { id: ENTRY_ID, user_id: USER_ID, notes }, error: null },
       existingVizResult: { data: { id: 'viz-1', entry_id: ENTRY_ID, viz_type: 'mind_map', source_content_hash: 'stale-hash-does-not-match', graph_data: OLD_REAL_DIAGRAM, created_at: 't0', updated_at: new Date().toISOString() }, error: null },
-      savedVizResult: { data: { id: 'viz-1', entry_id: ENTRY_ID, viz_type: 'mind_map', source_content_hash: 'new-hash', graph_data: JSON.parse(VALID_DIAGRAM_JSON), extra_context: null, ai_provider: 'groq', ai_model: 'openai/gpt-oss-20b', created_at: 't0', updated_at: 't1' }, error: null },
     }));
 
     const { req, res } = makeReqRes({ body: { entryId: ENTRY_ID, vizType: 'mind_map' } });
     await handler(req, res);
 
-    expect(GroqService.generate).toHaveBeenCalledTimes(1);
+    expect(GroqService.generate).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json.mock.calls[0][0].cached).toBe(false);
+    expect(res.json.mock.calls[0][0]).toMatchObject({ cached: true, stale: true });
+    expect(writes).toEqual([]);
+  });
+
+  test('regenerating a stale, user-EDITED diagram never wipes it before Groq — a failed generation leaves it intact', async () => {
+    const notes = 'A DIFFERENT review long enough to pass the 40-character minimum length floor.';
+    const edited = { __medbookViz: 1, original: OLD_REAL_DIAGRAM, current: { ...OLD_REAL_DIAGRAM, centralTopic: 'edited' }, edited: true, editedAt: 't1' };
+    GroqService.isConfigured.mockReturnValue(true);
+    GroqService.activeModel.mockReturnValue('openai/gpt-oss-20b');
+    const err = new Error('Groq rate limit reached.');
+    err.kind = 'quota';
+    GroqService.generate.mockRejectedValue(err);
+    createClient.mockReturnValue(makeSupabaseMock({
+      entryResult: { data: { id: ENTRY_ID, user_id: USER_ID, notes }, error: null },
+      existingVizResult: { data: { id: 'viz-1', entry_id: ENTRY_ID, viz_type: 'mind_map', source_content_hash: 'old', graph_data: edited, created_at: 't0', updated_at: 't1' }, error: null },
+    }));
+
+    const { req, res } = makeReqRes({ body: { entryId: ENTRY_ID, vizType: 'mind_map', regenerate: true } });
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(429);
+    expect(writes).toEqual([]); // no claim over the saved diagram, no delete
+  });
+
+  test('a failed FIRST generation releases its own claim so the next attempt is not blocked', async () => {
+    GroqService.isConfigured.mockReturnValue(true);
+    GroqService.activeModel.mockReturnValue('openai/gpt-oss-20b');
+    const err = new Error('overloaded');
+    err.kind = 'overloaded';
+    GroqService.generate.mockRejectedValue(err);
+    createClient.mockReturnValue(makeSupabaseMock());
+
+    const { req, res } = makeReqRes({ body: { entryId: ENTRY_ID, vizType: 'mind_map' } });
+    await handler(req, res);
+
+    expect(writes.map(w => w[0])).toEqual(['insert', 'delete']);
   });
 
   test('regenerate:true bypasses an otherwise-valid cache hit', async () => {

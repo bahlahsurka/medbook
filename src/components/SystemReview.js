@@ -11,6 +11,7 @@ import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
 import { ReviewVisualLearningButton, ReviewVisualLearningDrawer } from './ReviewVisualLearning';
 import VisualizationService from '../services/visualization';
 import { getSavedKeyPoints, isKeyPointsStale } from '../lib/keyPoints';
+import { useContentHash } from '../lib/contentHash';
 import { IconX } from '../lib/icons';
 import RichRuns from '../lib/RichRuns';
 import { rawOffsetAt } from './DetailView';
@@ -254,7 +255,8 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
   // use), so an old/partial row can't crash this.
   const cardAiSections = useMemo(() => normalizeSections(card?.ai_sections), [card]);
   const cardKeyPoints = useMemo(() => getSavedKeyPoints(card?.ai_sections), [card]);
-  const cardKeyPointsStale = isKeyPointsStale(cardKeyPoints, card?.notes);
+  const cardNotesHash = useContentHash(card?.notes || '');
+  const cardKeyPointsStale = isKeyPointsStale(cardKeyPoints, card?.notes, cardNotesHash);
   const cardHasKeyPoints = hasKeyPoints(cardAiSections, cardKeyPoints);
 
   // Visual Learning drawer — overlays this still-mounted session; closed
@@ -603,7 +605,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
         <Lightbox images={card.images} start={lightboxIdx} onClose={()=>setLightboxIdx(null)} />
       )}
       {vlOpen && card && (
-        <ReviewVisualLearningDrawer entryId={card.id} entryTitle={card.title} onClose={closeVl} />
+        <ReviewVisualLearningDrawer entryId={card.id} entryTitle={card.title} entryNotes={card.notes || ''} onClose={closeVl} />
       )}
 
       {/* Floating highlight/bold/underline bar — same selection toolbar

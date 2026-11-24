@@ -31,12 +31,20 @@ export function getSavedKeyPoints(aiSections) {
     generatedAt: saved.generatedAt || null,
     model: saved.model || null,
     sourceNotesLength: typeof saved.sourceNotesLength === 'number' ? saved.sourceNotesLength : null,
+    sourceContentHash: typeof saved.sourceContentHash === 'string' ? saved.sourceContentHash : null,
   };
 }
 
-/** Same approximate staleness signal DetailView uses: notes length changed since generation. */
-export function isKeyPointsStale(saved, notes) {
-  return !!saved && typeof saved.sourceNotesLength === 'number' && saved.sourceNotesLength !== (notes || '').length;
+/**
+ * Has the Review changed since these Key Points were generated? Uses the
+ * content hash when both sides have one (catches same-length edits);
+ * falls back to the notes-length signal for Key Points saved before the
+ * hash was stored. `currentHash` is lib/contentHash's hash of the notes.
+ */
+export function isKeyPointsStale(saved, notes, currentHash) {
+  if (!saved) return false;
+  if (saved.sourceContentHash && currentHash) return saved.sourceContentHash !== currentHash;
+  return typeof saved.sourceNotesLength === 'number' && saved.sourceNotesLength !== (notes || '').length;
 }
 
 /**

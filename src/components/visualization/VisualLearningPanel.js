@@ -23,6 +23,7 @@ import { IconSparkle, IconNetwork } from '../../lib/icons';
 import VisualizationService, { VisualizationServiceError } from '../../services/visualization';
 import { cloneDiagram } from './graphDiagramEdits';
 import useSavedVisualizationTypes from './useSavedVisualizationTypes';
+import { contentHashHex } from '../../lib/contentHash';
 
 // One metadata entry per supported type — the selector, the idle-state
 // description, and the Generate button's label all read from this instead
@@ -126,7 +127,7 @@ function typeChipStyle(t, isSelected) {
  *   (DetailView's own runAnalyze) owns the AI Analysis request instead of
  *   AISections.js making it.
  */
-function VisualLearningPanelContent({ entryId, mode = 'full' }) {
+function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
   const { t } = useTheme();
   // mode="saved" (review screens): read-only view of already-saved diagrams.
   // Loads them once via VisualizationService.listSaved (a plain RLS-scoped
@@ -299,12 +300,35 @@ function VisualLearningPanelContent({ entryId, mode = 'full' }) {
 
   const cancelConfirm = useCallback((key) => updateTypeState(key, { confirmAction: null }), [updateTypeState]);
 
+  // Regenerating replaces the saved diagram — confirm first if the user edited it.
+  const requestRegenerate = useCallback((key) => {
+    if (getTypeState(key).result?.visualization?.isEdited) updateTypeState(key, { confirmAction: 'regenerate' });
+    else run(key, true);
+  }, [getTypeState, updateTypeState, run]);
+
+  // Saved mode: compare each saved diagram's source hash with the current
+  // Review (client-side sha256, no request) to flag possibly outdated ones.
+  const [staleByType, setStaleByType] = useState({});
+  useEffect(() => {
+    if (!savedOnly || notes == null || savedStatus !== 'loaded') return undefined;
+    let cancelled = false;
+    const loaded = Object.entries(stateByType).filter(([, st]) => st.result?.visualization?.sourceContentHash);
+    Promise.all(loaded.map(async ([key, st]) => {
+      const v = st.result.visualization;
+      const hash = await contentHashHex(notes, v.extraContext);
+      return [key, !!hash && hash !== v.sourceContentHash];
+    })).then(pairs => { if (!cancelled) setStaleByType(Object.fromEntries(pairs)); }, () => {});
+    return () => { cancelled = true; };
+    // stateByType is only populated once, when the saved rows load.
+  }, [savedOnly, notes, savedStatus]);
+
   const current = getTypeState(selectedType);
   const currentMeta = TYPE_BY_KEY[selectedType];
   const Renderer = RENDERER_BY_TYPE[selectedType];
   const Editor = EDITOR_BY_TYPE[selectedType];
   const elapsedSec = current.status === 'loading' ? Math.max(0, Math.floor((Date.now() - current.startedAt) / 1000)) : 0;
   const isBusy = current.saveStatus === 'saving';
+  const isStale = savedOnly ? !!staleByType[selectedType] : !!current.result?.stale;
   const visibleTypes = savedOnly ? VISUALIZATION_TYPES.filter(({ key }) => stateByType[key]?.status === 'loaded') : VISUALIZATION_TYPES;
 
   if (savedOnly && (savedStatus !== 'loaded' || visibleTypes.length === 0)) {
@@ -416,7 +440,7 @@ function VisualLearningPanelContent({ entryId, mode = 'full' }) {
               ) : (
                 <>
                   <button onClick={() => startEdit(selectedType)} style={regenerateButtonStyle(t)}>✎ Edit</button>
-                  <button onClick={() => run(selectedType, true)} disabled={current.status === 'loading'} style={regenerateButtonStyle(t)}>↻ Regenerate</button>
+                  <button onClick={() => requestRegenerate(selectedType)} disabled={current.status === 'loading'} style={regenerateButtonStyle(t)}>↻ Regenerate</button>
                 </>
               )}
               {current.result.visualization?.isEdited && (
@@ -424,6 +448,15 @@ function VisualLearningPanelContent({ entryId, mode = 'full' }) {
               )}
             </div>}
           </div>
+
+          {isStale && !current.editMode && (
+            <div role="status" style={{ background: t.warnBg, border: `1px solid ${t.warnBorder}`, borderRadius: RADIUS.md,
+              padding: '8px 12px', marginBottom: SPACE.sm, fontSize: FONT.size.xs, color: t.text2, lineHeight: 1.5 }}>
+              <strong style={{ color: t.warn }}>May be out of date.</strong> Your Review changed after this diagram was made.
+              {savedOnly ? ' Regenerate it from the entry page to update it.' : ' Use ↻ Regenerate to rebuild it from the current Review.'}
+              {current.result.visualization?.isEdited ? ' Your edits are kept until you do.' : ''}
+            </div>
+          )}
 
           {/* Inline confirmation — shown instead of acting immediately
               whenever discarding/restoring would lose something real. */}
@@ -433,12 +466,16 @@ function VisualLearningPanelContent({ entryId, mode = 'full' }) {
               <span style={{ fontSize: FONT.size.xs, color: t.danger, flex: 1 }}>
                 {current.confirmAction === 'discard'
                   ? 'Discard your unsaved changes? This can\'t be undone.'
-                  : 'Restore the original AI version? Your saved edits will be replaced and can\'t be recovered.'}
+                  : current.confirmAction === 'regenerate'
+                    ? 'Regenerate this diagram? Your edited version and the current AI version will be replaced by a new one.'
+                    : 'Restore the original AI version? Your saved edits will be replaced and can\'t be recovered.'}
               </span>
               <button
-                onClick={() => (current.confirmAction === 'discard' ? performDiscard(selectedType) : performRestore(selectedType))}
+                onClick={() => (current.confirmAction === 'discard' ? performDiscard(selectedType)
+                  : current.confirmAction === 'regenerate' ? (cancelConfirm(selectedType), run(selectedType, true))
+                  : performRestore(selectedType))}
                 style={{ ...saveButtonStyle(t, false), background: t.danger, border: `1px solid ${t.danger}`, color: '#fff' }}>
-                Yes, {current.confirmAction === 'discard' ? 'discard' : 'restore'}
+                Yes, {current.confirmAction}
               </button>
               <button onClick={() => cancelConfirm(selectedType)} style={regenerateButtonStyle(t)}>Cancel</button>
             </div>
@@ -626,7 +663,7 @@ function saveButtonStyle(t, busy) {
  * own hooks). Keeps this self-contained — DetailView.js doesn't need to
  * know this check exists at all.
  */
-export default function VisualLearningPanel({ entryId, mode = 'full' }) {
+export default function VisualLearningPanel({ entryId, mode = 'full', notes }) {
   if (!VisualizationService.isConfigured()) return null;
-  return <VisualLearningPanelContent entryId={entryId} mode={mode} />;
+  return <VisualLearningPanelContent entryId={entryId} mode={mode} notes={notes} />;
 }

@@ -14,6 +14,8 @@ import HLToolbar from './HLToolbar';
 import HLPopover from './HLPopover';
 import { FlashcardSection } from './AISections';
 import KeyPointsPanel from './KeyPointsPanel';
+import { useContentHash } from '../lib/contentHash';
+import { isKeyPointsStale } from '../lib/keyPoints';
 import VisualLearningPanel from './visualization/VisualLearningPanel';
 import AIService, { normalizeSections, isAllEmpty } from '../services/ai';
 import { limitsFor } from '../services/ai/PromptBuilder';
@@ -373,7 +375,8 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const [kpBusy, setKpBusy] = useState(false);
   const [kpErr, setKpErr]   = useState('');
   const kpInFlight = useRef(false);
-  const kpIsStale = !!kp && typeof kp.sourceNotesLength === 'number' && kp.sourceNotesLength !== (entry.notes || '').length;
+  const notesHash = useContentHash(entry.notes || '');
+  const kpIsStale = isKeyPointsStale(kp, entry.notes, notesHash);
 
   const runKeyPoints = async () => {
     if (kpInFlight.current) return;
@@ -386,6 +389,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         generatedAt: result.generatedAt,
         model: result.model,
         sourceNotesLength: result.sourceNotesLength,
+        sourceContentHash: result.sourceContentHash || null,
         fidelityWarnings: result.fidelity?.warnings || [],
         fidelityDisclaimer: result.fidelity?.disclaimer || '',
       };

@@ -225,9 +225,15 @@ export default async function handler(req, res) {
   // just ask about the CURRENT diagram, exactly as before Phase 4.
   const existingCurrent = existing ? unwrapGraphData(existing.graph_data).current : null;
 
-  if (existing && vizDef.isRealDiagram(existingCurrent) && existing.source_content_hash === contentHash && !wantsRegenerate) {
+  const existingIsReal = !!existing && vizDef.isRealDiagram(existingCurrent);
+  // A saved diagram is returned as-is unless the user explicitly asked to
+  // regenerate — including when the Review changed since (hash mismatch):
+  // then it's returned flagged `stale`, never silently regenerated, since a
+  // regenerate replaces the saved diagram and any of the user's edits.
+  if (existingIsReal && !wantsRegenerate) {
     return res.status(200).json({
       cached: true,
+      stale: existing.source_content_hash !== contentHash,
       visualization: toVisualizationResponseShape(existing),
       disclaimer: STRUCTURAL_VALIDATION_DISCLAIMER,
       coverage: coverageResponse(notes, existingCurrent, vizDef),
@@ -247,13 +253,19 @@ export default async function handler(req, res) {
   // rather than wedging this slot shut forever. No schema change — see
   // the audit's own "no schema change unless absolutely necessary"
   // guidance; this dedup mechanism works unmodified for all six types. ----
-  if (existing && !vizDef.isRealDiagram(existingCurrent)) {
+  if (existing && !existingIsReal) {
     const claimAgeMs = Date.now() - new Date(existing.updated_at || existing.created_at).getTime();
     if (claimAgeMs < CLAIM_STALE_MS) return inProgressResponse(res);
     // Stale/abandoned claim — re-claim it below rather than leaving it
     // wedged for every future request to also bounce off.
   }
+  // Never claim over a real saved diagram: the claim sentinel ({}) would
+  // wipe it (and the user's edits) before Groq has produced a replacement,
+  // and lose it outright if generation then fails. Regenerating an existing
+  // diagram relies on the client's per-type in-flight guard instead.
+  let claimed = false;
   if (!existing) {
+    claimed = true;
     const { error: claimErr } = await userClient.from('entry_visualizations').insert({
       entry_id: entryId, user_id: user.id, viz_type: vizType,
       source_content_hash: contentHash, extra_context: trimmedExtraContext || null,
@@ -265,17 +277,28 @@ export default async function handler(req, res) {
       if (claimErr.code === '23505') return inProgressResponse(res);
       return res.status(502).json({ error: `Could not start generation: ${claimErr.message}`, kind: 'api' });
     }
-  } else {
+  } else if (!existingIsReal) {
+    claimed = true;
     await userClient.from('entry_visualizations')
       .update({ source_content_hash: contentHash, extra_context: trimmedExtraContext || null, graph_data: {}, updated_at: new Date().toISOString() })
       .eq('entry_id', entryId).eq('viz_type', vizType);
   }
+  // On failure, release a claim this request made (only while it's still
+  // an empty claim) so the next attempt isn't blocked for CLAIM_STALE_MS.
+  const releaseClaim = async () => {
+    if (!claimed) return;
+    try {
+      await userClient.from('entry_visualizations').delete()
+        .eq('entry_id', entryId).eq('viz_type', vizType).eq('graph_data', '{}');
+    } catch { /* best effort — the stale-claim timeout still self-heals */ }
+  };
 
   // ---- Generate. Groq only in this phase — see this file's header
   // comment and the audit: a second provider can be added later by
   // branching here exactly the way api/analyze.mjs branches to Gemini,
   // without touching anything above or below this block. ----
   if (!GroqService.isConfigured()) {
+    await releaseClaim();
     return res.status(500).json({
       error: 'No visualization provider is configured (set GROQ_API_KEY in Vercel).',
       kind: 'config',
@@ -305,6 +328,7 @@ export default async function handler(req, res) {
     });
     model = GroqService.activeModel();
   } catch (e) {
+    await releaseClaim();
     return res.status(statusForKind(e.kind)).json({
       error: userMessageFor(e.kind, e.message), kind: e.kind || 'api', provider: 'groq', model: GroqService.activeModel(),
       timing: { totalMs: Date.now() - generationStartedAt, retries: GroqService.getRequestCount() - requestsBefore - 1 },
@@ -318,6 +342,7 @@ export default async function handler(req, res) {
     diagram = vizDef.validate(rawText, { allowAiContext: !!trimmedExtraContext });
   } catch (e) {
     if (e instanceof VisualizationValidationError) {
+      await releaseClaim();
       return res.status(statusForKind(e.kind)).json({
         error: userMessageFor(e.kind, e.message), kind: e.kind, provider: 'groq', model,
         timing: { totalMs: totalGenerationMs, retries },
@@ -349,6 +374,7 @@ export default async function handler(req, res) {
     .single();
 
   if (saveErr) {
+    await releaseClaim();
     return res.status(502).json({
       error: 'The diagram was generated but could not be saved. Try again.', kind: 'api',
       timing: { totalMs: totalGenerationMs, retries },
