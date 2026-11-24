@@ -2,7 +2,7 @@
 // entry detail view (KeyPointsPanel) and the review screens (ReviewKeyPoints)
 // so the two always present the same content the same way.
 import { useState } from 'react';
-import { useTheme, SPACE, RADIUS, FONT } from '../lib/theme';
+import { useTheme, SPACE, RADIUS, FONT, fs } from '../lib/theme';
 import { splitLeadTerm } from '../lib/keyPoints';
 
 function emphasisStyle(t, emphasis) {
@@ -23,14 +23,14 @@ export default function KeyPointsContent({ sections, fidelityWarnings = [], fide
       {sections.map((s, i) => (
         <div key={i} style={{ marginBottom: i < sections.length - 1 ? sectionGap : 0 }}>
           {s.heading && (
-            <div style={{ fontSize: 13, fontWeight: FONT.weight.bold, color: t.text, marginBottom: 6 }}>{s.heading}</div>
+            <div style={{ fontSize: fs(13), fontWeight: FONT.weight.bold, color: t.text, marginBottom: 6 }}>{s.heading}</div>
           )}
           <ul style={{ margin: 0, paddingLeft: 18 }}>
             {s.bullets.map((b, j) => {
               const style = emphasisStyle(t, b.emphasis);
               const { lead, rest } = splitLeadTerm(b.text);
               return (
-                <li key={j} style={{ fontSize: 12.5, color: style.color, fontWeight: style.fontWeight, lineHeight: 1.65, marginBottom: 4 }}>
+                <li key={j} style={{ fontSize: fs(12.5), color: style.color, fontWeight: style.fontWeight, lineHeight: 1.65, marginBottom: 4 }}>
                   {style.icon && <span style={{ marginRight: 5 }}>{style.icon}</span>}
                   {lead && <strong style={{ fontWeight: FONT.weight.bold, color: b.emphasis === 'red_flag' ? t.danger : t.text }}>{lead}: </strong>}
                   {rest}
@@ -50,7 +50,7 @@ export default function KeyPointsContent({ sections, fidelityWarnings = [], fide
           </button>
           {showWarnings && (
             <div style={{ background: t.warnBg, border: `1px solid ${t.warnBorder}`, borderRadius: RADIUS.md,
-              padding: '10px 12px', marginTop: 6, fontSize: 11.5, color: t.text2 }}>
+              padding: '10px 12px', marginTop: 6, fontSize: fs(11.5), color: t.text2 }}>
               <ul style={{ margin: '0 0 8px', paddingLeft: 16 }}>
                 {fidelityWarnings.map((w, i) => <li key={i} style={{ marginBottom: 4 }}>{w}</li>)}
               </ul>

@@ -171,14 +171,16 @@ async function openDrawerAndCheck(e, onReviewed) {
     expect(drawer().textContent).toContain('mind_map:Edited root');    // saved edit wins
     expect(drawer().textContent).toContain('Edited by you');
     expect(drawer().textContent).not.toContain('Knowledge Network');   // only saved types offered
-    act(() => { findButton(b => b.textContent === 'Comparison Map').click(); });
+    const select = drawer().querySelector('select[aria-label="Diagram format"]');
+    expect(Array.from(select.options).map(o => o.value)).toEqual(['mind_map', 'comparison_map']);
+    act(() => { select.value = 'comparison_map'; select.dispatchEvent(new Event('change', { bubbles: true })); });
     await flush();
     expect(drawer().textContent).toContain('comparison_map:Drug A');
   } else {
     expect(drawer().textContent).toContain('No saved visualizations yet');
   }
   // No generation controls in review.
-  expect(findButton(b => /Generate|Regenerate|Recommend|Edit$/.test(b.textContent))).toBeUndefined();
+  expect(findButton(b => /Generate|Regenerate|Suggest|Edit$|Delete|More actions/.test(b.textContent + (b.getAttribute('aria-label') || '')))).toBeUndefined();
 
   // Review shortcuts must be inert while the drawer is open.
   key('g'); key('Enter'); key('a'); key('ArrowLeft'); key(' ');

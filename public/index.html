@@ -139,33 +139,55 @@
          window isn't just a stretched phone layout. Widths/columns live
          here rather than inline so they can be media-queried at all —
          inline styles can't respond to viewport size on their own. */
+      /* Text scale (read by every inline font size via fs() in
+         src/lib/theme.js). Phones stay at 1; tablets and up grow it. */
+      :root { --mb-fs: 1; }
+      @media (min-width: 768px) { :root { --mb-fs: 1.06; } }
+      @media (min-width: 1024px) { :root { --mb-fs: 1.12; } }
+      @media (min-width: 1440px) { :root { --mb-fs: 1.16; } }
+
       .mb-detail-shell { max-width: 680px; margin: 0 auto; }
       .mb-detail-shell-narrow { max-width: 680px; margin: 0 auto; }
       @media (min-width: 768px) {
         .mb-detail-shell { max-width: 1160px; }
         .mb-detail-shell-narrow { max-width: 760px; }
       }
+      @media (min-width: 1024px) {
+        .mb-detail-shell { max-width: 1440px; }
+      }
 
-      .mb-detail-grid { display: block; }
-      .mb-detail-side { margin-top: 14px; }
+      /* Entry page cards (.mb-entry). One grid item per card so Visual
+         Learning can move between the right column and the full-width top
+         slot with CSS only (no remount). Spacing is margin-based so a card
+         that isn't rendered leaves no gap behind.
+         < 768px (phones): one column, same order as before.
+         >= 768px (tablet and up): notes left; Key Points / Visual Learning /
+         Flashcards / images right; .mb-entry--viztop puts Visual Learning
+         on top, full width. The side column widens on laptops. */
+      .mb-entry { display: flex; flex-direction: column; }
+      .mb-entry > * { margin-bottom: 14px; min-width: 0; }
+      .mb-notes-measure { max-width: 640px; }
       @media (min-width: 768px) {
-        .mb-detail-grid {
-          display: grid;
-          grid-template-columns: minmax(0, 1fr) 300px;
-          gap: 24px;
-          align-items: start;
+        .mb-entry {
+          display: grid; max-width: none; margin: 0;
+          grid-template-columns: minmax(0, 1fr) clamp(280px, 40%, 360px);
+          grid-template-rows: auto auto auto auto auto 1fr;
+          column-gap: 20px; align-items: start;
         }
-        /* No images — one flexible reading column instead of the two-column
-           split, capped and centred rather than stretched to the full
-           1160px shell. The header now lives INSIDE this column (merged
-           into the reading pane), so there's only one thing to width-
-           constrain here, not two that need to be kept in sync. */
-        .mb-detail-grid.mb-detail-grid--single {
-          grid-template-columns: minmax(0, 1fr);
-          max-width: 760px;
-          margin: 0 auto;
+        .mb-entry > .mb-e-notes { grid-column: 1; grid-row: 2 / -1; }
+        .mb-entry > .mb-e-kp  { grid-column: 2; grid-row: 2; }
+        .mb-entry > .mb-e-vl  { grid-column: 2; grid-row: 3; }
+        .mb-entry > .mb-e-fc  { grid-column: 2; grid-row: 4; }
+        .mb-entry > .mb-e-img { grid-column: 2; grid-row: 5; }
+        .mb-entry.mb-entry--viztop > .mb-e-vl { grid-column: 1 / -1; grid-row: 1; margin-bottom: 20px; }
+        .mb-notes-measure { max-width: none; }
+      }
+      @media (min-width: 1024px) {
+        .mb-entry {
+          grid-template-columns: minmax(0, 1fr) clamp(360px, 34%, 480px);
+          column-gap: 24px;
         }
-        .mb-detail-side { margin-top: 0; position: sticky; top: 20px; }
+        .mb-notes-measure { max-width: 860px; }
       }
 
       /* Image gallery inside the detail screen — a horizontal scroll strip
@@ -180,6 +202,8 @@
       @media (min-width: 768px) {
         .mb-detail-images { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; overflow: visible; padding-bottom: 0; }
         .mb-detail-images img { height: auto; width: 100%; max-width: none; aspect-ratio: 4 / 3; }
+        .mb-detail-images > :only-child { grid-column: 1 / -1; }
+        .mb-detail-images > :only-child img, .mb-detail-images img:only-child { aspect-ratio: auto; }
       }
 
       .mb-detail-card { padding: 18px 20px; }

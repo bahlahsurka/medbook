@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useTheme, SPACE, RADIUS, FONT, MOTION } from '../lib/theme';
+import { useTheme, SPACE, RADIUS, FONT, MOTION, fs, FONT_PX } from '../lib/theme';
 import { computeSystemStats } from '../lib/systemStats';
 import { timeAgo } from '../lib/timeAgo';
 import { IconPulse, IconSearch, IconRepeat, IconCards, IconChart, IconTrendUp, IconSun, IconMoon,
@@ -235,7 +235,7 @@ function SystemRow({ sys, t, isActive, onClick, caption, showProgress }) {
         background:isActive?`${c}1f`:'transparent',
         transition:`background ${MOTION.fast} ${MOTION.ease}, border-color ${MOTION.fast} ${MOTION.ease}` }}>
       <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-        <span style={{ fontSize:FONT.size.sm+0.5, flex:1, color:isActive?c:t.text2,
+        <span style={{ fontSize:fs(FONT_PX.sm+0.5), flex:1, color:isActive?c:t.text2,
           fontWeight:isActive?FONT.weight.semibold:FONT.weight.regular,
           overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sys.name}</span>
         {sys.dueCount > 0 && (

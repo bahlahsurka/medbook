@@ -16,7 +16,7 @@
 // in-flight latency.
 import { useEffect, useRef, useState } from 'react';
 import { subscribePendingCount } from '../lib/ratingOutbox';
-import { useTheme, SPACE, Z, elevation } from '../lib/theme';
+import { useTheme, SPACE, Z, elevation, fs } from '../lib/theme';
 
 const SHOW_AFTER_MS = 8000;
 
@@ -51,7 +51,7 @@ export default function PendingSyncIndicator({ userId }) {
       background: status.failing ? t.dangerBg : t.surface2,
       border: `1px solid ${status.failing ? t.dangerBorder : t.border}`,
       color: status.failing ? t.danger : t.text3,
-      borderRadius: 8, padding: '7px 12px', fontSize: 12, fontWeight: 600,
+      borderRadius: 8, padding: '7px 12px', fontSize: fs(12), fontWeight: 600,
       fontFamily: 'Inter,sans-serif', boxShadow: elevation(t, 'lg'),
       pointerEvents: 'none', maxWidth: 240,
     }}>

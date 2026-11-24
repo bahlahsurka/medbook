@@ -7,7 +7,7 @@ import { adjustHighlights, matchHighlightShortcutView, matchRichShortcut, toggle
   isRangeFullyMarked, richMarkersToHtml, markedTextToHtml } from '../lib/highlights';
 import RichRuns from '../lib/RichRuns';
 import { useHighlight, clearRange } from '../lib/useHighlight';
-import { useTheme, SPACE, RADIUS, FONT, Z, MOTION, elevation } from '../lib/theme';
+import { useTheme, SPACE, RADIUS, FONT, Z, MOTION, elevation, fs } from '../lib/theme';
 import { IconChevronLeft, IconChevronRight, IconEdit, IconCheck, IconTrash, IconPin,
   IconImages, IconSparkle, IconX, IconDownload, IconChart, IconListBullet } from '../lib/icons';
 import HLToolbar from './HLToolbar';
@@ -17,6 +17,8 @@ import KeyPointsPanel from './KeyPointsPanel';
 import { useContentHash } from '../lib/contentHash';
 import { isKeyPointsStale } from '../lib/keyPoints';
 import VisualLearningPanel from './visualization/VisualLearningPanel';
+import VisualizationService from '../services/visualization';
+import useMediaQuery from '../lib/useMediaQuery';
 import AIService, { normalizeSections, isAllEmpty } from '../services/ai';
 import { limitsFor } from '../services/ai/PromptBuilder';
 import { handleBulletKeyDown, toggleBulletLines, handleRichPaste, handlePlainPaste,
@@ -187,25 +189,25 @@ function Lightbox({ images, start, onClose }) {
         if(dx<-50)next();else if(dx>50)prev();tx.current=null;
       }}>
       <LbBtn onClick={onClose} title="Close" style={{position:'absolute',top:16,right:20,
-        fontSize:20,width:40,height:40,borderRadius:RADIUS.circle}}>
+        fontSize:fs(20),width:40,height:40,borderRadius:RADIUS.circle}}>
         <IconX size={18} />
       </LbBtn>
       <LbBtn onClick={download} title="Download" style={{position:'absolute',top:16,left:20,
-        fontSize:12,padding:'8px 14px',borderRadius:RADIUS.md,fontWeight:600,
+        fontSize:fs(12),padding:'8px 14px',borderRadius:RADIUS.md,fontWeight:600,
         fontFamily:'Inter,sans-serif',gap:6}}>
         <IconDownload size={13} /> Download
       </LbBtn>
       {images.length>1 && <>
         <div style={{position:'absolute',top:20,left:'50%',transform:'translateX(-50%)',
-          color:'#fff',fontSize:13,background:'rgba(0,0,0,.5)',padding:'4px 14px',borderRadius:RADIUS.pill}}>
+          color:'#fff',fontSize:fs(13),background:'rgba(0,0,0,.5)',padding:'4px 14px',borderRadius:RADIUS.pill}}>
           {idx+1}/{images.length}
         </div>
         <LbBtn onClick={prev} title="Previous image" style={{position:'absolute',left:12,
-          fontSize:28,width:44,height:44,borderRadius:RADIUS.circle}}>
+          fontSize:fs(28),width:44,height:44,borderRadius:RADIUS.circle}}>
           <IconChevronLeft size={22} />
         </LbBtn>
         <LbBtn onClick={next} title="Next image" style={{position:'absolute',right:12,
-          fontSize:28,width:44,height:44,borderRadius:RADIUS.circle}}>
+          fontSize:fs(28),width:44,height:44,borderRadius:RADIUS.circle}}>
           <IconChevronRight size={22} />
         </LbBtn>
       </>}
@@ -824,6 +826,12 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const color = colorProp || SYS_COLOR[entry.system] || '#2563eb';
   const fmt   = iso => new Date(iso).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
   const hasImages = entry.images?.length > 0;
+  // Tablet and up (≥768px): two columns — notes left, Key Points / Visual
+  // Learning / Flashcards right. Once the entry has a saved diagram, Visual
+  // Learning moves to a full-width, collapsible slot above both columns.
+  const isWide = useMediaQuery('(min-width: 768px)');
+  const [vizHasDiagram, setVizHasDiagram] = useState(false);
+  const vizTop = isWide && vizHasDiagram;
 
   const updateDB = async fields => {
     const {data,error} = await supabase.from('entries').update(fields).eq('id',entry.id).select().single();
@@ -1194,7 +1202,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                       style={{width:100,height:76,objectFit:'cover',borderRadius:RADIUS.lg,boxShadow:elevation(t,'sm')}} />
                     <button className="mb-detailbtn" onClick={()=>setEI(p=>p.filter((_,j)=>j!==i))} style={{
                       position:'absolute',top:-7,right:-7,background:t.danger,border:'none',
-                      borderRadius:RADIUS.circle,width:20,height:20,fontSize:10,color:'#fff',
+                      borderRadius:RADIUS.circle,width:20,height:20,fontSize:fs(10),color:'#fff',
                       cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>
                       <IconX size={10} />
                     </button>
@@ -1220,7 +1228,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                       style={{width:100,height:76,objectFit:'cover',borderRadius:RADIUS.lg,boxShadow:elevation(t,'sm')}} />
                     <button className="mb-detailbtn" onClick={()=>setNI(p=>p.filter((_,j)=>j!==i))} style={{
                       position:'absolute',top:-7,right:-7,background:t.danger,border:'none',
-                      borderRadius:RADIUS.circle,width:20,height:20,fontSize:10,color:'#fff',
+                      borderRadius:RADIUS.circle,width:20,height:20,fontSize:fs(10),color:'#fff',
                       cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>
                       <IconX size={10} />
                     </button>
@@ -1254,7 +1262,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   );
 
   // ── VIEW MODE ──────────────────────────────────────────────────────────
-  // Width/columns are driven by the .mb-detail-shell/.mb-detail-grid CSS
+  // Width/columns are driven by the .mb-detail-shell/.mb-entry CSS
   // classes (public/index.html) rather than inline styles, specifically so
   // they can respond to viewport size — mobile stays a single column;
   // tablet/laptop (≥768px) get a wider shell and, once there are images, a
@@ -1319,8 +1327,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         )}
       </div>
 
-      <div className={`mb-detail-grid${hasImages ? '' : ' mb-detail-grid--single'}`}>
-      <div className="mb-detail-main" style={{display:'flex',flexDirection:'column',gap:SPACE.md+2,minWidth:0}}>
+      <div className={`mb-entry${hasImages ? ' mb-entry--img' : ''}${vizTop ? ' mb-entry--viztop' : ''}`}>
 
       {/* ---- Reading pane: System / Title / meta+toolbar / Review Notes ----
           Merged into ONE lightly-contained block (previously two separate
@@ -1330,7 +1337,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
           keep this the visually lightest element on the screen, on
           purpose — the medical content should carry the weight, not the
           container around it. */}
-      <div className="mb-detail-card" style={{background:t.surface,
+      <div className="mb-detail-card mb-e-notes" style={{background:t.surface,
         border:`1px solid ${t.border}`,borderRadius:RADIUS.md}}>
 
         <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6,flexWrap:'wrap'}}>
@@ -1421,10 +1428,10 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
                 highlight mode is on, HLPopover below gives an in-app
                 substitute for the browser menu this suppresses. */}
             <div ref={notesRef}
-              className={STUDY_SCOPE_CLASS}
+              className={`${STUDY_SCOPE_CLASS} mb-notes-measure`}
               data-selectable="true"
               onContextMenu={suppressContextMenu}
-              style={{lineHeight:1.9,fontSize:FONT.size.lg,color:t.text2,maxWidth:640}}>
+              style={{lineHeight:1.9,fontSize:FONT.size.lg,color:t.text2}}>
               <RenderedNotes text={entry.notes} highlights={viewHL} />
             </div>
           </>
@@ -1439,7 +1446,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
           block's own comment on why entries.ai_sections.keyPoints and the
           old six-section fields must each preserve the other on write. */}
       {entry.notes && AIService.isConfigured() && (
-        <KeyPointsPanel
+        <div className="mb-e-kp"><KeyPointsPanel
           keyPoints={kp?.content || null}
           fidelityWarnings={kp?.fidelityWarnings || []}
           fidelityDisclaimer={kp?.fidelityDisclaimer}
@@ -1449,7 +1456,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
           busy={kpBusy}
           error={kpErr}
           onGenerate={runKeyPoints}
-        />
+        /></div>
       )}
 
       {/* ---- Visual Learning --------------------------------------------------
@@ -1461,8 +1468,11 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
           own provider check (VisualizationService.isConfigured(), via the
           same REACT_APP_AI_ENABLED signal) rather than depending on the
           AI Analysis service module at all. */}
-      {entry.notes && (
-        <VisualLearningPanel entryId={entry.id} notes={entry.notes || ''} />
+      {entry.notes && VisualizationService.isConfigured() && (
+        <div className="mb-e-vl">
+          <VisualLearningPanel entryId={entry.id} notes={entry.notes || ''}
+            collapsible={vizTop} onHasDiagramChange={setVizHasDiagram} />
+        </div>
       )}
 
       {/* ---- Flashcards (suggestions) ------------------------------------------
@@ -1477,7 +1487,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
           (this card's own header/labels, and no longer showing the other
           five now-removed sections) changed. */}
       {entry.notes && AIService.isConfigured() && (
-        <div className="mb-detail-card" style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
+        <div className="mb-detail-card mb-e-fc" style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
           boxShadow:elevation(t,'sm')}}>
 
           <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:SPACE.lg,flexWrap:'wrap'}}>
@@ -1488,18 +1498,18 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
             {aiSavedFlash && <SavedChip t={t} />}
             {aiDirty && (
               <button className="mb-detailbtn" onClick={saveAiEdits} disabled={aiBusy} style={{
-                fontSize:FONT.size.xs,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
+                fontSize:FONT.size.base,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
                 background:t.okBg,border:`1px solid ${t.okBorder}`,color:t.ok,
-                borderRadius:RADIUS.sm-1,padding:'5px 12px',cursor:aiBusy?'default':'pointer'}}>
+                borderRadius:RADIUS.md,padding:'0 16px',height:38,boxSizing:'border-box',cursor:aiBusy?'default':'pointer'}}>
                 Save changes
               </button>
             )}
             <button className="mb-detailbtn" onClick={runAnalyze} disabled={aiBusy} style={{
-              fontSize:FONT.size.xs,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
+              fontSize:FONT.size.base,fontWeight:FONT.weight.semibold,fontFamily:'Inter,sans-serif',
               background:aiBusy?t.surface3:t.navActiveBg,
               border:`1px solid ${aiBusy?t.border:t.navActiveBorder}`,
               color:aiBusy?t.text4:t.navActiveText,
-              borderRadius:RADIUS.sm-1,padding:'5px 12px',
+              borderRadius:RADIUS.md,padding:'0 16px',height:38,boxSizing:'border-box',
               cursor:aiBusy?'default':'pointer',
               display:'flex',alignItems:'center',gap:6}}>
               {aiBusy ? <>
@@ -1543,7 +1553,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
 
           {aiErr && (
             <div style={{background:t.dangerBg,border:`1px solid ${t.dangerBorder}`,
-              borderRadius:RADIUS.md,padding:'10px 14px',fontSize:12.5,color:t.danger,marginBottom:SPACE.md}}>
+              borderRadius:RADIUS.md,padding:'10px 14px',fontSize:fs(12.5),color:t.danger,marginBottom:SPACE.md}}>
               {aiErr}
               <div style={{marginTop:6,fontSize:FONT.size.xs}}>
                 Your Review and notes are untouched. You can retry.
@@ -1552,7 +1562,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
           )}
           {aiNote && (
             <div style={{background:t.warnBg,border:`1px solid ${t.warnBorder}`,
-              borderRadius:RADIUS.md,padding:'10px 14px',fontSize:12.5,color:t.warn,marginBottom:SPACE.md}}>
+              borderRadius:RADIUS.md,padding:'10px 14px',fontSize:fs(12.5),color:t.warn,marginBottom:SPACE.md}}>
               {aiNote}
             </div>
           )}
@@ -1567,18 +1577,16 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
               busy={aiBusy}
             />
           ) : !aiBusy && !aiErr && (
-            <div style={{fontSize:12.5,color:t.text4,lineHeight:1.6}}>
+            <div style={{fontSize:fs(12.5),color:t.text4,lineHeight:1.6}}>
               Click <strong>Generate</strong> for a few flashcard suggestions built from this Review, which you can
-              add to your permanent deck. Your Review itself is never changed.
+              add to your permanent deck.
             </div>
           )}
         </div>
       )}
 
-      </div>{/* /.mb-detail-main */}
-
       {hasImages && (
-        <div className="mb-detail-side">
+        <div className="mb-e-img">
           <div className="mb-detail-card" style={{background:t.surface,border:`1px solid ${t.border}`,borderRadius:RADIUS.lg,
             boxShadow:elevation(t,'sm')}}>
             <div style={{display:'flex',alignItems:'center',gap:6,fontSize:FONT.size.micro,color:t.text4,
@@ -1594,7 +1602,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
         </div>
       )}
 
-      </div>{/* /.mb-detail-grid */}
+      </div>{/* /.mb-entry */}
     </div>
   );
 }

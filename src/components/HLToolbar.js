@@ -1,5 +1,5 @@
 import { HL_COLORS } from '../lib/highlights';
-import { useTheme, RADIUS } from '../lib/theme';
+import { useTheme, RADIUS, fs } from '../lib/theme';
 
 /**
  * Highlight toolbar.
@@ -18,7 +18,7 @@ export default function HLToolbar({ onApply, onRemove, onClearAll, hasSelection,
       flexWrap: 'wrap', marginBottom: 8,
       userSelect: 'none', WebkitUserSelect: 'none'
     }}>
-      <span style={{ fontSize: 11, color: t.text4, fontWeight: 600 }}>
+      <span style={{ fontSize: fs(11), color: t.text4, fontWeight: 600 }}>
         {hasSelection ? 'Apply:' : 'Select text:'}
       </span>
 
@@ -92,7 +92,7 @@ export default function HLToolbar({ onApply, onRemove, onClearAll, hasSelection,
         disabled={!hasSelection}
         title={hasSelection ? 'Remove highlight from selected text' : 'Select text first'}
         style={{
-          fontSize: 11, background: t.surface3, border: `1px solid ${t.border}`,
+          fontSize: fs(11), background: t.surface3, border: `1px solid ${t.border}`,
           borderRadius: RADIUS.sm, padding: '7px 12px',
           cursor: hasSelection ? 'pointer' : 'not-allowed',
           color: t.text3, fontWeight: 600, fontFamily: 'Inter,sans-serif',
@@ -108,7 +108,7 @@ export default function HLToolbar({ onApply, onRemove, onClearAll, hasSelection,
           onClick={onClearAll}
           title="Remove every highlight in this entry"
           style={{
-            fontSize: 11, background: t.dangerBg, border: `1px solid ${t.dangerBorder}`,
+            fontSize: fs(11), background: t.dangerBg, border: `1px solid ${t.dangerBorder}`,
             borderRadius: RADIUS.sm, padding: '7px 12px', cursor: 'pointer',
             color: t.danger, fontWeight: 600, fontFamily: 'Inter,sans-serif'
           }}>
@@ -117,7 +117,7 @@ export default function HLToolbar({ onApply, onRemove, onClearAll, hasSelection,
       )}
 
       {!hasSelection && (
-        <span style={{ fontSize: 11, color: t.text4 }}>
+        <span style={{ fontSize: fs(11), color: t.text4 }}>
           then tap a colour
         </span>
       )}

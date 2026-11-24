@@ -469,7 +469,7 @@ export default function Insights({ entries, userSystems, userId, onNavigateSyste
         .mb-insights-week { display:flex; gap:6px; }
         .mb-insights-day {
           flex:1; height:26px; border-radius:${RADIUS.sm}px; display:flex; align-items:center;
-          justify-content:center; font-size:${FONT.size.micro}px; font-weight:${FONT.weight.semibold};
+          justify-content:center; font-size:${FONT.size.micro}; font-weight:${FONT.weight.semibold};
         }
       `}</style>
 

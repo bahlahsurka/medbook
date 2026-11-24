@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useCallback, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR } from '../lib/constants';
-import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, BREAKPOINT } from '../lib/theme';
+import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, BREAKPOINT, fs } from '../lib/theme';
 import { getReviewQueueTheme } from '../lib/reviewQueueTheme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue } from '../lib/reviewQueue';
@@ -76,7 +76,7 @@ const SideColumn = memo(function SideColumn({ rt, images, aiSections, keyPoints,
           <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
             {images.map((url, i) => (
               <img key={i} src={url} alt="" onClick={()=>onImageClick(i)} className="mb-rq-img"
-                style={{ width:'100%', maxHeight:280, objectFit:'contain', borderRadius:RADIUS.xl,
+                style={{ objectFit:'contain', borderRadius:RADIUS.xl,
                   cursor:'zoom-in', background:rt.surfaceSunken, display:'block',
                   border:`1px solid ${rt.border}`, boxShadow:`0 6px 20px -10px ${rt.shadow}` }} />
             ))}
@@ -117,7 +117,7 @@ function Lightbox({ images, start, onClose }) {
         width:40, height:40, borderRadius:RADIUS.circle }}><IconX size={18} /></LbBtn>
       {images.length > 1 && <>
         <div style={{ position:'absolute', top:20, left:'50%', transform:'translateX(-50%)',
-          color:'#fff', fontSize:13, background:'rgba(0,0,0,.5)', padding:'4px 14px', borderRadius:RADIUS.pill }}>
+          color:'#fff', fontSize:fs(13), background:'rgba(0,0,0,.5)', padding:'4px 14px', borderRadius:RADIUS.pill }}>
           {idx + 1}/{images.length}
         </div>
         <LbBtn onClick={prev} title="Previous image" style={{ position:'absolute', left:12,
@@ -1047,6 +1047,15 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     .mb-rq-scroll::-webkit-scrollbar { width:8px; }
     .mb-rq-scroll::-webkit-scrollbar-thumb { background:${rt.borderRich}; border-radius:8px; }
 
+    /* Images: full column width, capped height on phones/tablets. On a
+       tablet or laptop, a revealed card with images goes wide: text left (40%),
+       images right (60%) shown as close to their real size as fits. */
+    .mb-rq-img { width:100%; max-height:280px; }
+    @media (min-width:768px) {
+      .mb-rq-wide { max-width:1680px !important; }
+      .mb-rq-content.has-side.has-images { grid-template-columns:minmax(0,4fr) minmax(0,6fr); gap:${SPACE.xl2+8}px; }
+      .mb-rq-content.has-images .mb-rq-img { width:auto; max-width:100%; height:auto; max-height:80vh; }
+    }
     .mb-rq-img { transition:transform ${MOTION.fast} ${MOTION.ease}, box-shadow ${MOTION.fast} ${MOTION.ease}; }
     .mb-rq-img:hover { transform:translateY(-2px); }
 
@@ -1078,7 +1087,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
               textTransform:'uppercase', marginBottom:8 }}>
               Study Session
             </div>
-            <div style={{ fontFamily:SANS, fontSize:28, fontWeight:FONT.weight.bold,
+            <div style={{ fontFamily:SANS, fontSize:fs(28), fontWeight:FONT.weight.bold,
               color:rt.text, lineHeight:1.15, letterSpacing:-.3 }}>
               Review Queue
             </div>
@@ -1476,7 +1485,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   const showSide = flipped && (cardHasImages || cardHasKeyPoints);
 
   return (
-    <div className="mb-rq-fade" style={{ maxWidth:1040, margin:'0 auto', width:'100%',
+    <div className={`mb-rq-fade${showSide && cardHasImages ? ' mb-rq-wide' : ''}`} style={{ maxWidth:1040, margin:'0 auto', width:'100%',
       fontFamily:SANS, height:'100%', display:'flex', flexDirection:'column' }}>
       <style>{localCss}</style>
 
@@ -1634,7 +1643,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
             points, revealed state only); otherwise the card column alone
             takes a comfortably wide, centred measure instead of stretching
             edge to edge with nothing beside it. */}
-        <div className={`mb-rq-content${showSide ? ' has-side' : ''}`} style={{ paddingTop:SPACE.lg, paddingBottom:SPACE.md }}>
+        <div className={`mb-rq-content${showSide ? ' has-side' : ''}${showSide && cardHasImages ? ' has-images' : ''}`} style={{ paddingTop:SPACE.lg, paddingBottom:SPACE.md }}>
           <div className="mb-rq-card-col" style={showSide ? undefined : { maxWidth:760, margin:'0 auto', width:'100%' }}>
 
             {/* Card — a soft colour-tinted wash fading into the surface plus

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useTheme, MOTION, RADIUS } from '../lib/theme';
+import { useTheme, MOTION, RADIUS, fs } from '../lib/theme';
 import { STUDY_SCOPE_CLASS, suppressContextMenu } from '../lib/studyInteraction';
 
 // Animated collapse/expand (batch 6) — a CSS-grid-rows trick rather than a
@@ -71,18 +71,18 @@ export default function AISections({
             {/* Header */}
             <div style={{ display:'flex', alignItems:'center', gap:8, padding:'11px 14px',
               cursor:'pointer', userSelect:'none' }} onClick={()=>toggle(s.key)}>
-              <span style={{ fontSize:14 }}>{s.icon}</span>
-              <span style={{ fontSize:12.5, fontWeight:700, color:t.text, flex:1 }}>{s.label}</span>
-              <span style={{ fontSize:11, color:t.text4, background:t.surface3,
+              <span style={{ fontSize:fs(14) }}>{s.icon}</span>
+              <span style={{ fontSize:fs(12.5), fontWeight:700, color:t.text, flex:1 }}>{s.label}</span>
+              <span style={{ fontSize:fs(11), color:t.text4, background:t.surface3,
                 borderRadius:10, padding:'1px 7px', fontWeight:600 }}>{list.length}</span>
               <button
                 onClick={e=>{ e.stopPropagation(); toggleEdit(s.key); if(collapsed[s.key]) toggle(s.key); }}
                 style={{ background:'none', border:'none', cursor:'pointer',
-                  fontSize:11, color:isEditing?s.accent:t.text4, fontWeight:600,
+                  fontSize:fs(11), color:isEditing?s.accent:t.text4, fontWeight:600,
                   fontFamily:'Inter,sans-serif', padding:'2px 4px' }}>
                 {isEditing ? 'Done' : 'Edit'}
               </button>
-              <span style={{ fontSize:11, color:t.text4, transform:isOpen?'rotate(90deg)':'none',
+              <span style={{ fontSize:fs(11), color:t.text4, transform:isOpen?'rotate(90deg)':'none',
                 transition:`transform ${MOTION.fast} ${MOTION.ease}` }}>▶</span>
             </div>
 
@@ -102,22 +102,22 @@ export default function AISections({
                       placeholder="One point per line…"
                       style={{ width:'100%', background:t.surface2,
                         border:`1px solid ${t.borderStrong}`, borderRadius:RADIUS.sm,
-                        color:t.text, padding:'8px 10px', fontSize:13, lineHeight:1.6,
+                        color:t.text, padding:'8px 10px', fontSize:fs(13), lineHeight:1.6,
                         outline:'none', boxSizing:'border-box', resize:'vertical',
                         fontFamily:'Inter,sans-serif' }} />
-                    <div style={{ fontSize:10.5, color:t.text4, marginTop:4 }}>
+                    <div style={{ fontSize:fs(10.5), color:t.text4, marginTop:4 }}>
                       One point per line. These are yours to edit; Gemini won't overwrite
                       them unless you Re-analyze.
                     </div>
                   </>
                 ) : list.length === 0 ? (
-                  <div style={{ fontSize:12, color:t.text4, fontStyle:'italic' }}>
+                  <div style={{ fontSize:fs(12), color:t.text4, fontStyle:'italic' }}>
                     Nothing here. Your Review didn't support this section.
                   </div>
                 ) : (
                   <ul data-selectable="true" style={{ margin:0, paddingLeft:18 }}>
                     {list.map((item,i)=>(
-                      <li key={i} style={{ fontSize:13, color:t.text2, lineHeight:1.65,
+                      <li key={i} style={{ fontSize:fs(13), color:t.text2, lineHeight:1.65,
                         marginBottom:4 }}>{item}</li>
                     ))}
                   </ul>
@@ -139,7 +139,7 @@ export default function AISections({
       />
 
       {generatedAt && (
-        <div style={{ fontSize:10.5, color:t.text4, textAlign:'right', marginTop:8 }}>
+        <div style={{ fontSize:fs(10.5), color:t.text4, textAlign:'right', marginTop:8 }}>
           Generated {fmtDate(generatedAt)}{model ? ` · ${model}` : ''}
         </div>
       )}
@@ -185,16 +185,16 @@ export function FlashcardSection({ cards, onChange, onAddToDeck, onAddAllToDeck,
       borderLeft:`3px solid ${accent}`, borderRadius:10, overflow:'hidden' }}>
       <div style={{ display:'flex', alignItems:'center', gap:8, padding:'11px 14px',
         cursor:'pointer', userSelect:'none' }} onClick={()=>setOpen(p=>!p)}>
-        <span style={{ fontSize:14 }}>🃏</span>
-        <span style={{ fontSize:12.5, fontWeight:700, color:t.text, flex:1 }}>Flashcards</span>
-        <span style={{ fontSize:11, color:t.text4, background:t.surface3,
+        <span style={{ fontSize:fs(14) }}>🃏</span>
+        <span style={{ fontSize:fs(12.5), fontWeight:700, color:t.text, flex:1 }}>Flashcards</span>
+        <span style={{ fontSize:fs(11), color:t.text4, background:t.surface3,
           borderRadius:10, padding:'1px 7px', fontWeight:600 }}>{cards.length}</span>
         {onAddAllToDeck && cards.length > 0 && (
           <button
             onClick={handleAddAll}
             disabled={busy || addingAll || pendingCount === 0}
             title={pendingCount===0 ? 'All cards already in your deck' : `Add all ${pendingCount} to your deck`}
-            style={{ fontSize:11, fontWeight:600, fontFamily:'Inter,sans-serif',
+            style={{ fontSize:fs(11), fontWeight:600, fontFamily:'Inter,sans-serif',
               background: pendingCount===0 ? t.surface3 : `${accent}1f`,
               border:`1px solid ${pendingCount===0 ? t.border : accent+'55'}`,
               color: pendingCount===0 ? t.text4 : accent,
@@ -203,14 +203,14 @@ export function FlashcardSection({ cards, onChange, onAddToDeck, onAddAllToDeck,
             {addingAll ? 'Adding…' : pendingCount===0 ? '✓ All in deck' : `+ Add all (${pendingCount})`}
           </button>
         )}
-        <span style={{ fontSize:11, color:t.text4, transform:open?'rotate(90deg)':'none',
+        <span style={{ fontSize:fs(11), color:t.text4, transform:open?'rotate(90deg)':'none',
           transition:`transform ${MOTION.fast} ${MOTION.ease}` }}>▶</span>
       </div>
 
       <Collapse open={open}>
         <div style={{ padding:'0 14px 12px' }}>
           {cards.length === 0 ? (
-            <div style={{ fontSize:12, color:t.text4, fontStyle:'italic' }}>
+            <div style={{ fontSize:fs(12), color:t.text4, fontStyle:'italic' }}>
               No flashcards generated from this Review.
             </div>
           ) : cards.map((c,i)=>{
@@ -221,18 +221,18 @@ export function FlashcardSection({ cards, onChange, onAddToDeck, onAddAllToDeck,
                 <input value={c.front} onChange={e=>update(i,'front',e.target.value)}
                   placeholder="Front"
                   style={{ width:'100%', background:'transparent', border:'none',
-                    color:t.text, fontSize:13, fontWeight:600, outline:'none',
+                    color:t.text, fontSize:fs(13), fontWeight:600, outline:'none',
                     fontFamily:'Inter,sans-serif', marginBottom:4 }} />
                 <input value={c.back} onChange={e=>update(i,'back',e.target.value)}
                   placeholder="Back"
                   style={{ width:'100%', background:'transparent', border:'none',
-                    color:t.text3, fontSize:12.5, outline:'none',
+                    color:t.text3, fontSize:fs(12.5), outline:'none',
                     fontFamily:'Inter,sans-serif' }} />
                 <div style={{ display:'flex', gap:6, marginTop:8 }}>
                   <button
                     onClick={()=>onAddToDeck(c, i)}
                     disabled={busy || added || !c.front.trim() || !c.back.trim()}
-                    style={{ fontSize:11, fontWeight:600, fontFamily:'Inter,sans-serif',
+                    style={{ fontSize:fs(11), fontWeight:600, fontFamily:'Inter,sans-serif',
                       background: added ? t.okBg : `${accent}1f`,
                       border:`1px solid ${added ? t.okBorder : accent+'55'}`,
                       color: added ? t.ok : accent,
@@ -242,7 +242,7 @@ export function FlashcardSection({ cards, onChange, onAddToDeck, onAddAllToDeck,
                     {added ? '✓ In my deck' : '+ Add to my deck'}
                   </button>
                   <button onClick={()=>remove(i)}
-                    style={{ fontSize:11, fontWeight:600, fontFamily:'Inter,sans-serif',
+                    style={{ fontSize:fs(11), fontWeight:600, fontFamily:'Inter,sans-serif',
                       background:t.surface3, border:`1px solid ${t.border}`,
                       color:t.text4, borderRadius:6, padding:'4px 10px', cursor:'pointer' }}>
                     Remove
@@ -252,7 +252,7 @@ export function FlashcardSection({ cards, onChange, onAddToDeck, onAddAllToDeck,
             );
           })}
           {cards.length > 0 && (
-            <div style={{ fontSize:10.5, color:t.text4 }}>
+            <div style={{ fontSize:fs(10.5), color:t.text4 }}>
               "Add to my deck" copies a card into your permanent Flashcards.
               Copies are yours; Re-analyze never touches them.
             </div>

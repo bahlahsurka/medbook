@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { HL_COLORS, resolveHL } from '../lib/highlights';
-import { useTheme } from '../lib/theme';
+import { useTheme, fs } from '../lib/theme';
 
 const GAP = 10;        // px between selection and popover
 const MARGIN = 8;      // min distance from viewport edge
@@ -72,7 +72,7 @@ export default function HLPopover({ rect, onApply, onRemove, onCopy, hasHighligh
   const btn = {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     border: 'none', cursor: 'pointer', fontFamily: 'Inter,sans-serif',
-    background: 'transparent', color: t.text2, fontSize: 11, fontWeight: 600,
+    background: 'transparent', color: t.text2, fontSize: fs(11), fontWeight: 600,
     padding: '0 8px', height: 30, borderRadius: 6, whiteSpace: 'nowrap',
   };
 

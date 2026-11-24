@@ -37,7 +37,7 @@ global.IS_REACT_ACT_ENVIRONMENT = true;
 const SAVED_MIND_MAP = {
   id: 'v1', entryId: 'e1', vizType: 'mind_map',
   graphData: { nodes: [{ id: 'a', label: 'Serotonin syndrome' }], edges: [] },
-  originalGraphData: null, isEdited: false, aiModel: 'm', updatedAt: '2026-11-21T00:00:00Z',
+  originalGraphData: null, isEdited: false, aiModel: 'openai/gpt-oss-20b', updatedAt: '2026-11-21T00:00:00Z',
 };
 
 let container, root;
@@ -61,14 +61,18 @@ async function mount() {
   });
   await flush();
 }
-const button = (text) => [...container.querySelectorAll('button')].find(b => b.textContent.includes(text));
+const button = (text) => [...container.querySelectorAll('button')].find(b => b.textContent.includes(text) || b.getAttribute('aria-label') === text);
+async function openDelete() {
+  await act(async () => { button('More actions').click(); });
+  await act(async () => { button('Delete').click(); });
+}
 
 test('opening the entry shows its saved mind map without generating anything', async () => {
   VisualizationService.listSaved.mockResolvedValue([SAVED_MIND_MAP]);
   await mount();
   expect(VisualizationService.listSaved).toHaveBeenCalledWith('e1');
   expect(container.querySelector('[data-testid="renderer"]').textContent).toBe('mind_map:Serotonin syndrome');
-  expect(container.textContent).toContain('Saved to this entry');
+  expect(container.textContent).toContain('Saved · 21 Nov 2026');
   expect(container.textContent).not.toMatch(/cache/i);
   expect(VisualizationService.generate).not.toHaveBeenCalled();
   expect(global.fetch === undefined || !global.fetch.mock || global.fetch.mock.calls.length === 0).toBe(true);
@@ -85,20 +89,45 @@ test('a failed saved-diagram read in the entry page is silent and leaves Generat
   VisualizationService.listSaved.mockRejectedValue(new Error('offline'));
   await mount();
   expect(container.textContent).not.toContain('offline');
-  expect(container.textContent).toContain('Visual Learning');
+  expect(button('Generate Mind Map')).toBeTruthy();
+});
+
+test('no extra helper text, model name or long disclaimer; format is a dropdown', async () => {
+  VisualizationService.listSaved.mockResolvedValue([SAVED_MIND_MAP]);
+  await mount();
+  const text = container.textContent;
+  expect(text).not.toMatch(/never changed|Preview|structural validation|additional medical context/i);
+  expect(text).not.toContain(SAVED_MIND_MAP.aiModel);
+  expect(container.querySelector('select[aria-label="Diagram format"]').value).toBe('mind_map');
+  expect(button('About this diagram')).toBeTruthy();
+});
+
+test('collapsible top mode starts expanded and can collapse', async () => {
+  VisualizationService.listSaved.mockResolvedValue([SAVED_MIND_MAP]);
+  const onHas = jest.fn();
+  await act(async () => {
+    root.render(<ThemeProvider><VisualLearningPanel entryId="e1" notes="Some notes" collapsible onHasDiagramChange={onHas} /></ThemeProvider>);
+  });
+  await flush();
+  expect(onHas).toHaveBeenLastCalledWith(true);
+  expect(container.querySelector('[data-testid="renderer"]')).not.toBeNull();
+  await act(async () => { button('Collapse').click(); });
+  expect(container.querySelector('[data-testid="renderer"]')).toBeNull();
+  await act(async () => { button('Expand').click(); });
+  expect(container.querySelector('[data-testid="renderer"]')).not.toBeNull();
 });
 
 test('Delete asks for confirmation and only then removes the saved diagram', async () => {
   VisualizationService.listSaved.mockResolvedValue([SAVED_MIND_MAP]);
   await mount();
-  await act(async () => { button('Delete').click(); });
+  await openDelete();
   expect(VisualizationService.deleteSaved).not.toHaveBeenCalled();
   expect(container.textContent).toContain("This can't be undone");
 
   await act(async () => { button('Cancel').click(); });
   expect(container.querySelector('[data-testid="renderer"]')).not.toBeNull();
 
-  await act(async () => { button('Delete').click(); });
+  await openDelete();
   await act(async () => { button('Yes, delete').click(); });
   await flush();
   expect(VisualizationService.deleteSaved).toHaveBeenCalledWith('mind_map', 'e1');
@@ -109,7 +138,7 @@ test('a failed delete keeps the diagram and shows the error', async () => {
   VisualizationService.listSaved.mockResolvedValue([SAVED_MIND_MAP]);
   VisualizationService.deleteSaved.mockRejectedValueOnce(new Error('nope'));
   await mount();
-  await act(async () => { button('Delete').click(); });
+  await openDelete();
   await act(async () => { button('Yes, delete').click(); });
   await flush();
   expect(container.querySelector('[data-testid="renderer"]')).not.toBeNull();

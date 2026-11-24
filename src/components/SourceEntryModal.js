@@ -23,6 +23,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR } from '../lib/constants';
 import DetailView from './DetailView';
+import { fs } from '../lib/theme';
 
 export default function SourceEntryModal({ t, entryId, userId, onClose }) {
   const [entry, setEntry] = useState(undefined); // undefined=loading, null=not found, else the row
@@ -46,22 +47,22 @@ export default function SourceEntryModal({ t, entryId, userId, onClose }) {
         boxShadow:`0 8px 40px ${t.shadowStrong}`, display:'flex', flexDirection:'column', overflow:'hidden' }}>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
           padding:'12px 16px', borderBottom:`1px solid ${t.border}`, flexShrink:0 }}>
-          <span style={{ fontSize:13, fontWeight:700, color:t.text3, fontFamily:'Inter,sans-serif' }}>
+          <span style={{ fontSize:fs(13), fontWeight:700, color:t.text3, fontFamily:'Inter,sans-serif' }}>
             Source entry
           </span>
           <button onClick={onClose} style={{ background:'none', border:'none', color:t.text3,
-            cursor:'pointer', fontSize:20, lineHeight:1, fontFamily:'Inter,sans-serif' }}>×</button>
+            cursor:'pointer', fontSize:fs(20), lineHeight:1, fontFamily:'Inter,sans-serif' }}>×</button>
         </div>
         <div style={{ flex:1, minHeight:0, overflow:'auto', padding:16 }}>
           {entry === undefined && (
-            <div style={{ textAlign:'center', padding:'60px 0', color:t.text4, fontSize:13, fontFamily:'Inter,sans-serif' }}>
+            <div style={{ textAlign:'center', padding:'60px 0', color:t.text4, fontSize:fs(13), fontFamily:'Inter,sans-serif' }}>
               Loading…
             </div>
           )}
           {entry === null && (
             <div style={{ textAlign:'center', padding:'60px 20px', fontFamily:'Inter,sans-serif' }}>
-              <div style={{ fontSize:28, marginBottom:10 }}>🔍</div>
-              <div style={{ fontSize:13.5, color:t.text3 }}>{err || 'This entry is no longer available.'}</div>
+              <div style={{ fontSize:fs(28), marginBottom:10 }}>🔍</div>
+              <div style={{ fontSize:fs(13.5), color:t.text3 }}>{err || 'This entry is no longer available.'}</div>
             </div>
           )}
           {entry && (

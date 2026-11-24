@@ -12,6 +12,7 @@
 import { useEffect, useState } from 'react';
 import * as ownCardsApi from '../lib/ownCards/api';
 import { OWN_CARDS_DEFAULTS, studyMinutesToCardBudget } from '../lib/ownCards/settings';
+import { fs } from '../lib/theme';
 
 export default function StudyByTimePicker({ t, userId, system, scopeLabel, onStart, onClose }) {
   const [counts, setCounts] = useState(null); // { [minutes]: availableCount } | null while loading
@@ -40,11 +41,11 @@ export default function StudyByTimePicker({ t, userId, system, scopeLabel, onSta
       display:'flex', alignItems:'center', justifyContent:'center', padding:16 }}>
       <div onClick={e=>e.stopPropagation()} style={{ background:t.surface, borderRadius:14, padding:20,
         maxWidth:380, width:'100%', boxShadow:`0 8px 32px ${t.shadowStrong}`, fontFamily:'Inter,sans-serif' }}>
-        <div style={{ fontSize:15, fontWeight:700, color:t.text, marginBottom:4 }}>Study by time</div>
-        <div style={{ fontSize:12.5, color:t.text4, marginBottom:16 }}>{scopeLabel}</div>
+        <div style={{ fontSize:fs(15), fontWeight:700, color:t.text, marginBottom:4 }}>Study by time</div>
+        <div style={{ fontSize:fs(12.5), color:t.text4, marginBottom:16 }}>{scopeLabel}</div>
 
         {counts === null ? (
-          <div style={{ textAlign:'center', padding:'20px 0', color:t.text4, fontSize:13 }}>Checking how many cards are ready…</div>
+          <div style={{ textAlign:'center', padding:'20px 0', color:t.text4, fontSize:fs(13) }}>Checking how many cards are ready…</div>
         ) : (
           <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
             {OWN_CARDS_DEFAULTS.studyTimeChoicesMinutes.map(m => {
@@ -58,8 +59,8 @@ export default function StudyByTimePicker({ t, userId, system, scopeLabel, onSta
                   border:`1px solid ${isDefault ? t.navActiveBorder : t.border}`,
                   borderRadius:10, padding:'12px 14px', cursor: n===0 ? 'default' : 'pointer', opacity: n===0 ? .5 : 1,
                   fontFamily:'Inter,sans-serif', textAlign:'left', width:'100%' }}>
-                  <span style={{ fontSize:14, fontWeight:700, color:t.text }}>{m} min</span>
-                  <span style={{ fontSize:12.5, color:t.text3, textAlign:'right' }}>
+                  <span style={{ fontSize:fs(14), fontWeight:700, color:t.text }}>{m} min</span>
+                  <span style={{ fontSize:fs(12.5), color:t.text3, textAlign:'right' }}>
                     {n === 0 ? 'No cards ready' : n < budget ? `Only ${n} card${n!==1?'s':''} available` : `≈ ${n} cards · ${m} min`}
                   </span>
                 </button>
@@ -68,7 +69,7 @@ export default function StudyByTimePicker({ t, userId, system, scopeLabel, onSta
           </div>
         )}
         <button onClick={onClose} style={{ marginTop:16, width:'100%', background:'none', border:'none',
-          color:t.text3, fontSize:13, cursor:'pointer', fontFamily:'Inter,sans-serif' }}>Cancel</button>
+          color:t.text3, fontSize:fs(13), cursor:'pointer', fontFamily:'Inter,sans-serif' }}>Cancel</button>
       </div>
     </div>
   );

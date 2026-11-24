@@ -10,6 +10,7 @@
 // which screen it's rendered from.
 
 import { useState, useRef } from 'react';
+import { fs } from '../lib/theme';
 
 /** Consecutive days with >=1 review, walking back from today. Today not
  *  having a review yet doesn't zero an in-progress streak (the day isn't
@@ -89,7 +90,7 @@ export function TrendChart({ t, values, dayLabels, width = 100, height = 56 }) {
           left: `clamp(4px, ${(points[hoverIdx].x / width) * 100}%, calc(100% - 4px))`,
           transform: hoverIdx === 0 ? 'translate(0,-100%)'
             : hoverIdx === values.length - 1 ? 'translate(-100%,-100%)' : 'translate(-50%,-100%)',
-          background: t.text, color: t.appBg, fontSize: 11, fontWeight: 600,
+          background: t.text, color: t.appBg, fontSize: fs(11), fontWeight: 600,
           padding: '4px 8px', borderRadius: 6, whiteSpace: 'nowrap', boxShadow: `0 4px 16px ${t.shadowStrong}` }}>
           {dayLabels[hoverIdx]} · {values[hoverIdx]} review{values[hoverIdx] === 1 ? '' : 's'}
         </div>
@@ -111,7 +112,7 @@ export function RetentionRing({ t, pct, size = 84, stroke = 7 }) {
           transform={`rotate(-90 ${size / 2} ${size / 2})`} style={{ transition: 'stroke-dashoffset .4s ease' }} />
       </svg>
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 20, fontWeight: 700, color: t.text }}>
+        fontSize: fs(20), fontWeight: 700, color: t.text }}>
         {pct}%
       </div>
     </div>
@@ -133,7 +134,7 @@ export function DueForecastBars({ t, values, dayLabels, height = 56 }) {
             height: `${Math.max(v > 0 ? 6 : 1, (v / max) * (height - 18))}px`,
             background: v > 0 ? t.accent : t.surface3, borderRadius: 3,
           }} />
-          <div style={{ fontSize: 9.5, color: t.text4, fontWeight: 600 }}>{v}</div>
+          <div style={{ fontSize: fs(9.5), color: t.text4, fontWeight: 600 }}>{v}</div>
         </div>
       ))}
     </div>
