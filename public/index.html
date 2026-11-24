@@ -139,12 +139,14 @@
          window isn't just a stretched phone layout. Widths/columns live
          here rather than inline so they can be media-queried at all —
          inline styles can't respond to viewport size on their own. */
-      /* Text scale (read by every inline font size via fs() in
-         src/lib/theme.js). Phones stay at 1; tablets and up grow it. */
-      :root { --mb-fs: 1; }
-      @media (min-width: 768px) { :root { --mb-fs: 1.06; } }
-      @media (min-width: 1024px) { :root { --mb-fs: 1.12; } }
-      @media (min-width: 1440px) { :root { --mb-fs: 1.16; } }
+      /* Text scale, read by every inline font size via fs() in
+         src/lib/theme.js: --mb-fs = per-screen default × the user's zoom
+         (--mb-zoom, set on <html> by src/lib/uiZoom.js from the top-bar
+         magnifier). Defaults: phones and tablets 1, laptops 1.06, large
+         screens 1.08. */
+      :root { --mb-fs-base: 1; --mb-zoom: 1; --mb-fs: calc(var(--mb-fs-base) * var(--mb-zoom)); }
+      @media (min-width: 1024px) { :root { --mb-fs-base: 1.06; } }
+      @media (min-width: 1440px) { :root { --mb-fs-base: 1.08; } }
 
       .mb-detail-shell { max-width: 680px; margin: 0 auto; }
       .mb-detail-shell-narrow { max-width: 680px; margin: 0 auto; }

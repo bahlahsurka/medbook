@@ -588,12 +588,12 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
     .mb-sr-scroll { scrollbar-width:thin; scrollbar-color:${t.borderStrong} transparent; }
     .mb-sr-scroll::-webkit-scrollbar { width:8px; }
     .mb-sr-scroll::-webkit-scrollbar-thumb { background:${t.borderStrong}; border-radius:8px; }
-    /* Tablet/laptop + revealed card with images: wider modal, text left (40%),
-       images right (60%) shown as close to their real size as fits. */
+    /* Tablet/laptop + revealed card with images: wider modal, text left (45%),
+       images right (55%) shown as close to their real size as fits. */
     .mb-sr-img { width:100%; max-height:240px; }
     @media (min-width:768px) {
       .mb-sr-wide { max-width:min(1680px, 96vw) !important; }
-      .mb-sr-content.has-side.has-images { grid-template-columns:minmax(0,4fr) minmax(0,6fr); gap:${SPACE.xl2+8}px; }
+      .mb-sr-content.has-side.has-images { grid-template-columns:minmax(0,45fr) minmax(0,55fr); gap:${SPACE.xl2+8}px; }
       .mb-sr-content.has-images .mb-sr-img { width:auto; max-width:100%; height:auto; max-height:75vh; }
     }
     .mb-sr-img { transition:transform ${MOTION.fast} ${MOTION.ease}; }
