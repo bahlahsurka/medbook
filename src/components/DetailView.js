@@ -1462,7 +1462,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
           same REACT_APP_AI_ENABLED signal) rather than depending on the
           AI Analysis service module at all. */}
       {entry.notes && (
-        <VisualLearningPanel entryId={entry.id} />
+        <VisualLearningPanel entryId={entry.id} notes={entry.notes || ''} />
       )}
 
       {/* ---- Flashcards (suggestions) ------------------------------------------

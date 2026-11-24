@@ -246,6 +246,22 @@ const VisualizationService = {
    *   draft was loaded from, for the server's optimistic-concurrency check.
    * @returns {Promise<{action:'save', visualization:object}>}
    */
+  /**
+   * Permanently delete one saved diagram (both its AI original and any edit)
+   * from an entry. Only ever called after the user confirms Delete. RLS
+   * limits the delete to the signed-in user's own rows; no AI call.
+   */
+  async deleteSaved(vizType, entryId) {
+    if (!entryId || !vizType) throw new VisualizationServiceError('Missing entry or visualization type.', 'validation');
+    try {
+      const { error } = await supabase.from('entry_visualizations').delete()
+        .eq('entry_id', entryId).eq('viz_type', vizType);
+      if (error) throw new VisualizationServiceError(`Could not delete this diagram: ${error.message}`, 'api');
+    } finally {
+      invalidateSaved(entryId);
+    }
+  },
+
   async saveEdit(vizType, entryId, editedGraphData, { baseUpdatedAt } = {}) {
     if (!entryId) throw new VisualizationServiceError('Missing entry id.', 'validation');
     if (!vizType) throw new VisualizationServiceError('Missing visualization type.', 'validation');
