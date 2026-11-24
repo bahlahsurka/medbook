@@ -105,8 +105,8 @@ export const RADIUS = { sm:6, md:8, lg:10, xl:14, xl2:20, pill:999, circle:'50%'
 // Type scale + weight/line-height ramp. Replaces one-off sizes like 10.5,
 // 12.5, 13.5 that crept in from ad hoc tweaks.
 // Desktop text scale: every inline font size is emitted as
-// calc(Npx * var(--mb-fs, 1)). --mb-fs is 1 on phones/tablets and grows
-// moderately on laptop/desktop widths (public/index.html), so the whole app
+// calc(Npx * var(--mb-fs, 1)). --mb-fs is 1 on phones and grows
+// moderately on tablet, laptop and desktop widths (public/index.html), so the whole app
 // reads comfortably on a big screen without a separate desktop stylesheet.
 // FONT_PX keeps the raw numbers for the rare place that needs arithmetic.
 export const fs = (px) => `calc(${px}px * var(--mb-fs, 1))`;

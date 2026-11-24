@@ -826,10 +826,10 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const color = colorProp || SYS_COLOR[entry.system] || '#2563eb';
   const fmt   = iso => new Date(iso).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
   const hasImages = entry.images?.length > 0;
-  // Laptop/desktop (≥1024px): two columns — notes left, Key Points / Visual
+  // Tablet and up (≥768px): two columns — notes left, Key Points / Visual
   // Learning / Flashcards right. Once the entry has a saved diagram, Visual
   // Learning moves to a full-width, collapsible slot above both columns.
-  const isWide = useMediaQuery('(min-width: 1024px)');
+  const isWide = useMediaQuery('(min-width: 768px)');
   const [vizHasDiagram, setVizHasDiagram] = useState(false);
   const vizTop = isWide && vizHasDiagram;
 

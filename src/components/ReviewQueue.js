@@ -1048,10 +1048,10 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     .mb-rq-scroll::-webkit-scrollbar-thumb { background:${rt.borderRich}; border-radius:8px; }
 
     /* Images: full column width, capped height on phones/tablets. On a
-       laptop, a revealed card with images goes wide: text left (40%),
+       tablet or laptop, a revealed card with images goes wide: text left (40%),
        images right (60%) shown as close to their real size as fits. */
     .mb-rq-img { width:100%; max-height:280px; }
-    @media (min-width:1024px) {
+    @media (min-width:768px) {
       .mb-rq-wide { max-width:1680px !important; }
       .mb-rq-content.has-side.has-images { grid-template-columns:minmax(0,4fr) minmax(0,6fr); gap:${SPACE.xl2+8}px; }
       .mb-rq-content.has-images .mb-rq-img { width:auto; max-width:100%; height:auto; max-height:80vh; }
