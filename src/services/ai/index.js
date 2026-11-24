@@ -142,6 +142,51 @@ const AIService = {
   //   generateClinicalCase(reviewText)
   //   generateMnemonics(reviewText)
   //   generateDifferential(reviewText)
+
+  /**
+   * Phase 5: generates the new Key Points summary for one entry — a
+   * completely separate Groq task from analyzeReview()/the six-section
+   * analysis above (see KeyPointsPromptBuilder.js's own header on why
+   * that pipeline stays untouched). Unlike analyzeReview (which sends the
+   * review text directly), this sends only entryId — /api/key-points.mjs
+   * fetches entry.notes itself server-side, the same stricter pattern
+   * every Phase 1-4 Visual Learning endpoint already uses.
+   *
+   * @param {string} entryId
+   * @returns {Promise<{keyPoints:object, sourceContentHash:string, provider:string, model:string, generatedAt:string, fidelity:{warnings:string[],disclaimer:string}, timing:object, usage:object}>}
+   */
+  async generateKeyPoints(entryId) {
+    if (!entryId) throw new AIServiceError('Missing entry id.', 'validation');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new AIServiceError('You need to be signed in to use Key Points.', 'auth');
+
+    let res;
+    try {
+      res = await fetch('/api/key-points', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ entryId }),
+      });
+    } catch {
+      throw new AIServiceError('Network error reaching MedBook\'s Key Points endpoint. Check your connection.', 'network');
+    }
+
+    let body = null;
+    try { body = await res.json(); } catch { /* non-JSON error body */ }
+
+    if (!res.ok) {
+      const message = body?.error || `Key Points generation failed (HTTP ${res.status}).`;
+      if (body?.model) { lastProvider = body.provider || lastProvider; lastModel = body.model; }
+      throw new AIServiceError(message, body?.kind || 'api');
+    }
+
+    lastProvider = body.provider;
+    lastModel = body.model;
+    lastFallback = false; // Key Points has no Gemini fallback (Groq-only, same precedent as Visual Learning)
+    if (typeof body.requestCountToday === 'number') lastRequestCount = body.requestCountToday;
+
+    return body;
+  },
 };
 
 export default AIService;

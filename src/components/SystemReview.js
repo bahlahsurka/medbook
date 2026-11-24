@@ -8,6 +8,10 @@ import { normalizeSections } from '../services/ai';
 import { loadSession, saveSession, clearSession, newSessionId } from '../lib/reviewSessionStore';
 import { enqueueRating, newRatingId, flushNow } from '../lib/ratingOutbox';
 import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
+import { ReviewVisualLearningButton, ReviewVisualLearningDrawer } from './ReviewVisualLearning';
+import VisualizationService from '../services/visualization';
+import { getSavedKeyPoints, isKeyPointsStale } from '../lib/keyPoints';
+import { useContentHash } from '../lib/contentHash';
 import { IconX } from '../lib/icons';
 import RichRuns from '../lib/RichRuns';
 import { rawOffsetAt } from './DetailView';
@@ -250,11 +254,27 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
   // here, only read back (same normalizeSections ReviewQueue.js/DetailView.js
   // use), so an old/partial row can't crash this.
   const cardAiSections = useMemo(() => normalizeSections(card?.ai_sections), [card]);
-  const cardHasKeyPoints = hasKeyPoints(cardAiSections);
+  const cardKeyPoints = useMemo(() => getSavedKeyPoints(card?.ai_sections), [card]);
+  const cardNotesHash = useContentHash(card?.notes || '');
+  const cardKeyPointsStale = isKeyPointsStale(cardKeyPoints, card?.notes, cardNotesHash);
+  const cardHasKeyPoints = hasKeyPoints(cardAiSections, cardKeyPoints);
+
+  // Visual Learning drawer — overlays this still-mounted session; closed
+  // automatically whenever the card changes.
+  const [vlOpen, setVlOpen] = useState(false);
+  const openVl = useCallback(() => setVlOpen(true), []);
+  const closeVl = useCallback(() => setVlOpen(false), []);
+  useEffect(() => { setVlOpen(false); }, [card?.id]);
+  // Saved-diagram counts for the Visual Learning button, ~100 cards at a
+  // time in one lightweight read (no-op once known).
+  useEffect(() => {
+    if (!queue?.length || !VisualizationService.isConfigured()) return;
+    VisualizationService.prefetchSavedTypes(queue.slice(idx, idx + 100).map(e => e.id));
+  }, [queue, idx]);
   const cardHasImages = card?.images?.length > 0;
 
   // Keyboard: Space=reveal, Enter=Easy, g=Good, h=Hard, a=Again.
-  useReviewKeyboard(!done && !ended && !!card && lightboxIdx===null, {
+  useReviewKeyboard(!done && !ended && !!card && lightboxIdx===null && !vlOpen, {
     flipped, onFlip: () => setFlipped(true),
     onAgain: () => rate('again'), onHard: () => rate('hard'),
     onGood: () => rate('good'),   onEasy: () => rate('easy'),
@@ -584,6 +604,9 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
       {lightboxIdx !== null && card?.images?.length > 0 && (
         <Lightbox images={card.images} start={lightboxIdx} onClose={()=>setLightboxIdx(null)} />
       )}
+      {vlOpen && card && (
+        <ReviewVisualLearningDrawer entryId={card.id} entryTitle={card.title} entryNotes={card.notes || ''} onClose={closeVl} />
+      )}
 
       {/* Floating highlight/bold/underline bar — same selection toolbar
           ReviewQueue.js's review mode uses, appearing once real text is
@@ -690,6 +713,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
                     ) : (
                       <div style={{fontSize:FONT.size.sm,color:t.text4,marginBottom:SPACE.lg}}>No notes.</div>
                     )}
+                    {card.notes && <ReviewVisualLearningButton entryId={card.id} onOpen={openVl} />}
                   </div>
                 )}
               </div>
@@ -715,7 +739,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
                     </div>
                   </div>
                 )}
-                {cardHasKeyPoints && <ReviewKeyPoints sections={cardAiSections} />}
+                {cardHasKeyPoints && <ReviewKeyPoints sections={cardAiSections} keyPoints={cardKeyPoints} isStale={cardKeyPointsStale} />}
               </div>
             )}
           </div>

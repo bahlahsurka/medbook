@@ -311,3 +311,32 @@ export function IconListBullet({ size=14, style, className }) {
     <line x1="9" y1="18" x2="21" y2="18" />
   </Svg>;
 }
+
+// --- Added for Visual Learning Phase 3 (distinct AI Analysis / Visual
+// Learning section-header icons — previously both used the bare IconSparkle,
+// reading as the same feature at a glance) -----------------------------------
+
+// Magnifying glass (same circle+handle as IconSearch) with a small spark
+// inside the lens — "intelligence applied to the Review", distinct from a
+// bare sparkle alone.
+export function IconBrainSpark({ size=14, style, className }) {
+  return <Svg size={size} style={style} className={className}>
+    <circle cx="10" cy="10" r="7" />
+    <line x1="20" y1="20" x2="15.5" y2="15.5" />
+    <path d="M10 7v2.2M10 10.8v2.2M7 10h2.2M10.8 10h2.2" />
+  </Svg>;
+}
+
+// Three nodes fully connected — a minimal "network/graph" glyph for Visual
+// Learning, clearly distinct from IconBrainSpark above at the same small
+// header size.
+export function IconNetwork({ size=14, style, className }) {
+  return <Svg size={size} style={style} className={className}>
+    <circle cx="12" cy="5" r="2.2" />
+    <circle cx="5" cy="17" r="2.2" />
+    <circle cx="19" cy="17" r="2.2" />
+    <line x1="12" y1="7.2" x2="6.3" y2="15.3" />
+    <line x1="12" y1="7.2" x2="17.7" y2="15.3" />
+    <line x1="7.2" y1="17" x2="16.8" y2="17" />
+  </Svg>;
+}

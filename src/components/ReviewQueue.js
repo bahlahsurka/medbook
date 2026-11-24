@@ -14,6 +14,10 @@ import { computeOverallProgress, buildSystemRegister } from '../lib/syllabusProg
 import { OverallSyllabusProgress, SystemProgressRegister } from './SyllabusProgress';
 import { formatDueCount } from '../lib/dueCount';
 import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
+import { ReviewVisualLearningButton, ReviewVisualLearningDrawer } from './ReviewVisualLearning';
+import VisualizationService from '../services/visualization';
+import { getSavedKeyPoints, isKeyPointsStale } from '../lib/keyPoints';
+import { useContentHash } from '../lib/contentHash';
 import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
   IconX, IconEdit } from '../lib/icons';
 import RichRuns from '../lib/RichRuns';
@@ -59,7 +63,7 @@ function RenderedNotes({ text, highlights, isDark }) {
 // a far worse outcome than the re-render cost it would save. `onImageClick`
 // below is a plain useState setter (setLightboxIdx), which React guarantees
 // is always referentially stable — no such risk here.
-const SideColumn = memo(function SideColumn({ rt, images, aiSections, hasKeyPoints, onImageClick }) {
+const SideColumn = memo(function SideColumn({ rt, images, aiSections, keyPoints, keyPointsStale, hasKeyPoints, onImageClick }) {
   const hasImages = images?.length > 0;
   return (
     <div className="mb-rq-side-col mb-rq-fade">
@@ -79,7 +83,7 @@ const SideColumn = memo(function SideColumn({ rt, images, aiSections, hasKeyPoin
           </div>
         </div>
       )}
-      {hasKeyPoints && <ReviewKeyPoints sections={aiSections} />}
+      {hasKeyPoints && <ReviewKeyPoints sections={aiSections} keyPoints={keyPoints} isStale={keyPointsStale} />}
     </div>
   );
 });
@@ -602,8 +606,24 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   // can't be called only on some renders (Rules of Hooks), so this can't
   // live further down past those early returns.
   const cardAiSections = useMemo(() => normalizeSections(card?.ai_sections), [card]);
-  const cardHasKeyPoints = hasKeyPoints(cardAiSections);
+  const cardKeyPoints = useMemo(() => getSavedKeyPoints(card?.ai_sections), [card]);
+  const cardNotesHash = useContentHash(card?.notes || '');
+  const cardKeyPointsStale = isKeyPointsStale(cardKeyPoints, card?.notes, cardNotesHash);
+  const cardHasKeyPoints = hasKeyPoints(cardAiSections, cardKeyPoints);
   const cardHasImages = card?.images?.length > 0;
+
+  // Visual Learning drawer — an overlay on top of this still-mounted
+  // session. Closed automatically whenever the card changes.
+  const [vlOpen, setVlOpen] = useState(false);
+  const openVl = useCallback(() => setVlOpen(true), []);
+  const closeVl = useCallback(() => setVlOpen(false), []);
+  useEffect(() => { setVlOpen(false); }, [card?.id]);
+  // Saved-diagram counts for the Visual Learning button, ~100 cards at a
+  // time in one lightweight read (no-op once known).
+  useEffect(() => {
+    if (!queue.length || !VisualizationService.isConfigured()) return;
+    VisualizationService.prefetchSavedTypes(queue.slice(idx, idx + 100).map(e => e.id));
+  }, [queue, idx]);
 
   // Persists a partial update to the current card to Supabase-synced app
   // state immediately — the same {...card, ...updates} shape rate() below
@@ -812,7 +832,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   // Keyboard: Space=reveal, Enter=Easy, g=Good, h=Hard, a=Again.
   // Disabled on the overview screen, once the session is over, or while the
   // image lightbox is open on top.
-  useReviewKeyboard(sessionStarted && !done && !ended && !!card && lightboxIdx===null && !editingCard, {
+  useReviewKeyboard(sessionStarted && !done && !ended && !!card && lightboxIdx===null && !editingCard && !vlOpen, {
     flipped, onFlip: () => setFlipped(true),
     onAgain: () => rate('again'), onHard: () => rate('hard'),
     onGood: () => rate('good'),   onEasy: () => rate('easy'),
@@ -1463,6 +1483,9 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
       {lightboxIdx !== null && card?.images?.length > 0 && (
         <Lightbox images={card.images} start={lightboxIdx} onClose={()=>setLightboxIdx(null)} />
       )}
+      {vlOpen && card && (
+        <ReviewVisualLearningDrawer entryId={card.id} entryTitle={card.title} entryNotes={card.notes || ''} onClose={closeVl} />
+      )}
 
       {/* Floating highlight bar — appears only once real text is selected
           inside the revealed answer; nothing on-screen hints at this until
@@ -1667,6 +1690,10 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
                   ) : (
                     <div style={{ fontSize:FONT.size.sm, color:rt.text4, marginBottom:SPACE.lg }}>No notes for this entry.</div>
                   )}
+                  {card.notes && (
+                    <ReviewVisualLearningButton entryId={card.id} onOpen={openVl}
+                      colors={{ text: rt.text2, muted: rt.text4, border: rt.border, bg: rt.surfaceSunken }} />
+                  )}
                   {/* Images move to the supporting column once there's room
                       for one (see below); on narrow screens where that
                       column stacks underneath instead, they still end up
@@ -1682,6 +1709,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
               recovered space beside the card rather than leaving it empty. */}
           {showSide && (
             <SideColumn rt={rt} images={card.images} aiSections={cardAiSections}
+              keyPoints={cardKeyPoints} keyPointsStale={cardKeyPointsStale}
               hasKeyPoints={cardHasKeyPoints} onImageClick={setLightboxIdx} />
           )}
         </div>

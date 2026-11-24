@@ -50,13 +50,54 @@ export function resetRequestCount() { requestCount = 0; }
 const OVERLOAD_RETRY_DELAYS_MS = [1000, 2000]; // 503/498: usually clears in seconds
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-/** One attempt. Throws GroqError on any failure. */
-async function attempt(userPrompt, signal) {
+// Timing/usage from the LAST successful attempt — read by a caller right
+// after generate() resolves (same pattern as getRequestCount() below) so
+// api/analyze.mjs and api/visualize.mjs can both surface real numbers
+// (actual latency, actual prompt/completion token counts from Groq's own
+// `usage` field) instead of guessing. Reset per attempt, so a retry's
+// numbers always reflect whichever attempt actually succeeded.
+let lastElapsedMs = 0;
+let lastUsage = null;
+export function getLastElapsedMs() { return lastElapsedMs; }
+export function getLastUsage() { return lastUsage; }
+
+/**
+ * One attempt. Throws GroqError on any failure.
+ *
+ * `task` carries everything that varies by WHAT is being asked of the model
+ * (system instruction, schema, schema name, token budget) — defaulted to
+ * MedBook's existing six-section Review analysis so every pre-existing
+ * caller (api/analyze.mjs, passing none of this) gets byte-identical
+ * behavior. A second task (api/visualize.mjs's Mind Map generation) passes
+ * its own values instead, reusing this same transport/retry/error-mapping
+ * logic rather than duplicating it — see this file's own header comment on
+ * why that retry discipline is worth never re-deriving by hand. Adding a
+ * THIRD task later (another visualization type, or another provider
+ * following this same shape) needs no change here at all.
+ */
+async function attempt(userPrompt, signal, task = {}) {
+  const {
+    systemInstruction = GROQ_SYSTEM_INSTRUCTION,
+    responseSchema = GROQ_RESPONSE_SCHEMA,
+    schemaName = 'medbook_review_analysis',
+    maxCompletionTokens = 32768,
+    // Six-section analysis keeps its own hard-won 'high' default (see the
+    // reasoning_effort comment below) unchanged. A task whose structured
+    // output is itself more complex to get right under strict mode (more
+    // nested required fields, more ways to violate the schema) benefits
+    // from LOWER reasoning effort, not higher — less of the shared
+    // reasoning+output token budget spent "thinking" before the model even
+    // starts committing to JSON means less chance of exhausting that budget
+    // mid-structure (a real contributor to json_validate_failed, not just
+    // slower responses) — see api/visualize.mjs's own task config.
+    reasoningEffort = 'high',
+  } = task;
+
   const n = ++requestCount;
   const startedAt = Date.now();
   if (DEV) {
     // eslint-disable-next-line no-console
-    console.log(`[Groq] request #${n} → ${MODEL} (prompt ${userPrompt.length} chars)`);
+    console.log(`[Groq] request #${n} → ${MODEL} (prompt ${userPrompt.length} chars, schema ${schemaName})`);
   }
 
   let res;
@@ -71,15 +112,15 @@ async function attempt(userPrompt, signal) {
       body: JSON.stringify({
         model: MODEL,
         messages: [
-          { role: 'system', content: GROQ_SYSTEM_INSTRUCTION },
+          { role: 'system', content: systemInstruction },
           { role: 'user', content: userPrompt },
         ],
         response_format: {
           type: 'json_schema',
           json_schema: {
-            name: 'medbook_review_analysis',
+            name: schemaName,
             strict: true,
-            schema: GROQ_RESPONSE_SCHEMA,
+            schema: responseSchema,
           },
         },
         temperature: 0.2,       // low: we're extracting, not brainstorming
@@ -99,7 +140,7 @@ async function attempt(userPrompt, signal) {
         // file now has), not giving up depth entirely. Back to 'high', now
         // paired with a much larger budget and a safety net that was
         // missing the first time this was tried.
-        reasoning_effort: 'high',
+        reasoning_effort: reasoningEffort,
         // Groq counts the model's reasoning tokens against this SAME budget
         // (console.groq.com/docs/reasoning: "the default may be too low for
         // complex reasoning") — unlike Gemini's thinking budget, which is
@@ -112,8 +153,10 @@ async function attempt(userPrompt, signal) {
         // whole budget, that's exactly what the 'invalid_output' handling
         // above (resample once, then fall back to Gemini) exists for —
         // this is no longer an all-or-nothing bet on one request the way
-        // the first attempt at 'high' effectively was.
-        max_completion_tokens: 32768,
+        // the first attempt at 'high' effectively was. (This default is
+        // this specific analysis task's own tuning — see `task` above;
+        // another task can pass its own budget instead.)
+        max_completion_tokens: maxCompletionTokens,
       }),
     });
   } catch (e) {
@@ -121,9 +164,10 @@ async function attempt(userPrompt, signal) {
     throw new GroqError('Network error reaching Groq. Check your connection.', 'network');
   }
 
+  const elapsedMs = Date.now() - startedAt;
   if (DEV) {
     // eslint-disable-next-line no-console
-    console.log(`[Groq] request #${n} ← HTTP ${res.status} from ${MODEL} in ${Date.now() - startedAt}ms`);
+    console.log(`[Groq] request #${n} ← HTTP ${res.status} from ${MODEL} in ${elapsedMs}ms`);
   }
 
   if (!res.ok) {
@@ -136,6 +180,17 @@ async function attempt(userPrompt, signal) {
       type = body?.error?.type || '';
       code = body?.error?.code || '';
     } catch { /* non-JSON error body */ }
+
+    // Always-on (not DEV-gated) — Vercel captures stdout as runtime logs
+    // regardless of NODE_ENV, and the DEV-only logs above never fire in
+    // production, which is exactly why a real production failure couldn't
+    // be diagnosed from logs before this. Deliberately logs ONLY transport
+    // metadata — http status, Groq's own short machine code/type, schema
+    // name, elapsed time — never `message` (can echo back model output
+    // derived from the student's medical notes) and never the request body,
+    // API key, or Groq's `error.failed_generation` field.
+    // eslint-disable-next-line no-console
+    console.error(`[Groq] FAILED schema=${schemaName} model=${MODEL} attempt=#${n} http=${res.status} code=${code || 'none'} type=${type || 'none'} elapsedMs=${elapsedMs}`);
 
     // Groq's strict json_schema mode can fail the MODEL's own output
     // against the schema (HTTP 400, error.code 'json_validate_failed',
@@ -212,6 +267,25 @@ async function attempt(userPrompt, signal) {
 
   const text = (choice.message?.content || '').trim();
   if (!text) throw new GroqError('Groq returned an empty response.', 'empty');
+
+  lastElapsedMs = elapsedMs;
+  lastUsage = data.usage ? {
+    promptTokens: data.usage.prompt_tokens ?? null,
+    completionTokens: data.usage.completion_tokens ?? null,
+    totalTokens: data.usage.total_tokens ?? null,
+    // Groq's reasoning token count, when the API reports it separately —
+    // the actual number this file's whole reasoning_effort history has
+    // been reasoning about from the outside without ever seeing it.
+    reasoningTokens: data.usage.completion_tokens_details?.reasoning_tokens ?? null,
+  } : null;
+  // Always-on success log, same metadata-only discipline as the failure
+  // log above — this is what makes "measure actual latency/token usage"
+  // (rather than guess it) possible from Vercel's runtime logs going
+  // forward, for every attempt, not just failures.
+  // eslint-disable-next-line no-console
+  console.log(`[Groq] OK schema=${schemaName} model=${MODEL} attempt=#${n} elapsedMs=${elapsedMs}` +
+    (lastUsage ? ` promptTokens=${lastUsage.promptTokens} completionTokens=${lastUsage.completionTokens} reasoningTokens=${lastUsage.reasoningTokens}` : ''));
+
   return text;
 }
 
@@ -237,16 +311,24 @@ const INVALID_OUTPUT_MAX_RETRIES = 1; // one immediate resample — see attempt(
  * A 404 here means real misconfiguration (a typo'd GROQ_MODEL), not the
  * kind of upstream deprecation Gemini's alias chases, so it surfaces as a
  * 'config' error instead of silently trying something else.
+ *
+ * `systemInstruction`/`responseSchema`/`schemaName`/`maxCompletionTokens`
+ * are all optional and default to the existing Review-analysis task
+ * unchanged — see attempt()'s own comment. A caller doing something other
+ * than six-section analysis (e.g. api/visualize.mjs's Mind Map generation)
+ * passes its own values; everything else below (retry/backoff/error
+ * mapping) applies identically regardless of which task this is.
  */
-export async function generate(userPrompt, { signal } = {}) {
+export async function generate(userPrompt, { signal, systemInstruction, responseSchema, schemaName, maxCompletionTokens, reasoningEffort } = {}) {
   if (!isConfigured()) {
     throw new GroqError('No Groq API key found. Set GROQ_API_KEY in Vercel (server-side only, no REACT_APP_ prefix).', 'config');
   }
+  const task = { systemInstruction, responseSchema, schemaName, maxCompletionTokens, reasoningEffort };
 
   let invalidOutputRetries = 0;
   for (let i = 0; ; i++) {
     try {
-      return await attempt(userPrompt, signal);
+      return await attempt(userPrompt, signal, task);
     } catch (e) {
       if (e.name === 'AbortError') throw e;
       if (e.kind === 'overloaded' && i < OVERLOAD_RETRY_DELAYS_MS.length) {
