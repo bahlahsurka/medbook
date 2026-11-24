@@ -1597,7 +1597,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
             display:'flex', alignItems:'center', justifyContent:'center' }}>
             <IconChevronLeft size={14} />
           </button>
-          <span style={{ fontSize:FONT.size.sm, color:rt.text3, fontWeight:FONT.weight.medium, padding:'0 2px' }}>{idx + 1} / {total}</span>
+          <span style={{ fontSize:FONT.size.sm, color:rt.text3, fontWeight:FONT.weight.medium, padding:'0 2px', whiteSpace:'nowrap' }}>{idx + 1} / {total}</span>
           {/* Count-up session timer — ticks via timerRunning (see its own
               effect above), so it genuinely freezes while paused instead of
               just visually looking frozen. tabular-nums keeps the digits

@@ -104,10 +104,10 @@ export const RADIUS = { sm:6, md:8, lg:10, xl:14, xl2:20, pill:999, circle:'50%'
 
 // Type scale + weight/line-height ramp. Replaces one-off sizes like 10.5,
 // 12.5, 13.5 that crept in from ad hoc tweaks.
-// Desktop text scale: every inline font size is emitted as
-// calc(Npx * var(--mb-fs, 1)). --mb-fs is 1 on phones and grows
-// moderately on tablet, laptop and desktop widths (public/index.html), so the whole app
-// reads comfortably on a big screen without a separate desktop stylesheet.
+// App-wide text scale: every inline font size is emitted as
+// calc(Npx * var(--mb-fs, 1)). --mb-fs = a per-screen default (slightly
+// larger on laptops, public/index.html) × the user's zoom from the top-bar
+// magnifier (lib/uiZoom.js), so one setting resizes the text of every component.
 // FONT_PX keeps the raw numbers for the rare place that needs arithmetic.
 export const fs = (px) => `calc(${px}px * var(--mb-fs, 1))`;
 export const FONT_PX = { micro:10, xs:11, sm:12, base:13, md:14, lg:16, xl:18, xl2:22, xl3:28, display:40 };

@@ -10,6 +10,8 @@ import { useServiceWorkerUpdate } from './lib/useServiceWorkerUpdate';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation, BREAKPOINT, fs } from './lib/theme';
 import { IconMenu, IconX, IconChevronLeft, IconPlus, IconInbox, IconSearch } from './lib/icons';
 import Auth from './components/Auth';
+import ZoomControl from './components/ZoomControl';
+import { syncZoomFromUser } from './lib/uiZoom';
 import LandingPage from './components/LandingPage';
 import Sidebar from './components/Sidebar';
 import EntryCard from './components/EntryCard';
@@ -207,6 +209,10 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, s) => setSession(s));
     return () => subscription.unsubscribe();
   }, []);
+
+  // Text zoom follows the account: adopt the zoom saved on the user's
+  // profile whenever the signed-in user (or their metadata) changes.
+  useEffect(() => { syncZoomFromUser(session?.user); }, [session]);
 
   // A signed-in visitor should never be sitting on "/" — the render check
   // below already guarantees an active session skips the public landing
@@ -598,7 +604,8 @@ export default function App() {
     // unrelated screens snapping past each other. Reduced-motion visitors
     // skip the delay entirely (see goToApp) and never see this opacity dip.
     if (pathname === '/') return (
-      <div style={{ opacity: leavingLanding ? 0 : 1,
+      // The landing page keeps its own type sizes: the in-app zoom doesn't apply.
+      <div style={{ '--mb-fs': 'var(--mb-fs-base)', opacity: leavingLanding ? 0 : 1,
         transform: leavingLanding ? 'translateY(-10px)' : 'translateY(0)',
         transition: `opacity 220ms ${MOTION.ease}, transform 220ms ${MOTION.ease}` }}>
         <LandingPage onGetStarted={goToApp} />
@@ -701,7 +708,7 @@ export default function App() {
       <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minWidth:0}}>
 
         {/* Header */}
-        <div className="mb-app-header" style={{display:'flex',alignItems:'center',gap:SPACE.sm+2,padding:`${SPACE.md}px ${SPACE.lg}px`,
+        <div className={`mb-app-header${view==='cards' ? ' mb-app-header--cards' : ''}`} style={{display:'flex',alignItems:'center',gap:SPACE.sm+2,padding:`${SPACE.md}px ${SPACE.lg}px`,
           borderBottom:`1px solid ${t.border}`,background:t.surface,flexShrink:0,position:'relative',
           boxShadow:elevation(t,'sm')}}>
           <style>{`
@@ -732,6 +739,10 @@ export default function App() {
                those, unchanged). */
             @media (max-width: 480px) {
               .mb-app-header:has(#mb-study-toolbar-slot > *) .mb-portal-header-label { display: none; }
+              /* The flashcard study toolbar is sized to fill this row exactly
+                 on phones, so the text-size button steps aside while a study
+                 session is running there (it's back on the deck screens). */
+              .mb-app-header--cards:has(#mb-study-toolbar-slot > *) .mb-zoom-wrap { display: none !important; }
             }
           `}</style>
           <button className="mb-headerbtn" onClick={()=>setSB(p=>!p)} title={sidebarOpen?'Close sidebar':'Open sidebar'}
@@ -813,6 +824,9 @@ export default function App() {
               <IconChevronLeft size={14} /> Back
             </button>
           )}
+
+          {/* Universal text size (magnifier) — always the last item. */}
+          <ZoomControl />
         </div>
 
         {/* Content — scrollRef attached here for scroll restoration.

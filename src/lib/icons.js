@@ -40,6 +40,16 @@ export function IconSearch({ size=16, style, className }) {
   </Svg>;
 }
 
+// Magnifier with a plus in the lens — the universal text-size (zoom) control.
+export function IconZoom({ size=16, style, className }) {
+  return <Svg size={size} style={style} className={className}>
+    <circle cx="11" cy="11" r="7" />
+    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    <line x1="11" y1="8" x2="11" y2="14" />
+    <line x1="8" y1="11" x2="14" y2="11" />
+  </Svg>;
+}
+
 export function IconRepeat({ size=16, style, className }) {
   return <Svg size={size} style={style} className={className}>
     <polyline points="17 1 21 5 17 9" />
