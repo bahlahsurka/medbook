@@ -12,6 +12,7 @@ jest.mock('../lib/supabase', () => ({
       mockQueries.push(q);
       const chain = {
         select: (cols) => { q.cols = cols; return chain; },
+        delete: () => { q.op = 'delete'; return chain; },
         eq: (col, val) => { q.filters.push([col, val]); return chain; },
         in: (col, vals) => { q.filters.push(['in', col, vals]); return chain; },
         neq: (col, val) => { q.filters.push(['neq', col, val]); return chain; },
@@ -144,4 +145,20 @@ describe('prefetchSavedTypes (saved counts before the drawer opens)', () => {
     await expect(VisualizationService.prefetchSavedTypes(['e9'])).resolves.toBeUndefined();
     expect(VisualizationService.getSavedTypes('e9')).toBeUndefined();
   });
+});
+
+test('deleteSaved deletes exactly one (entry, type) row, never calls an AI endpoint, and drops the cached list', async () => {
+  mockRows = [row('mind_map', mindMap)];
+  await VisualizationService.listSaved('e1');
+  await VisualizationService.deleteSaved('mind_map', 'e1');
+  const del = mockQueries.find(q => q.op === 'delete');
+  expect(del.table).toBe('entry_visualizations');
+  expect(del.filters).toEqual([['entry_id', 'e1'], ['viz_type', 'mind_map']]);
+  expect(global.fetch).not.toHaveBeenCalled();
+  expect(VisualizationService.peekSaved('e1')).toBeUndefined();
+});
+
+test('deleteSaved surfaces a database error', async () => {
+  mockError = { message: 'denied' };
+  await expect(VisualizationService.deleteSaved('mind_map', 'e1')).rejects.toThrow('denied');
 });

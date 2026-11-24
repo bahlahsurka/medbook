@@ -134,9 +134,13 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
   // table read, never /api/visualize, so never Groq) and hides every
   // generate/regenerate/recommend/edit control.
   const savedOnly = mode === 'saved';
-  const [initialSaved] = useState(() => (savedOnly ? VisualizationService.peekSaved(entryId) : undefined));
-  const [savedStatus, setSavedStatus] = useState(() => (!savedOnly ? 'off' : initialSaved ? 'loaded' : 'loading'));
+  // Both modes show the entry's saved diagrams straight away (a read-only
+  // table read — never Groq): saved diagrams belong to the entry and stay
+  // until the user deletes them.
+  const [initialSaved] = useState(() => VisualizationService.peekSaved(entryId));
+  const [savedStatus, setSavedStatus] = useState(() => (initialSaved ? 'loaded' : 'loading'));
   const [savedError, setSavedError] = useState('');
+  const [staleByType, setStaleByType] = useState({});
   const [selectedType, setSelectedType] = useState(() => (initialSaved ? firstSavedType(initialSaved) : 'mind_map'));
 
   // Independent per-type state — each of the six types has its own
@@ -148,15 +152,24 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
   // behavior per type" — this is the client-side half of that guarantee.
   const [stateByType, setStateByType] = useState(() => (initialSaved ? stateFromSaved(initialSaved) : {}));
   const savedTypes = useSavedVisualizationTypes(entryId);
-  useEffect(() => { if (!savedOnly) VisualizationService.prefetchSavedTypes([entryId]); }, [savedOnly, entryId]);
 
   useEffect(() => {
-    if (!savedOnly || savedStatus !== 'loading') return undefined;
+    if (savedStatus !== 'loading') return undefined;
     let cancelled = false;
     VisualizationService.listSaved(entryId).then(list => {
       if (cancelled) return;
-      setStateByType(stateFromSaved(list));
-      setSelectedType(firstSavedType(list));
+      if (savedOnly) {
+        setStateByType(stateFromSaved(list));
+        setSelectedType(firstSavedType(list));
+      } else {
+        // Never clobber a type the user already started generating/loading.
+        setStateByType(prev => {
+          const next = { ...stateFromSaved(list) };
+          for (const [k, st] of Object.entries(prev)) if (st.status !== 'idle') next[k] = st;
+          return next;
+        });
+        if (list.length) setSelectedType(prev => (list.some(v => v.vizType === prev) ? prev : firstSavedType(list)));
+      }
       setSavedStatus('loaded');
     }, e => {
       if (cancelled) return;
@@ -300,17 +313,37 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
 
   const cancelConfirm = useCallback((key) => updateTypeState(key, { confirmAction: null }), [updateTypeState]);
 
+  // Delete — permanently removes this saved diagram from the entry (the
+  // only way a saved diagram goes away). Always confirmed first.
+  const deleteInFlight = useRef(new Set());
+  const performDelete = useCallback(async (key) => {
+    if (deleteInFlight.current.has(key)) return;
+    deleteInFlight.current.add(key);
+    updateTypeState(key, { saveStatus: 'saving', saveError: '' });
+    try {
+      await VisualizationService.deleteSaved(key, entryId);
+      setStateByType(prev => ({ ...prev, [key]: EMPTY_TYPE_STATE }));
+      setStaleByType(prev => ({ ...prev, [key]: false }));
+    } catch (e) {
+      const message = e instanceof VisualizationServiceError ? e.message : 'Something went wrong deleting this diagram.';
+      updateTypeState(key, { saveStatus: 'error', saveError: message, confirmAction: null });
+    } finally {
+      deleteInFlight.current.delete(key);
+    }
+  }, [entryId, updateTypeState]);
+  const requestDelete = useCallback((key) => updateTypeState(key, { confirmAction: 'delete' }), [updateTypeState]);
+
   // Regenerating replaces the saved diagram — confirm first if the user edited it.
   const requestRegenerate = useCallback((key) => {
     if (getTypeState(key).result?.visualization?.isEdited) updateTypeState(key, { confirmAction: 'regenerate' });
     else run(key, true);
   }, [getTypeState, updateTypeState, run]);
 
-  // Saved mode: compare each saved diagram's source hash with the current
-  // Review (client-side sha256, no request) to flag possibly outdated ones.
-  const [staleByType, setStaleByType] = useState({});
+  // Diagrams read from the table (both modes) carry no server `stale` flag:
+  // compare each one's source hash with the current Review (client-side
+  // sha256, no request) to flag possibly outdated ones.
   useEffect(() => {
-    if (!savedOnly || notes == null || savedStatus !== 'loaded') return undefined;
+    if (notes == null || savedStatus !== 'loaded') return undefined;
     let cancelled = false;
     const loaded = Object.entries(stateByType).filter(([, st]) => st.result?.visualization?.sourceContentHash);
     Promise.all(loaded.map(async ([key, st]) => {
@@ -320,7 +353,7 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
     })).then(pairs => { if (!cancelled) setStaleByType(Object.fromEntries(pairs)); }, () => {});
     return () => { cancelled = true; };
     // stateByType is only populated once, when the saved rows load.
-  }, [savedOnly, notes, savedStatus]);
+  }, [notes, savedStatus]);
 
   const current = getTypeState(selectedType);
   const currentMeta = TYPE_BY_KEY[selectedType];
@@ -328,7 +361,9 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
   const Editor = EDITOR_BY_TYPE[selectedType];
   const elapsedSec = current.status === 'loading' ? Math.max(0, Math.floor((Date.now() - current.startedAt) / 1000)) : 0;
   const isBusy = current.saveStatus === 'saving';
-  const isStale = savedOnly ? !!staleByType[selectedType] : !!current.result?.stale;
+  // A fresh /api/visualize response says itself whether it is stale; a row
+  // read straight from the table falls back to the client-side hash check.
+  const isStale = typeof current.result?.stale === 'boolean' ? current.result.stale : !!staleByType[selectedType];
   const visibleTypes = savedOnly ? VISUALIZATION_TYPES.filter(({ key }) => stateByType[key]?.status === 'loaded') : VISUALIZATION_TYPES;
 
   if (savedOnly && (savedStatus !== 'loaded' || visibleTypes.length === 0)) {
@@ -359,7 +394,7 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
           const typeState = getTypeState(key);
           return (
             <button key={key} onClick={() => setSelectedType(key)} style={typeChipStyle(t, key === selectedType)}
-              title={!savedOnly && typeState.status !== 'loaded' && savedTypes?.includes(key) ? 'Saved earlier — reopens from the cache if your Review hasn\'t changed' : undefined}>
+              title={!savedOnly && typeState.status !== 'loaded' && savedTypes?.includes(key) ? 'Saved to this entry' : undefined}>
               {!savedOnly && typeState.status === 'loaded' && <span style={{ color: t.ok }}>✓</span>}
               {!savedOnly && typeState.status !== 'loaded' && savedTypes?.includes(key) && (
                 <span aria-label="saved" style={{ width: 6, height: 6, borderRadius: 999, background: t.accent, flexShrink: 0 }} />
@@ -412,7 +447,9 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
             <span style={{ fontSize: FONT.size.xs, color: t.text4 }}>
               {savedOnly
                 ? `Saved${fmtSavedDate(current.result.visualization?.updatedAt) ? ` ${fmtSavedDate(current.result.visualization.updatedAt)}` : ''}`
-                : current.result.cached ? '✓ Loaded from cache (instant)' : `✓ Generated${current.result.timing?.totalMs ? ` in ${(current.result.timing.totalMs / 1000).toFixed(1)}s` : ''}`}
+                : current.result.cached
+                  ? `✓ Saved to this entry${fmtSavedDate(current.result.visualization?.updatedAt) ? ` · ${fmtSavedDate(current.result.visualization.updatedAt)}` : ''}`
+                  : `✓ Generated and saved to this entry${current.result.timing?.totalMs ? ` in ${(current.result.timing.totalMs / 1000).toFixed(1)}s` : ''}`}
               {current.result.visualization?.aiModel ? ` · ${current.result.visualization.aiModel}` : ''}
               {current.result.visualization?.isEdited && !current.editMode && (
                 <span style={{ marginLeft: 6, color: t.navActiveText, fontWeight: FONT.weight.semibold }}>· Edited by you</span>
@@ -441,6 +478,7 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
                 <>
                   <button onClick={() => startEdit(selectedType)} style={regenerateButtonStyle(t)}>✎ Edit</button>
                   <button onClick={() => requestRegenerate(selectedType)} disabled={current.status === 'loading'} style={regenerateButtonStyle(t)}>↻ Regenerate</button>
+                  <button onClick={() => requestDelete(selectedType)} disabled={isBusy} style={{ ...regenerateButtonStyle(t), color: t.danger }}>🗑 Delete</button>
                 </>
               )}
               {current.result.visualization?.isEdited && (
@@ -468,11 +506,14 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
                   ? 'Discard your unsaved changes? This can\'t be undone.'
                   : current.confirmAction === 'regenerate'
                     ? 'Regenerate this diagram? Your edited version and the current AI version will be replaced by a new one.'
-                    : 'Restore the original AI version? Your saved edits will be replaced and can\'t be recovered.'}
+                    : current.confirmAction === 'delete'
+                      ? `Delete this ${currentMeta?.label || 'diagram'} from the entry? It will no longer appear here or in review. This can't be undone.`
+                      : 'Restore the original AI version? Your saved edits will be replaced and can\'t be recovered.'}
               </span>
               <button
                 onClick={() => (current.confirmAction === 'discard' ? performDiscard(selectedType)
                   : current.confirmAction === 'regenerate' ? (cancelConfirm(selectedType), run(selectedType, true))
+                  : current.confirmAction === 'delete' ? performDelete(selectedType)
                   : performRestore(selectedType))}
                 style={{ ...saveButtonStyle(t, false), background: t.danger, border: `1px solid ${t.danger}`, color: '#fff' }}>
                 Yes, {current.confirmAction}
@@ -484,7 +525,7 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
           {current.saveStatus === 'error' && (
             <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: RADIUS.md,
               padding: '10px 14px', fontSize: 12.5, color: t.danger, marginBottom: SPACE.sm }}>
-              {current.saveError} Your edits are still here — try saving again.
+              {current.saveError}{current.editMode ? ' Your edits are still here — try saving again.' : ''}
             </div>
           )}
           {current.saveStatus === 'saved' && !current.editMode && (
