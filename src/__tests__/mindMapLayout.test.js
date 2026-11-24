@@ -1,8 +1,13 @@
 // Pure layout math — the one part of the Mind Map renderer most prone to
 // actual bugs (node positions), and fully unit-testable without a DOM or
-// @xyflow/react runtime. See mindMapLayout.js's own header comment for
-// why this is a radial BFS layout rather than ELK.js.
-import { computeMindMapLayout } from '../components/visualization/mindMapLayout';
+// @xyflow/react runtime. See mindMapLayout.js's own header comment for the
+// two-sided tree / outline modes.
+import { computeMindMapLayout, defaultMindMapSize } from '../components/visualization/mindMapLayout';
+import { hasOverlap } from '../components/visualization/overlapRemoval';
+
+function rects(d, pos) {
+  return d.nodes.map(node => { const s = defaultMindMapSize(node); const p = pos.get(node.id); return { x: p.x - s.width / 2, y: p.y - s.height / 2, w: s.width, h: s.height }; });
+}
 
 function diagram(nodes, edges) {
   return { centralTopic: 'x', nodes, edges };
@@ -17,7 +22,7 @@ describe('computeMindMapLayout', () => {
       [{ source: 'central', target: 'a', relationship: 'related_to', label: '' }]
     );
     const pos = computeMindMapLayout(d);
-    expect(pos.get('central')).toEqual({ x: 0, y: 0, depth: 0 });
+    expect(pos.get('central')).toMatchObject({ x: 0, y: 0, depth: 0 });
   });
 
   test('a lone central node (no other nodes) does not throw', () => {
@@ -83,39 +88,58 @@ describe('computeMindMapLayout', () => {
     expect(pos.get('orphan').depth).toBe(1);
   });
 
-  test('a crowded ring (many siblings) gets a wider radius than a sparse one, avoiding crowding', () => {
-    const sparseNodes = [n('central', 'central_topic'), n('only', 'branch')];
-    const sparseEdges = [{ source: 'central', target: 'only', relationship: 'related_to', label: '' }];
-    const sparsePos = computeMindMapLayout(diagram(sparseNodes, sparseEdges));
-
-    const crowdedNodes = [n('central', 'central_topic')];
-    const crowdedEdges = [];
-    for (let i = 0; i < 20; i++) {
-      crowdedNodes.push(n(`s${i}`, 'branch'));
-      crowdedEdges.push({ source: 'central', target: `s${i}`, relationship: 'related_to', label: '' });
+  const wordy = (id, category, words) => ({ ...n(id, category), label: Array.from({ length: words }, (_, i) => `term${i}${id}`).join(' ') });
+  function sized(branches, subsPer, words) {
+    const nodes = [wordy('central', 'central_topic', 6)];
+    const edges = [];
+    for (let b = 0; b < branches; b++) {
+      nodes.push(wordy(`b${b}`, 'branch', 2));
+      edges.push({ source: 'central', target: `b${b}`, relationship: 'r', label: '' });
+      for (let k = 0; k < subsPer; k++) {
+        nodes.push(wordy(`b${b}s${k}`, k === 0 ? 'red_flag' : 'subtopic', words));
+        edges.push({ source: `b${b}`, target: `b${b}s${k}`, relationship: 'r', label: '' });
+      }
     }
-    const crowdedPos = computeMindMapLayout(diagram(crowdedNodes, crowdedEdges));
+    return diagram(nodes, edges);
+  }
 
-    const sparseRadius = Math.hypot(sparsePos.get('only').x, sparsePos.get('only').y);
-    const crowdedRadius = Math.hypot(crowdedPos.get('s0').x, crowdedPos.get('s0').y);
-    expect(crowdedRadius).toBeGreaterThan(sparseRadius);
+  test.each([
+    ['small (3 nodes)', sized(1, 1, 3)],
+    ['medium (~16 nodes)', sized(3, 4, 4)],
+    ['large (36 nodes)', sized(7, 4, 5)],
+    ['long medical labels', sized(4, 3, 14)],
+  ])('no two node boxes overlap — %s, in every mode', (_name, d) => {
+    for (const mode of ['balanced', 'right', 'outline']) {
+      expect(hasOverlap(rects(d, computeMindMapLayout(d, undefined, { mode })), 4)).toBe(false);
+    }
   });
 
-  test('a small diagram (few total nodes) gets a visibly smaller base radius than a large one, at the SAME single-child depth-1 ring (regression: "excessive empty space, widely separated nodes")', () => {
-    const small = diagram(
-      [n('central', 'central_topic'), n('only', 'branch')],
-      [{ source: 'central', target: 'only', relationship: 'related_to', label: '' }]
-    );
-    const large = diagram(
-      [n('central', 'central_topic'), n('only', 'branch'), ...Array.from({ length: 16 }, (_, i) => n(`pad${i}`, 'subtopic'))],
-      [
-        { source: 'central', target: 'only', relationship: 'related_to', label: '' },
-        ...Array.from({ length: 16 }, (_, i) => ({ source: 'only', target: `pad${i}`, relationship: 'related_to', label: '' })),
-      ]
-    );
-    const smallRadius = Math.hypot(...Object.values(computeMindMapLayout(small).get('only')).slice(0, 2));
-    const largeRadius = Math.hypot(...Object.values(computeMindMapLayout(large).get('only')).slice(0, 2));
-    expect(smallRadius).toBeLessThan(largeRadius);
+  test('balanced mode splits branches across both sides; right mode keeps them all on the right', () => {
+    const d = sized(4, 2, 3);
+    const bal = computeMindMapLayout(d, undefined, { mode: 'balanced' });
+    const sides = new Set(['b0', 'b1', 'b2', 'b3'].map(id => Math.sign(bal.get(id).x)));
+    expect(sides).toEqual(new Set([1, -1]));
+    const right = computeMindMapLayout(d, undefined, { mode: 'right' });
+    expect(['b0', 'b1', 'b2', 'b3'].every(id => right.get(id).x > 0)).toBe(true);
+  });
+
+  test('deeper levels sit further from the centre (aligned columns)', () => {
+    const d = sized(2, 2, 3);
+    const pos = computeMindMapLayout(d, undefined, { mode: 'right' });
+    expect(pos.get('b0s0').x).toBeGreaterThan(pos.get('b0').x);
+    expect(pos.get('b0s0').x - defaultMindMapSize(d.nodes.find(x => x.id === 'b0s0')).width / 2)
+      .toBeCloseTo(pos.get('b1s0').x - defaultMindMapSize(d.nodes.find(x => x.id === 'b1s0')).width / 2, 5);
+  });
+
+  test('outline mode lists nodes top to bottom with children indented under their parent', () => {
+    const d = sized(2, 2, 3);
+    const pos = computeMindMapLayout(d, undefined, { mode: 'outline' });
+    const leftOf = (id) => pos.get(id).x - defaultMindMapSize(d.nodes.find(x => x.id === id)).width / 2;
+    expect(pos.get('b0').y).toBeGreaterThan(pos.get('central').y);
+    expect(pos.get('b0s0').y).toBeGreaterThan(pos.get('b0').y);
+    expect(pos.get('b1').y).toBeGreaterThan(pos.get('b0s1').y);
+    expect(leftOf('b0')).toBeGreaterThan(leftOf('central'));
+    expect(leftOf('b0s0')).toBeGreaterThan(leftOf('b0'));
   });
 
   test('an empty node list returns an empty map rather than throwing', () => {

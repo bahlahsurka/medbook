@@ -1,21 +1,18 @@
 // components/visualization/GraphNode.js
 //
-// Generic React Flow node shell shared by the Phase 3 graph-based
-// visualization types (Knowledge Network, Clinical Flowchart, Mechanism
-// Diagram) — NOT used by Mind Map, which keeps its own MindMapNode.js
-// unchanged from Phase 2 (avoiding any regression risk to already-shipped
-// code, per this phase's "avoid unrelated refactoring" brief). The actual
-// per-category colour/shape decisions live in each type's own graph-
-// builder module (knowledgeNetworkGraph.js etc.), which computes a plain,
-// already-resolved `style` object per node using useTheme()'s tokens —
-// this component itself has zero per-type knowledge, just renders
-// whatever style/shape/icon/label it's given.
+// The one React Flow node component for every graph-based visualization
+// (Mind Map, Knowledge Network, Clinical Flowchart, Mechanism Diagram).
+// Graph builders resolve WHAT a node is (variant = prominence, style =
+// tone colours, shape, icon) and its exact layout size; this component only
+// renders it. Width is fixed to the layout width and height never drops
+// below the layout height, so the laid-out diagram and the DOM agree.
 //
-// Same four invisible anchor handles as MindMapNode.js, for the same
-// reason: a non-tree-like diagram (a Knowledge Network, a branching
-// flowchart) has neighbours in every direction, not just below.
+// Four invisible anchor handles (top/right/bottom/left) remain for editing
+// connections; edges themselves attach to node borders via the custom edge
+// components in diagramEdges.js.
 import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
+import { NODE_VARIANTS, SHAPE_INSET } from './nodeTheme';
 
 const HANDLE_POSITIONS = [
   { id: 'top', position: Position.Top },
@@ -23,58 +20,89 @@ const HANDLE_POSITIONS = [
   { id: 'bottom', position: Position.Bottom },
   { id: 'left', position: Position.Left },
 ];
-const handleStyle = { opacity: 0, width: 1, height: 1, pointerEvents: 'none', border: 'none' };
-
-function AnchorHandles() {
+// Invisible in view mode; in edit mode they appear on hover as drag-to-
+// connect dots (styled by the canvas's shared CSS, see diagramStyles.js).
+function AnchorHandles({ connectable }) {
   return HANDLE_POSITIONS.map(h => (
-    <Handle key={h.id} id={h.id} type="source" position={h.position} style={handleStyle} isConnectable={false} />
+    <Handle key={h.id} id={h.id} type="source" position={h.position}
+      className={`mb-viz-handle${connectable ? ' mb-viz-handle--live' : ''}`} isConnectable={!!connectable} />
   ));
 }
 
-// 'hexagon' (chamfered left/right corners) is used for Clinical Flowchart
-// decision nodes — reads as visually distinct from a plain rect/pill
-// without the layout complexity of a true rotated diamond (which needs a
-// counter-rotated inner wrapper to keep text upright). Yes/No branching
-// itself is conveyed by the EDGE labels (see clinicalFlowchartGraph.js),
-// which is the clearer signal anyway — this shape is a secondary cue.
-const SHAPE_CLIP_PATH = {
-  hexagon: 'polygon(12% 0%, 88% 0%, 100% 50%, 88% 100%, 12% 100%, 0% 50%)',
-};
+// Decision nodes: an SVG outline drawn behind the text, so the chamfered
+// ends keep a crisp continuous border (a CSS clip-path cut the border off).
+function HexagonBackdrop({ width, height, fill, stroke, selectedRing }) {
+  const i = SHAPE_INSET.hexagon;
+  const pts = `${i},0.75 ${width - i},0.75 ${width - 0.75},${height / 2} ${width - i},${height - 0.75} ${i},${height - 0.75} 0.75,${height / 2}`;
+  return (
+    <svg width={width} height={height} style={{ position: 'absolute', inset: 0, overflow: 'visible', pointerEvents: 'none' }} aria-hidden>
+      {selectedRing && <polygon points={pts} fill="none" stroke={selectedRing} strokeWidth={6} strokeLinejoin="round" />}
+      <polygon points={pts} fill={fill} stroke={stroke} strokeWidth={1.5} strokeLinejoin="round" />
+    </svg>
+  );
+}
 
-function GraphNode({ data, selected }) {
-  const { label, style = {}, shape = 'rect', icon } = data;
+function provenanceMark(sourceType) {
+  if (sourceType === 'user_added') return { title: 'Added by you', glyph: '✎' };
+  if (sourceType === 'ai_context') return { title: 'From supplementary context, not your review', glyph: '+' };
+  return null;
+}
+
+function GraphNode({ data, selected, isConnectable }) {
+  const { label, style = {}, shape = 'rect', icon, variant = 'standard', width, height } = data;
+  const spec = NODE_VARIANTS[variant] || NODE_VARIANTS.standard;
+  const isRoot = variant === 'root';
+  const isHex = shape === 'hexagon';
   const isPill = shape === 'pill';
-  const clipPath = SHAPE_CLIP_PATH[shape];
+  const mark = provenanceMark(data.sourceType);
+  const dashed = data.sourceType === 'ai_context';
+  // Solid colour for the SVG fill (gradients aren't valid SVG fills).
+  const solidFill = typeof style.background === 'string' && style.background.startsWith('linear-gradient')
+    ? style.background.split('), ').pop() : style.background;
 
   return (
     <div
       role="button"
       aria-pressed={selected}
+      title={mark?.title}
+      className={`mb-viz-node${isHex ? ' mb-viz-node--hex' : ''}${data.dimmed ? ' mb-viz-node--dim' : ''}`}
       style={{
-        ...style,
+        position: 'relative',
         boxSizing: 'border-box',
-        borderRadius: isPill ? 999 : 10,
-        clipPath,
-        // A chamfered shape's clipped corners eat into any content sitting
-        // right at the edge — extra horizontal padding keeps the label
-        // clear of the cut rather than looking clipped itself.
-        padding: clipPath ? `${parseInt(style.padding, 10) || 9}px 22px` : style.padding,
+        width,
+        minHeight: height,
+        display: 'flex', alignItems: 'center',
+        justifyContent: isRoot || isPill || isHex ? 'center' : 'flex-start',
+        textAlign: isRoot || isPill || isHex ? 'center' : 'left',
+        padding: `${spec.padY}px ${spec.padX + (SHAPE_INSET[shape] || 0)}px`,
+        background: isHex ? 'transparent' : style.background,
+        color: style.color,
+        border: isHex ? 'none' : `1px ${dashed ? 'dashed' : 'solid'} ${style.border}`,
+        borderLeft: !isHex && style.rule ? `3px solid ${style.rule}` : undefined,
+        borderRadius: isPill || isRoot ? 999 : 10,
+        boxShadow: isHex ? 'none' : [selected ? `0 0 0 3px ${style.ring}` : null, style.shadow || 'var(--mb-viz-node-shadow)'].filter(Boolean).join(', '),
         fontFamily: 'Inter,sans-serif',
-        lineHeight: 1.35,
-        textAlign: isPill ? 'center' : 'left',
+        fontSize: spec.fontSize,
+        fontWeight: spec.weight,
+        lineHeight: spec.lineHeight,
         cursor: 'pointer',
-        boxShadow: selected
-          ? `0 0 0 3px ${style.selectedRingColor || 'rgba(37,99,235,.35)'}${style.boxShadow ? `, ${style.boxShadow}` : ''}`
-          : style.boxShadow,
-        transition: 'box-shadow 120ms ease',
         userSelect: 'none',
-        wordBreak: 'break-word',
-        maxWidth: 230,
+        overflowWrap: 'anywhere',
       }}
     >
-      <AnchorHandles />
-      {icon && <span style={{ marginRight: 5 }}>{icon}</span>}
-      {label}
+      {isHex && <HexagonBackdrop width={width} height={height} fill={solidFill} stroke={style.border} selectedRing={selected ? style.ring : null} />}
+      <AnchorHandles connectable={isConnectable} />
+      <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'flex-start', gap: 5, maxWidth: '100%' }}>
+        {icon && <span aria-hidden style={{ flexShrink: 0, lineHeight: spec.lineHeight }}>{icon}</span>}
+        <span>{label}</span>
+      </span>
+      {mark && (
+        <span aria-label={mark.title} style={{ position: 'absolute', top: -7, right: -7, width: 16, height: 16, borderRadius: 999,
+          background: 'var(--mb-viz-badge-bg)', color: 'var(--mb-viz-badge-fg)', fontSize: 9.5, fontWeight: 700,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--mb-viz-node-shadow)' }}>
+          {mark.glyph}
+        </span>
+      )}
     </div>
   );
 }

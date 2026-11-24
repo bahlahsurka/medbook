@@ -20,7 +20,8 @@ function Collapse({ open, children }) {
   return (
     <div style={{ display: 'grid', gridTemplateRows: open ? '1fr' : '0fr',
       transition: `grid-template-rows ${MOTION.normal} ${MOTION.ease}` }}>
-      <div style={{ overflow: 'hidden', minHeight: 0 }}>{children}</div>
+      <div aria-hidden={!open} style={{ overflow: 'hidden', minHeight: 0, visibility: open ? 'visible' : 'hidden',
+        transition: `visibility 0s linear ${open ? '0s' : MOTION.normal}` }}>{children}</div>
     </div>
   );
 }
@@ -44,20 +45,35 @@ export default function KeyPointsPanel({ keyPoints, fidelityWarnings = [], fidel
   const { t } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
   const hasContent = !!keyPoints && Array.isArray(keyPoints.sections) && keyPoints.sections.length > 0;
+  const bullets = hasContent ? keyPoints.sections.flatMap(s => s.bullets || []) : [];
+  const redFlags = bullets.filter(b => b.emphasis === 'red_flag').length;
 
   return (
     <div className="mb-detail-card" style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: RADIUS.lg, boxShadow: elevation(t, 'sm') }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: collapsed ? 0 : SPACE.lg, flexWrap: 'wrap' }}>
-        <div
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: collapsed ? 0 : SPACE.lg, flexWrap: 'wrap',
+        transition: `margin-bottom ${MOTION.normal} ${MOTION.ease}` }}>
+        <button type="button"
           onClick={() => hasContent && setCollapsed(c => !c)}
+          aria-expanded={hasContent ? !collapsed : undefined}
+          disabled={!hasContent}
           style={{ fontSize: FONT.size.micro, color: t.text4, letterSpacing: .8, fontWeight: FONT.weight.semibold,
-            textTransform: 'uppercase', flex: 1, display: 'flex', alignItems: 'center', gap: 7,
+            textTransform: 'uppercase', flex: 1, display: 'flex', alignItems: 'center', gap: 7, minHeight: 32,
+            background: 'none', border: 'none', padding: 0, fontFamily: 'Inter,sans-serif', textAlign: 'left',
             cursor: hasContent ? 'pointer' : 'default', userSelect: 'none' }}>
           <IconBrainSpark size={13} style={{ color: t.text4, flexShrink: 0 }} /> Key Points
-          {hasContent && (
-            <span style={{ fontSize: 11, transform: collapsed ? 'none' : 'rotate(90deg)', transition: `transform ${MOTION.fast} ${MOTION.ease}` }}>▶</span>
+          {hasContent && collapsed && (
+            <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: FONT.weight.medium }}>· {bullets.length}</span>
           )}
-        </div>
+          {hasContent && collapsed && redFlags > 0 && (
+            <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: FONT.weight.bold, color: t.danger, background: t.dangerBg,
+              border: `1px solid ${t.dangerBorder}`, borderRadius: RADIUS.pill, padding: '1px 7px' }}>
+              🚩 {redFlags}
+            </span>
+          )}
+          {hasContent && (
+            <span aria-hidden style={{ fontSize: 11, transform: collapsed ? 'none' : 'rotate(90deg)', transition: `transform ${MOTION.fast} ${MOTION.ease}` }}>▶</span>
+          )}
+        </button>
         {isStale && !collapsed && (
           <span style={{ fontSize: FONT.size.micro, color: t.warn, background: t.warnBg, border: `1px solid ${t.warnBorder}`,
             borderRadius: RADIUS.sm, padding: '2px 8px', fontWeight: FONT.weight.semibold }}>

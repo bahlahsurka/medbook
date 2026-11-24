@@ -8,26 +8,48 @@ import { createPortal } from 'react-dom';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, Z } from '../lib/theme';
 import { IconNetwork, IconX, IconChevronRight } from '../lib/icons';
 import VisualizationService from '../services/visualization';
+import useSavedVisualizationTypes from './visualization/useSavedVisualizationTypes';
 
 const VisualLearningPanel = lazy(() => import('./visualization/VisualLearningPanel'));
 
 const stop = (e) => e.stopPropagation();
 
+// Slide-in for the drawer. No fill-mode, so once it finishes the panel has
+// no transform — a transform would trap the diagrams' position:fixed
+// fullscreen mode inside the drawer.
+const DRAWER_CSS = `
+  @keyframes mb-drawer-in { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+  @keyframes mb-drawer-up { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
+  .mb-drawer-panel { animation: mb-drawer-in 220ms cubic-bezier(.2,.7,.2,1); }
+  @media (max-width: 640px) { .mb-drawer-panel { animation-name: mb-drawer-up; } }
+  .mb-drawer-btn { transition: background 120ms ease, border-color 120ms ease; }
+  @media (prefers-reduced-motion: reduce) { .mb-drawer-panel, .mb-drawer-scrim { animation: none !important; } }
+`;
+
 export function ReviewVisualLearningButton({ entryId, onOpen, colors }) {
   const { t } = useTheme();
+  const types = useSavedVisualizationTypes(entryId);
   if (!VisualizationService.isConfigured()) return null;
   const c = { text: t.text2, muted: t.text4, border: t.border, bg: t.surface2, ...colors };
-  const saved = VisualizationService.peekSaved(entryId);
-  const countLabel = Array.isArray(saved) ? (saved.length ? `${saved.length} saved` : 'none saved') : '';
+  const known = Array.isArray(types);
+  const count = known ? types.length : 0;
+  const none = known && count === 0;
 
   return (
-    <button type="button" onClick={onOpen} aria-haspopup="dialog"
+    <button type="button" onClick={onOpen} aria-haspopup="dialog" className="mb-drawer-btn"
+      title={none ? 'No diagrams saved for this entry yet' : undefined}
       style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minHeight: 40, padding: '8px 14px',
-        background: c.bg, border: `1px solid ${c.border}`, borderRadius: RADIUS.pill, cursor: 'pointer',
-        fontFamily: 'Inter,sans-serif', fontSize: FONT.size.sm, fontWeight: FONT.weight.semibold, color: c.text }}>
+        background: none ? 'transparent' : c.bg, border: `1px solid ${c.border}`, borderRadius: RADIUS.pill, cursor: 'pointer',
+        fontFamily: 'Inter,sans-serif', fontSize: FONT.size.sm, fontWeight: FONT.weight.semibold, color: none ? c.muted : c.text }}>
       <IconNetwork size={14} />
       Visual Learning
-      {countLabel && <span style={{ fontSize: FONT.size.xs, fontWeight: FONT.weight.medium, color: c.muted }}>· {countLabel}</span>}
+      {count > 0 && (
+        <span style={{ fontSize: FONT.size.xs, fontWeight: FONT.weight.semibold, color: t.navActiveText, background: t.navActiveBg,
+          border: `1px solid ${t.navActiveBorder}`, borderRadius: RADIUS.pill, padding: '1px 8px' }}>
+          {count} saved
+        </span>
+      )}
+      {none && <span style={{ fontSize: FONT.size.xs, fontWeight: FONT.weight.medium }}>· none yet</span>}
       <IconChevronRight size={14} style={{ color: c.muted }} />
     </button>
   );
@@ -46,7 +68,12 @@ export function ReviewVisualLearningDrawer({ entryId, entryTitle, onClose }) {
     panelRef.current?.focus({ preventScroll: true });
     // Capture phase: the drawer's own stopPropagation (below) blocks the
     // bubble phase from reaching document.
-    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); onCloseRef.current(); } };
+    // A diagram in fullscreen handles Esc itself (exits fullscreen first).
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || document.querySelector('[data-mb-viz-fullscreen="true"]')) return;
+      e.preventDefault();
+      onCloseRef.current();
+    };
     document.addEventListener('keydown', onKey, true);
     return () => {
       document.removeEventListener('keydown', onKey, true);
@@ -66,13 +93,11 @@ export function ReviewVisualLearningDrawer({ entryId, entryTitle, onClose }) {
       onClick={stop} onKeyDown={stop} onKeyUp={stop}
       style={{ position: 'fixed', inset: 0, zIndex: Z.modalStack, display: 'flex', justifyContent: 'flex-end',
         fontFamily: 'Inter,sans-serif' }}>
-      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: t.overlay,
+      <style>{DRAWER_CSS}</style>
+      <div onClick={onClose} className="mb-drawer-scrim" style={{ position: 'absolute', inset: 0, background: t.overlay,
         animation: `medbook-scrim-in ${MOTION.normal} ${MOTION.ease}` }} />
-      {/* Opacity-only animation: a transform here would turn the renderers'
-          position:fixed fullscreen mode into position-relative-to-drawer. */}
-      <div ref={panelRef} tabIndex={-1} style={{ outline: 'none', position: 'relative', width: 'min(880px, 100%)', height: '100%', background: t.surface,
-        borderLeft: `1px solid ${t.border}`, boxShadow: `0 0 40px ${t.shadowStrong}`, display: 'flex', flexDirection: 'column',
-        animation: `medbook-scrim-in ${MOTION.normal} ${MOTION.ease}` }}>
+      <div ref={panelRef} tabIndex={-1} className="mb-drawer-panel" style={{ outline: 'none', position: 'relative', width: 'min(880px, 100%)', height: '100%', background: t.surface,
+        borderLeft: `1px solid ${t.border}`, boxShadow: `0 0 40px ${t.shadowStrong}`, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.md, padding: `${SPACE.md}px ${SPACE.lg}px`,
           borderBottom: `1px solid ${t.border}`, flexShrink: 0 }}>
           <IconNetwork size={15} style={{ color: t.text3, flexShrink: 0 }} />
@@ -85,7 +110,7 @@ export function ReviewVisualLearningDrawer({ entryId, entryTitle, onClose }) {
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{entryTitle}</div>
             )}
           </div>
-          <button type="button" onClick={onClose} aria-label="Back to review"
+          <button type="button" onClick={onClose} aria-label="Back to review" className="mb-drawer-btn"
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 40, padding: '8px 14px',
               background: t.surface2, border: `1px solid ${t.border}`, borderRadius: RADIUS.pill, cursor: 'pointer',
               fontFamily: 'Inter,sans-serif', fontSize: FONT.size.sm, fontWeight: FONT.weight.semibold, color: t.text2, flexShrink: 0 }}>

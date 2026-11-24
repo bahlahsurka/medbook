@@ -44,10 +44,20 @@ describe('buildFlowGraph', () => {
   d.nodes[2].sourceType = 'ai_context';
   d.edges.push({ source: 'central', target: 'ctx', relationship: 'related_to', label: '', provenance: 'mixed' });
 
-  test('produces one flow node per diagram node, positioned from the layout', () => {
+  const centreOf = (fn) => ({ x: fn.position.x + fn.data.width / 2, y: fn.position.y + fn.data.height / 2 });
+
+  test('produces one flow node per diagram node, positioned from the layout (central topic centred on the origin)', () => {
     const { flowNodes } = buildFlowGraph(d, LIGHT_T, {});
     expect(flowNodes).toHaveLength(3);
-    expect(flowNodes.find(fn => fn.id === 'central').position).toEqual({ x: 0, y: 0 });
+    expect(centreOf(flowNodes.find(fn => fn.id === 'central'))).toEqual({ x: 0, y: 0 });
+  });
+
+  test('every node carries its measured layout size', () => {
+    const { flowNodes } = buildFlowGraph(d, LIGHT_T, {});
+    for (const fn of flowNodes) {
+      expect(fn.data.width).toBeGreaterThan(0);
+      expect(fn.data.height).toBeGreaterThan(0);
+    }
   });
 
   test('the central node is not draggable; others are', () => {
@@ -89,13 +99,27 @@ describe('buildFlowGraph', () => {
     }
   });
 
-  test('Phase 4: a node carrying a `position` field overrides the computed radial layout for that node only', () => {
+  test('with a narrow container, picks the outline layout and draws elbow routes for tree links', () => {
+    const { flowEdges, meta } = buildFlowGraph(d, LIGHT_T, { container: { width: 380, height: 600, insets: { top: 60, left: 12, right: 12, bottom: 46 } } });
+    expect(meta.mode).toBe('outline');
+    const tree = flowEdges.find(fe => fe.target === 'branch');
+    expect(tree.type).toBe('routed');
+    expect(tree.data.points.length).toBeGreaterThanOrEqual(3);
+  });
+
+  test('with a wide container, picks a balanced or one-sided tree with curved branch links', () => {
+    const { flowEdges, meta } = buildFlowGraph(d, LIGHT_T, { container: { width: 900, height: 600, insets: { top: 60, left: 22, right: 22, bottom: 46 } } });
+    expect(['balanced', 'right']).toContain(meta.mode);
+    expect(flowEdges.every(fe => fe.type === 'branch')).toBe(true);
+  });
+
+  test('Phase 4: a node carrying a `position` field overrides the computed layout for that node only', () => {
     const central = n('central', 'central_topic');
     const branch = { ...n('branch'), position: { x: 999, y: -123 } };
     const dWithOverride = diagram([central, branch], [{ source: 'central', target: 'branch', relationship: 'x', label: '' }]);
     const { flowNodes } = buildFlowGraph(dWithOverride, LIGHT_T, {});
     expect(flowNodes.find(fn => fn.id === 'branch').position).toEqual({ x: 999, y: -123 });
     // The un-overridden central node still gets its normal computed position.
-    expect(flowNodes.find(fn => fn.id === 'central').position).toEqual({ x: 0, y: 0 });
+    expect(centreOf(flowNodes.find(fn => fn.id === 'central'))).toEqual({ x: 0, y: 0 });
   });
 });

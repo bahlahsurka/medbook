@@ -13,6 +13,8 @@ jest.mock('../lib/supabase', () => ({
       const chain = {
         select: (cols) => { q.cols = cols; return chain; },
         eq: (col, val) => { q.filters.push([col, val]); return chain; },
+        in: (col, vals) => { q.filters.push(['in', col, vals]); return chain; },
+        neq: (col, val) => { q.filters.push(['neq', col, val]); return chain; },
         then: (resolve, reject) => Promise.resolve({ data: mockError ? null : mockRows, error: mockError }).then(resolve, reject),
       };
       return chain;
@@ -99,4 +101,47 @@ test('a failed read surfaces an error and is not cached, so a retry queries agai
   mockRows = [];
   await expect(VisualizationService.listSaved('e1')).resolves.toEqual([]);
   expect(mockQueries).toHaveLength(2);
+});
+
+describe('prefetchSavedTypes (saved counts before the drawer opens)', () => {
+  test('one lightweight query for many entries: ids + types only, claim rows excluded', async () => {
+    mockRows = [{ entry_id: 'e1', viz_type: 'mind_map' }, { entry_id: 'e1', viz_type: 'visual_summary' }];
+    const listener = jest.fn();
+    VisualizationService.subscribeSaved(listener);
+    await VisualizationService.prefetchSavedTypes(['e1', 'e2', 'e1']);
+    expect(mockQueries).toHaveLength(1);
+    expect(mockQueries[0].cols).toBe('entry_id, viz_type');
+    expect(mockQueries[0].filters).toEqual([['in', 'entry_id', ['e1', 'e2']], ['neq', 'graph_data', '{}']]);
+    expect(VisualizationService.getSavedTypes('e1')).toEqual(['mind_map', 'visual_summary']);
+    expect(VisualizationService.getSavedTypes('e2')).toEqual([]); // known: none saved
+    expect(listener).toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('already-known entries are never re-queried', async () => {
+    mockRows = [];
+    await VisualizationService.prefetchSavedTypes(['e1']);
+    await VisualizationService.prefetchSavedTypes(['e1']);
+    expect(mockQueries).toHaveLength(1);
+  });
+
+  test('getSavedTypes returns the same array until it changes (stable snapshot)', async () => {
+    mockRows = [{ entry_id: 'e1', viz_type: 'mind_map' }];
+    await VisualizationService.prefetchSavedTypes(['e1']);
+    expect(VisualizationService.getSavedTypes('e1')).toBe(VisualizationService.getSavedTypes('e1'));
+  });
+
+  test('a listSaved result also records the entry\'s types; a save/regenerate forgets them', async () => {
+    mockRows = [row('mind_map', mindMap)];
+    await VisualizationService.listSaved('e1');
+    expect(VisualizationService.getSavedTypes('e1')).toEqual(['mind_map']);
+    await VisualizationService.saveEdit('mind_map', 'e1', mindMap, {});
+    expect(VisualizationService.getSavedTypes('e1')).toBeUndefined();
+  });
+
+  test('a failed lookup is silent and leaves counts unknown', async () => {
+    mockError = { message: 'offline' };
+    await expect(VisualizationService.prefetchSavedTypes(['e9'])).resolves.toBeUndefined();
+    expect(VisualizationService.getSavedTypes('e9')).toBeUndefined();
+  });
 });

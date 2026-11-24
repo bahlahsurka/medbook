@@ -15,6 +15,7 @@ import { OverallSyllabusProgress, SystemProgressRegister } from './SyllabusProgr
 import { formatDueCount } from '../lib/dueCount';
 import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
 import { ReviewVisualLearningButton, ReviewVisualLearningDrawer } from './ReviewVisualLearning';
+import VisualizationService from '../services/visualization';
 import { getSavedKeyPoints, isKeyPointsStale } from '../lib/keyPoints';
 import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
   IconX, IconEdit } from '../lib/icons';
@@ -615,6 +616,12 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   const openVl = useCallback(() => setVlOpen(true), []);
   const closeVl = useCallback(() => setVlOpen(false), []);
   useEffect(() => { setVlOpen(false); }, [card?.id]);
+  // Saved-diagram counts for the Visual Learning button, ~100 cards at a
+  // time in one lightweight read (no-op once known).
+  useEffect(() => {
+    if (!queue.length || !VisualizationService.isConfigured()) return;
+    VisualizationService.prefetchSavedTypes(queue.slice(idx, idx + 100).map(e => e.id));
+  }, [queue, idx]);
 
   // Persists a partial update to the current card to Supabase-synced app
   // state immediately — the same {...card, ...updates} shape rate() below

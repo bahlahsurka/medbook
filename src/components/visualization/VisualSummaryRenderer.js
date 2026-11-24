@@ -1,121 +1,87 @@
 // components/visualization/VisualSummaryRenderer.js
 //
-// Purpose-built React card grid for Visual Summary — no React Flow, no
-// layout engine, per the brief's explicit allowance for Comparison Map/
-// Visual Summary to use "purpose-built React layouts instead of graph
-// rendering". Importance drives a card's visual prominence (a "critical"
-// highlight spans two columns on screens wide enough to afford it, via a
-// media query rather than JS measurement — simpler and never overflows a
-// narrow single-column layout); category drives its icon/accent colour.
+// Visual Summary: a compact revision overview with real hierarchy (no
+// React Flow). Highlights are grouped by importance — Critical as
+// prominent cards, Important as regular cards, the rest as a compact
+// "Also worth knowing" list — keeping the model's order within each group.
+// Category drives the icon and accent (red flag / key fact / number /
+// pearl); a "number" headline is set in tabular figures so values scan.
 import { useState } from 'react';
-import { useTheme, SPACE, RADIUS, FONT, Z } from '../../lib/theme';
+import { useTheme, SPACE, RADIUS, FONT } from '../../lib/theme';
 import DiagramDetailPanel from './DiagramDetailPanel';
+import ContentDiagramFrame from './ContentDiagramFrame';
 
-const CATEGORY_ICON = { red_flag: '🚩', key_fact: '●', number: '#', pearl: '💡' };
+const CATEGORY_ICON = { red_flag: '🚩', key_fact: '◆', number: '#', pearl: '💡' };
 
-function categoryTreatment(t, category) {
+function treatment(t, category) {
   switch (category) {
-    case 'red_flag': return { accent: t.danger, bg: t.dangerBg, border: t.dangerBorder };
-    case 'number': return { accent: t.warn, bg: t.warnBg, border: t.warnBorder };
-    case 'pearl': return { accent: t.ok, bg: t.okBg, border: t.okBorder };
-    default: return { accent: t.accent, bg: t.surface2, border: t.border }; // 'key_fact'
+    case 'red_flag': return { accent: t.danger, tint: t.dangerBg, border: t.dangerBorder, headline: t.danger };
+    case 'number': return { accent: t.warn, tint: t.warnBg, border: t.warnBorder, headline: t.text };
+    case 'pearl': return { accent: t.ok, tint: t.okBg, border: t.okBorder, headline: t.text };
+    default: return { accent: t.accent, tint: t.navActiveBg, border: t.navActiveBorder, headline: t.text };
   }
 }
 
-function fullscreenButtonStyle(t) {
-  return {
-    background: t.surface2, border: `1px solid ${t.border}`, borderRadius: RADIUS.sm,
-    color: t.text3, fontSize: FONT.size.xs, fontWeight: FONT.weight.semibold,
-    fontFamily: 'Inter,sans-serif', padding: '8px 12px', cursor: 'pointer',
-    display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', minHeight: 34,
-  };
-}
+const over = (tint, base) => `linear-gradient(${tint}, ${tint}), ${base}`;
 
-// Only "critical" cards span two columns, and only once the grid has room
-// for at least two ~220px tracks — below that this rule simply never
-// matches, so a narrow phone always gets a clean single column.
-const RESPONSIVE_CSS = `
-  @media (min-width: 560px) {
-    .mb-vs-card--critical { grid-column: span 2; }
-  }
+const GRID_CSS = `
+  .mb-vs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+  .mb-vs-grid--critical { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .mb-vs-item { transition: box-shadow 120ms ease, background 120ms ease; }
 `;
 
-function SummaryCard({ h, isSelected, onClick, t }) {
-  const treatment = categoryTreatment(t, h.category);
-  const isCritical = h.importance === 'critical';
-  const isStandard = h.importance === 'standard';
+function SectionLabel({ t, children }) {
   return (
-    <div
-      role="button" tabIndex={0} onClick={onClick}
-      className={isCritical ? 'mb-vs-card--critical' : undefined}
+    <div style={{ fontSize: FONT.size.micro, fontWeight: FONT.weight.semibold, color: t.text4, textTransform: 'uppercase',
+      letterSpacing: .7, margin: `${SPACE.md}px 0 ${SPACE.sm}px` }}>{children}</div>
+  );
+}
+
+function Card({ h, t, critical, selected, onSelect }) {
+  const tr = treatment(t, h.category);
+  return (
+    <div role="button" tabIndex={0} onClick={onSelect}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(); } }}
+      className="mb-vs-item"
       style={{
-        boxSizing: 'border-box', borderRadius: RADIUS.lg, cursor: 'pointer',
-        padding: isCritical ? '16px 18px' : '12px 14px',
-        background: isCritical ? treatment.bg : t.surface,
-        border: `1px solid ${isCritical ? treatment.border : t.border}`,
-        borderLeft: `3px solid ${treatment.accent}`,
-        boxShadow: isSelected ? `0 0 0 3px ${treatment.accent}55` : 'none',
-        opacity: isStandard ? 0.92 : 1,
-        transition: 'box-shadow 120ms ease',
-        fontFamily: 'Inter,sans-serif', display: 'flex', flexDirection: 'column', gap: 6,
-      }}
-    >
+        boxSizing: 'border-box', borderRadius: RADIUS.lg, cursor: 'pointer', fontFamily: 'Inter,sans-serif',
+        padding: critical ? '14px 16px' : '11px 13px',
+        background: critical ? over(tr.tint, t.surface) : t.surface,
+        border: `1px solid ${critical ? tr.border : t.border}`, borderLeft: `3px solid ${tr.accent}`,
+        boxShadow: selected ? `0 0 0 3px ${tr.accent}44` : 'var(--mb-viz-node-shadow)',
+        display: 'flex', flexDirection: 'column', gap: 5,
+      }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-        <span style={{ fontSize: isCritical ? FONT.size.md : FONT.size.sm, flexShrink: 0, lineHeight: 1.3 }}>{CATEGORY_ICON[h.category]}</span>
-        <span style={{
-          fontSize: isCritical ? FONT.size.md : FONT.size.sm, fontWeight: FONT.weight.bold,
-          color: isCritical ? treatment.accent : t.text, lineHeight: 1.35,
-        }}>
+        <span aria-hidden style={{ fontSize: critical ? FONT.size.md : FONT.size.sm, lineHeight: 1.35, flexShrink: 0, color: tr.accent, fontWeight: 700 }}>
+          {CATEGORY_ICON[h.category]}
+        </span>
+        <span style={{ fontSize: critical ? FONT.size.md : FONT.size.base, fontWeight: FONT.weight.bold, lineHeight: 1.35,
+          color: tr.headline, fontVariantNumeric: h.category === 'number' ? 'tabular-nums' : undefined }}>
           {h.headline}
         </span>
       </div>
-      <div style={{
-        fontSize: FONT.size.xs, color: t.text2, lineHeight: 1.55,
-        display: '-webkit-box', WebkitLineClamp: isSelected ? 'unset' : 3, WebkitBoxOrient: 'vertical', overflow: isSelected ? 'visible' : 'hidden',
-      }}>
+      <div style={{ fontSize: FONT.size.xs, color: t.text2, lineHeight: 1.55,
+        display: '-webkit-box', WebkitLineClamp: selected ? 'unset' : 3, WebkitBoxOrient: 'vertical', overflow: selected ? 'visible' : 'hidden' }}>
         {h.detail}
       </div>
-      {h.sourceType === 'ai_context' && (
-        <span style={{ fontSize: FONT.size.micro, color: t.text4, alignSelf: 'flex-start' }}>From supplementary context</span>
-      )}
+      {h.sourceType === 'ai_context' && <span style={{ fontSize: FONT.size.micro, color: t.text4 }}>From supplementary context</span>}
     </div>
   );
 }
 
-function VisualSummaryGrid({ diagram, isFullscreen, onToggleFullscreen }) {
-  const { t } = useTheme();
-  const [selectedId, setSelectedId] = useState(null);
-  const highlights = diagram?.highlights || [];
-  const selected = selectedId ? highlights.find(h => h.id === selectedId) : null;
-  const selectedNode = selected ? {
-    label: selected.headline, explanation: selected.detail,
-    sourceType: selected.sourceType, sourceRef: selected.sourceRef,
-  } : null;
-
+function Row({ h, t, selected, onSelect, last }) {
+  const tr = treatment(t, h.category);
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <style>{RESPONSIVE_CSS}</style>
-      <div style={{ position: 'absolute', top: SPACE.sm, right: SPACE.sm, zIndex: 5 }}>
-        <button style={fullscreenButtonStyle(t)} onClick={onToggleFullscreen} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
-          {isFullscreen ? '⤡ Exit' : '⤢ Fullscreen'}
-        </button>
-      </div>
-      <div style={{ width: '100%', height: '100%', overflow: 'auto', padding: SPACE.lg, boxSizing: 'border-box' }}>
-        {diagram?.topic && (
-          <div style={{ fontSize: FONT.size.sm, fontWeight: FONT.weight.bold, color: t.text, marginBottom: SPACE.md, paddingRight: 96 }}>
-            {diagram.topic}
-          </div>
-        )}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-          {highlights.map(h => (
-            <SummaryCard
-              key={h.id} h={h} t={t} isSelected={selectedId === h.id}
-              onClick={() => setSelectedId(prev => (prev === h.id ? null : h.id))}
-            />
-          ))}
-        </div>
-      </div>
-      <DiagramDetailPanel node={selectedNode} onClose={() => setSelectedId(null)} />
+    <div role="button" tabIndex={0} onClick={onSelect}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(); } }}
+      className="mb-vs-item"
+      style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '8px 10px', cursor: 'pointer', fontFamily: 'Inter,sans-serif',
+        borderBottom: last ? 'none' : `1px solid ${t.border}`, background: selected ? t.navActiveBg : 'transparent', borderRadius: selected ? RADIUS.sm : 0 }}>
+      <span aria-hidden style={{ color: tr.accent, fontSize: FONT.size.xs, fontWeight: 700, width: 14, flexShrink: 0, textAlign: 'center' }}>{CATEGORY_ICON[h.category]}</span>
+      <span style={{ fontSize: FONT.size.sm, lineHeight: 1.45 }}>
+        <span style={{ fontWeight: FONT.weight.semibold, color: t.text }}>{h.headline}</span>
+        {h.detail && <span style={{ color: t.text3 }}> — {h.detail}</span>}
+      </span>
     </div>
   );
 }
@@ -123,15 +89,48 @@ function VisualSummaryGrid({ diagram, isFullscreen, onToggleFullscreen }) {
 /** @param {{diagram:{topic,highlights}}} props — a validated Visual Summary diagram. */
 export default function VisualSummaryRenderer({ diagram }) {
   const { t } = useTheme();
-  const [isFullscreen, setFullscreen] = useState(false);
-  const grid = <VisualSummaryGrid diagram={diagram} isFullscreen={isFullscreen} onToggleFullscreen={() => setFullscreen(f => !f)} />;
+  const [selectedId, setSelectedId] = useState(null);
+  const highlights = diagram?.highlights || [];
+  const critical = highlights.filter(h => h.importance === 'critical');
+  const high = highlights.filter(h => h.importance === 'high');
+  const standard = highlights.filter(h => h.importance !== 'critical' && h.importance !== 'high');
+  const selected = selectedId ? highlights.find(h => h.id === selectedId) : null;
+  const toggle = (id) => setSelectedId(prev => (prev === id ? null : id));
 
-  if (!isFullscreen) {
-    return (
-      <div style={{ width: '100%', height: 'clamp(320px, 65vh, 480px)', borderRadius: RADIUS.lg, overflow: 'hidden', border: `1px solid ${t.border}` }}>
-        {grid}
+  return (
+    <ContentDiagramFrame
+      title={diagram?.topic || 'Visual summary'}
+      overlay={<DiagramDetailPanel
+        node={selected && { label: selected.headline, explanation: selected.detail, category: selected.category, sourceType: selected.sourceType, sourceRef: selected.sourceRef }}
+        onClose={() => setSelectedId(null)} />}
+    >
+      <style>{GRID_CSS}</style>
+      <div style={{ padding: `${SPACE.xs}px ${SPACE.lg}px ${SPACE.lg}px`, fontFamily: 'Inter,sans-serif' }}>
+        {critical.length > 0 && (
+          <>
+            <SectionLabel t={t}>Critical</SectionLabel>
+            <div className="mb-vs-grid mb-vs-grid--critical">
+              {critical.map(h => <Card key={h.id} h={h} t={t} critical selected={selectedId === h.id} onSelect={() => toggle(h.id)} />)}
+            </div>
+          </>
+        )}
+        {high.length > 0 && (
+          <>
+            <SectionLabel t={t}>Important</SectionLabel>
+            <div className="mb-vs-grid">
+              {high.map(h => <Card key={h.id} h={h} t={t} selected={selectedId === h.id} onSelect={() => toggle(h.id)} />)}
+            </div>
+          </>
+        )}
+        {standard.length > 0 && (
+          <>
+            <SectionLabel t={t}>Also worth knowing</SectionLabel>
+            <div style={{ border: `1px solid ${t.border}`, borderRadius: RADIUS.md, background: t.surface }}>
+              {standard.map((h, i) => <Row key={h.id} h={h} t={t} selected={selectedId === h.id} last={i === standard.length - 1} onSelect={() => toggle(h.id)} />)}
+            </div>
+          </>
+        )}
       </div>
-    );
-  }
-  return <div style={{ position: 'fixed', inset: 0, zIndex: Z.lightbox, background: t.appBg }}>{grid}</div>;
+    </ContentDiagramFrame>
+  );
 }

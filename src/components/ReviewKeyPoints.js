@@ -31,12 +31,23 @@ export function hasKeyPoints(sections, keyPoints) {
   return SECTIONS.some(s => Array.isArray(sections?.[s.key]) && sections[s.key].length > 0);
 }
 
+/** Smooth height collapse (CSS grid rows), no JS measurement. */
+function Collapse({ open, children }) {
+  return (
+    <div style={{ display:'grid', gridTemplateRows: open ? '1fr' : '0fr', transition:`grid-template-rows ${MOTION.normal} ${MOTION.ease}` }}>
+      <div aria-hidden={!open} style={{ overflow:'hidden', minHeight:0, visibility: open ? 'visible' : 'hidden', transition:`visibility 0s linear ${open ? '0s' : MOTION.normal}` }}>{children}</div>
+    </div>
+  );
+}
+
 /**
  * ReviewKeyPoints — read-only Key Points for the review screens' revealed
  * answer. Prefers the saved Phase 5 Key Points; otherwise falls back to the
  * legacy four sections. Never calls the AI service, and renders nothing
  * when neither format has content. One collapsible panel, collapse
- * preference remembered per browser so it sticks across cards.
+ * preference remembered per browser so it sticks across cards. When
+ * collapsed, the header still says how much is hidden — including any red
+ * flags, so safety-critical points are never silently out of sight.
  */
 export default function ReviewKeyPoints({ sections, keyPoints, isStale = false }) {
   const { t } = useTheme();
@@ -49,17 +60,32 @@ export default function ReviewKeyPoints({ sections, keyPoints, isStale = false }
 
   if (!useNew && legacy.length === 0) return null;
 
+  const pointCount = useNew
+    ? keyPoints.sections.reduce((n, s) => n + s.bullets.length, 0)
+    : legacy.reduce((n, s) => n + s.items.length, 0);
+  const redFlagCount = useNew
+    ? keyPoints.sections.reduce((n, s) => n + s.bullets.filter(b => b.emphasis === 'red_flag').length, 0)
+    : (legacy.find(s => s.key === 'redFlags')?.items.length || 0);
+
   const toggle = () => setCollapsed(c => { writeCollapsedPref(!c); return !c; });
 
   return (
     <div style={{ fontFamily:'Inter,sans-serif', background:t.surface, border:`1px solid ${t.border}`,
-      borderRadius:RADIUS.xl2, boxShadow:elevation(t,'sm'), padding:'6px 20px', paddingBottom: collapsed ? 6 : 18 }}>
+      borderRadius:RADIUS.xl2, boxShadow:elevation(t,'sm'), padding:'4px 20px',
+      paddingBottom: collapsed ? 4 : 18, transition:`padding-bottom ${MOTION.normal} ${MOTION.ease}` }}>
       <button onClick={toggle} aria-expanded={!collapsed}
         style={{ width:'100%', display:'flex', alignItems:'center', gap:8, background:'none', border:'none',
           padding:'10px 0', minHeight:40, cursor:'pointer', fontFamily:'Inter,sans-serif', textAlign:'left' }}>
         <span style={{ fontSize:11, color:t.text4, letterSpacing:.8, fontWeight:700, textTransform:'uppercase', flex:1 }}>
           Key Points
+          {collapsed && <span style={{ marginLeft:6, textTransform:'none', letterSpacing:0, fontWeight:FONT.weight.medium }}>· {pointCount}</span>}
         </span>
+        {collapsed && redFlagCount > 0 && (
+          <span title={`${redFlagCount} red flag${redFlagCount !== 1 ? 's' : ''}`} style={{ fontSize:FONT.size.micro, fontWeight:FONT.weight.bold,
+            color:t.danger, background:t.dangerBg, border:`1px solid ${t.dangerBorder}`, borderRadius:RADIUS.pill, padding:'1px 7px' }}>
+            🚩 {redFlagCount}
+          </span>
+        )}
         {isStale && !collapsed && (
           <span style={{ fontSize:FONT.size.micro, color:t.warn, fontWeight:FONT.weight.semibold }}>Review edited since</span>
         )}
@@ -67,7 +93,7 @@ export default function ReviewKeyPoints({ sections, keyPoints, isStale = false }
           transition:`transform ${MOTION.fast} ${MOTION.ease}` }}>▶</span>
       </button>
 
-      {!collapsed && (
+      <Collapse open={!collapsed}>
         <div style={{ paddingTop:4 }}>
           {useNew ? (
             <KeyPointsContent sections={keyPoints.sections} fidelityWarnings={keyPoints.fidelityWarnings}
@@ -87,7 +113,7 @@ export default function ReviewKeyPoints({ sections, keyPoints, isStale = false }
             </div>
           ))}
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }

@@ -1,152 +1,179 @@
 // components/visualization/mindMapLayout.js
 //
-// Pure positioning math for a Mind Map — deliberately NOT ELK.js. Per the
-// architecture audit and this phase's own brief ("do not introduce ELK.js
-// yet unless genuinely necessary"): a Mind Map radiating from one central
-// topic is exactly the case a simple radial-tree layout already handles
-// well, and ELK's weight only earns its keep for a genuinely hierarchical,
-// directional diagram (a flowchart) — a later phase's problem, not this
-// one's.
+// Mind Map layout: a balanced TWO-SIDED TREE — the central topic in the
+// middle, depth-1 branches split between the right and left sides (by
+// subtree height, keeping the model's order), and each deeper level in its
+// own aligned column further out. This replaced a radial layout that had
+// no knowledge of node size: wide text labels competed for arc length, so
+// small maps overlapped and large maps sprawled. Stacking nodes vertically
+// spends their HEIGHT (~40px) instead of their width (~200px), which is
+// why it's both overlap-free by construction and far more compact.
 //
-// Algorithm: BFS from the central_topic node over the diagram's edges
-// (treated as undirected for layout purposes — a Mind Map's visual
-// structure is "what's near what", not the semantic direction of a
-// relationship) builds a spanning tree. Each node then gets an angular
-// SLICE of the circle around its parent, sized proportionally to how many
-// descendants it has (a branch with many subtopics gets more angular room
-// than one with few) — this is what keeps dense branches from cramming
-// into each other without needing an iterative force-directed solver.
-// Radius grows per depth, and is widened further whenever a depth level
-// is crowded enough that the base radius wouldn't give nodes room to
-// avoid overlapping along their own arc.
-//
-// Returns ONLY {x, y} per node id — never mutates the validated diagram
-// object itself, so the same {centralTopic, nodes, edges} this module
-// receives is exactly what a caller can still send back to the API
-// unmodified (e.g. to re-render after a theme change, no re-fetch needed).
-//
-// The base ring radius SCALES WITH TOTAL NODE COUNT rather than being one
-// flat constant — a flat 240px/depth was the direct cause of the
-// "excessive empty space, widely separated nodes" complaint on small
-// diagrams: a 5-6 node Mind Map doesn't need the same canvas footprint as
-// a 20-node one just because both have a depth-2 ring. fitView() can
-// shrink an oversized layout to fit the viewport, but that only makes the
-// SAME proportion of empty space smaller, not less empty — the fix has to
-// be in the layout's own scale, not downstream of it.
-const MIN_ARC_SPACING = 70; // px of arc length to reserve per sibling at a ring
+// Positions are node CENTRES; mindMapGraph.js converts to React Flow's
+// top-left anchor. Never mutates the diagram.
+import { sizeForNode } from './nodeTheme';
 
-function baseRadiusForNodeCount(totalNodes) {
-  if (totalNodes <= 4) return 130;
-  if (totalNodes <= 8) return 170;
-  if (totalNodes <= 15) return 210;
-  return 250;
+export const MIND_MAP_NODE_SPEC = {
+  central_topic: { variant: 'root', tone: 'root' },
+  branch: { variant: 'primary', tone: 'accent' },
+  red_flag: { variant: 'standard', tone: 'danger', icon: '🚩' },
+  high_yield: { variant: 'standard', tone: 'warn', icon: '⭐' },
+  subtopic: { variant: 'secondary', tone: 'neutral' },
+};
+
+const COLUMN_GAP = 60;   // horizontal gap between a parent column and its children's column
+const SIBLING_GAP = 10;  // vertical gap between siblings
+const BRANCH_GAP = 22;   // vertical gap between depth-1 branches (separates groups)
+
+export function defaultMindMapSize(node) {
+  const spec = MIND_MAP_NODE_SPEC[node?.category] || MIND_MAP_NODE_SPEC.subtopic;
+  return sizeForNode({ label: node?.label, ...spec });
 }
 
+const OUTLINE_INDENT = 30;      // per-depth indent in outline mode
+const OUTLINE_ROOT_INDENT = 40; // children of the (pill-shaped) root sit a little further in
+const OUTLINE_GAP = 8;
+const OUTLINE_GROUP_GAP = 16;
+
 /**
- * @param {{ nodes: Array, edges: Array }} diagram — already validated
- *   (VisualizationValidator.js) shape: nodes have {id, category, ...},
- *   edges have {source, target, ...}.
- * @returns {Map<string, {x:number, y:number, depth:number}>} keyed by node id.
+ * @param {{nodes:Array, edges:Array}} diagram — validated Mind Map shape.
+ * @param {(node)=>{width:number,height:number}} [sizeOf]
+ * @param {{mode?:'balanced'|'right'|'outline'}} [options]
+ *   'balanced': branches split left/right around the centre (default);
+ *   'right': every branch to the right (narrower, taller);
+ *   'outline': a vertical indented tree for narrow (phone) screens.
+ * @returns {Map<string,{x:number,y:number,depth:number,side:number}>} centres; side is +1 right, -1 left, 0 centre.
  */
-export function computeMindMapLayout(diagram) {
+export function computeMindMapLayout(diagram, sizeOf = defaultMindMapSize, { mode = 'balanced' } = {}) {
   const nodes = diagram?.nodes || [];
   const edges = diagram?.edges || [];
   const positions = new Map();
   if (nodes.length === 0) return positions;
 
+  const size =new Map(nodes.map(n => [n.id, sizeOf(n)]));
   const central = nodes.find(n => n.category === 'central_topic') || nodes[0];
 
-  // Undirected adjacency.
   const adjacency = new Map(nodes.map(n => [n.id, []]));
   for (const e of edges) {
-    if (adjacency.has(e.source) && adjacency.has(e.target)) {
+    if (adjacency.has(e.source) && adjacency.has(e.target) && e.source !== e.target) {
       adjacency.get(e.source).push(e.target);
       adjacency.get(e.target).push(e.source);
     }
   }
 
-  // BFS spanning tree from the central node — each node gets exactly ONE
-  // parent (whichever edge reaches it first), so a node reachable via
-  // multiple paths still gets exactly one position instead of a conflict.
-  const parent = new Map([[central.id, null]]);
+  // BFS spanning tree: each node gets exactly one parent (first edge to reach it).
   const depth = new Map([[central.id, 0]]);
   const children = new Map(nodes.map(n => [n.id, []]));
   const queue = [central.id];
   while (queue.length) {
     const id = queue.shift();
-    for (const neighbor of adjacency.get(id) || []) {
-      if (parent.has(neighbor)) continue; // already placed
-      parent.set(neighbor, id);
-      depth.set(neighbor, depth.get(id) + 1);
-      children.get(id).push(neighbor);
-      queue.push(neighbor);
+    for (const nb of adjacency.get(id)) {
+      if (depth.has(nb)) continue;
+      depth.set(nb, depth.get(id) + 1);
+      children.get(id).push(nb);
+      queue.push(nb);
     }
   }
-  // Any node the central topic can't reach at all (shouldn't happen —
-  // VisualizationValidator.js rejects a multi-node diagram with zero
-  // edges — but a disconnected sub-graph among 3+ nodes is still
-  // structurally possible) gets depth 1 directly off the center, rather
-  // than being silently dropped from the layout.
+  // Unreachable nodes hang directly off the centre rather than being dropped.
   for (const n of nodes) {
-    if (!parent.has(n.id)) {
-      parent.set(n.id, central.id);
-      depth.set(n.id, 1);
-      children.get(central.id).push(n.id);
-    }
+    if (!depth.has(n.id)) { depth.set(n.id, 1); children.get(central.id).push(n.id); }
   }
 
-  // Descendant (leaf) counts, for proportional angular allocation — a
-  // leaf node counts as 1 of itself.
-  const leafCount = new Map();
-  function countLeaves(id) {
+  if (mode === 'outline') {
+    // Depth-first, top to bottom; each level indented under its parent.
+    let y = 0;
+    const walk = (id, left, d) => {
+      const { width, height } = size.get(id);
+      positions.set(id, { x: left + width / 2, y: y + height / 2, depth: d, side: d === 0 ? 0 : 1 });
+      y += height + OUTLINE_GAP;
+      const kids = children.get(id);
+      kids.forEach((k, i) => {
+        walk(k, left + (d === 0 ? OUTLINE_ROOT_INDENT : OUTLINE_INDENT), d + 1);
+        if (d === 0 && i < kids.length - 1) y += OUTLINE_GROUP_GAP - OUTLINE_GAP;
+      });
+    };
+    walk(central.id, 0, 0);
+    return positions;
+  }
+
+  const subtreeHeight = new Map();
+  function measure(id) {
     const kids = children.get(id);
-    if (kids.length === 0) { leafCount.set(id, 1); return 1; }
-    const total = kids.reduce((sum, k) => sum + countLeaves(k), 0);
-    leafCount.set(id, total);
-    return total;
+    const own = size.get(id).height;
+    if (!kids.length) { subtreeHeight.set(id, own); return own; }
+    const gap = id === central.id ? BRANCH_GAP : SIBLING_GAP;
+    const stacked = kids.reduce((s, k) => s + measure(k), 0) + gap * (kids.length - 1);
+    const h = Math.max(own, stacked);
+    subtreeHeight.set(id, h);
+    return h;
   }
-  countLeaves(central.id);
+  measure(central.id);
 
-  // How many nodes share each depth ring — used to widen that ring's
-  // radius when it's crowded, independent of how many depths exist.
-  const countsByDepth = new Map();
+  // Split depth-1 branches between sides, in order, balancing total height.
+  const top = children.get(central.id);
+  const total = top.reduce((s, k) => s + subtreeHeight.get(k), 0);
+  const right = [], left = [];
+  let rightH = 0;
+  for (const k of top) {
+    const h = subtreeHeight.get(k);
+    if (mode === 'right' || right.length === 0 || rightH + h / 2 <= total / 2) { right.push(k); rightH += h; } else left.push(k);
+  }
+
+  // Column x per (side, depth): aligned columns, each as wide as its widest node.
+  const sideOf = new Map();
+  const markSide = (list, s) => {
+    const stack = [...list];
+    while (stack.length) { const id = stack.pop(); sideOf.set(id, s); stack.push(...children.get(id)); }
+  };
+  markSide(right, 1);
+  markSide(left, -1);
+
+  const colWidth = new Map(); // key `${side}:${depth}`
   for (const n of nodes) {
-    const d = depth.get(n.id);
-    countsByDepth.set(d, (countsByDepth.get(d) || 0) + 1);
+    if (n.id === central.id) continue;
+    const key = `${sideOf.get(n.id)}:${depth.get(n.id)}`;
+    colWidth.set(key, Math.max(colWidth.get(key) || 0, size.get(n.id).width));
   }
-  const baseRadiusPerDepth = baseRadiusForNodeCount(nodes.length);
-  function radiusForDepth(d) {
-    if (d === 0) return 0;
-    const base = baseRadiusPerDepth * d;
-    const countAtRing = countsByDepth.get(d) || 1;
-    const circumferenceNeeded = countAtRing * MIN_ARC_SPACING;
-    const radiusNeeded = circumferenceNeeded / (2 * Math.PI);
-    return Math.max(base, radiusNeeded);
-  }
-
-  positions.set(central.id, { x: 0, y: 0, depth: 0 });
-
-  // Recursively assign each node an angle within its parent's own slice,
-  // proportional to its own leaf-weight among its siblings.
-  function assign(id, angleStart, angleEnd) {
-    const angle = (angleStart + angleEnd) / 2;
-    const d = depth.get(id);
-    const r = radiusForDepth(d);
-    if (d > 0) {
-      positions.set(id, { x: r * Math.cos(angle), y: r * Math.sin(angle), depth: d });
+  const colStart = new Map(); // distance from centre to the column's inner edge
+  for (const s of [1, -1]) {
+    let edge = size.get(central.id).width / 2;
+    for (let d = 1; colWidth.has(`${s}:${d}`); d++) {
+      colStart.set(`${s}:${d}`, edge + COLUMN_GAP);
+      edge = edge + COLUMN_GAP + colWidth.get(`${s}:${d}`);
     }
+  }
 
+  positions.set(central.id, { x: 0, y: 0, depth: 0, side: 0 });
+  function place(id, centreY) {
     const kids = children.get(id);
-    if (kids.length === 0) return;
-    const totalWeight = kids.reduce((sum, k) => sum + leafCount.get(k), 0);
-    let cursor = angleStart;
+    if (!kids.length) return;
+    const gap = id === central.id ? BRANCH_GAP : SIBLING_GAP;
+    const stacked = kids.reduce((s, k) => s + subtreeHeight.get(k), 0) + gap * (kids.length - 1);
+    let cursor = centreY - stacked / 2;
     for (const k of kids) {
-      const share = (angleEnd - angleStart) * (leafCount.get(k) / totalWeight);
-      assign(k, cursor, cursor + share);
-      cursor += share;
+      const h = subtreeHeight.get(k);
+      const s = sideOf.get(k), d = depth.get(k);
+      const x = s * (colStart.get(`${s}:${d}`) + size.get(k).width / 2);
+      const y = cursor + h / 2;
+      positions.set(k, { x, y, depth: d, side: s });
+      place(k, y);
+      cursor += h + gap;
     }
   }
-  assign(central.id, 0, 2 * Math.PI);
-
+  // Each side is stacked independently around the centre line.
+  for (const [list] of [[right], [left]]) {
+    if (!list.length) continue;
+    const stacked = list.reduce((s, k) => s + subtreeHeight.get(k), 0) + BRANCH_GAP * (list.length - 1);
+    let cursor = -stacked / 2;
+    for (const k of list) {
+      const h = subtreeHeight.get(k);
+      const s = sideOf.get(k);
+      const x = s * (colStart.get(`${s}:1`) + size.get(k).width / 2);
+      const y = cursor + h / 2;
+      positions.set(k, { x, y, depth: 1, side: s });
+      place(k, y);
+      cursor += h + BRANCH_GAP;
+    }
+  }
   return positions;
 }

@@ -1,47 +1,59 @@
 // components/visualization/DiagramToolbar.js
 //
-// Shared zoom/fit/reset/fullscreen toolbar for the Phase 3 graph renderers
-// (Knowledge Network, Clinical Flowchart, Mechanism Diagram) — Mind Map
-// keeps its own inline copy from Phase 2 unchanged (see this phase's
-// "avoid unrelated refactoring" brief); every NEW renderer uses this one
-// instead of re-writing the same five buttons a fourth time. Must be
-// rendered INSIDE a <ReactFlowProvider> (uses useReactFlow()).
+// One floating control group shared by every graph diagram (and, via
+// `toolbarButtonStyle`, the header controls of Comparison Map / Visual
+// Summary), so all six types share the same controls and touch sizes.
+// Must render inside a <ReactFlowProvider>.
 //
-// Phase 4: `onAddNode`, when passed, adds one more button ("+ Add node")
-// for editable mode — omitted (as every pre-Phase-4 call site still does)
-// it renders exactly as before, so view mode is pixel-identical.
-import { useCallback } from 'react';
+// "Fit" shows the whole diagram; "Reset" returns to the initial readable
+// view (see viewport.js). Both hand viewport control back to the automatic
+// fitting, so a later resize/fullscreen re-centres again.
 import { useReactFlow } from '@xyflow/react';
 import { useTheme, SPACE, RADIUS, FONT } from '../../lib/theme';
 
-function toolbarButtonStyle(t) {
+export function toolbarButtonStyle(t, { active } = {}) {
   return {
-    background: t.surface2, border: `1px solid ${t.border}`, borderRadius: RADIUS.sm,
-    color: t.text3, fontSize: FONT.size.xs, fontWeight: FONT.weight.semibold,
-    fontFamily: 'Inter,sans-serif', padding: '8px 12px', cursor: 'pointer',
-    display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', minHeight: 34,
+    background: active ? t.navActiveBg : 'transparent',
+    border: 'none',
+    color: active ? t.navActiveText : t.text3,
+    fontSize: FONT.size.xs, fontWeight: FONT.weight.semibold, fontFamily: 'Inter,sans-serif',
+    padding: '0 10px', minWidth: 36, height: 34, borderRadius: RADIUS.sm, cursor: 'pointer',
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5, whiteSpace: 'nowrap',
   };
 }
 
-export default function DiagramToolbar({ isFullscreen, onToggleFullscreen, onAddNode }) {
-  const { t } = useTheme();
-  const { zoomIn, zoomOut, fitView, setViewport } = useReactFlow();
-  const resetView = useCallback(() => setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 250 }), [setViewport]);
+export function toolbarGroupStyle(t) {
+  return {
+    display: 'inline-flex', alignItems: 'center', gap: 2, padding: 2,
+    background: t.surface, border: `1px solid ${t.border}`, borderRadius: RADIUS.md,
+    boxShadow: 'var(--mb-viz-node-shadow)',
+  };
+}
 
+const Divider = ({ t }) => <span aria-hidden style={{ width: 1, alignSelf: 'stretch', margin: '6px 2px', background: t.border }} />;
+
+export default function DiagramToolbar({ isFullscreen, onToggleFullscreen, onFit, onReset, onAddNode, animate = true }) {
+  const { t } = useTheme();
+  const { zoomIn, zoomOut } = useReactFlow();
+  const d = animate ? 160 : 0;
   return (
     <div style={{ position: 'absolute', top: SPACE.md, left: SPACE.md, display: 'flex', gap: 6, flexWrap: 'wrap', zIndex: 5 }}>
-      <button style={toolbarButtonStyle(t)} onClick={() => zoomIn({ duration: 150 })} title="Zoom in">+</button>
-      <button style={toolbarButtonStyle(t)} onClick={() => zoomOut({ duration: 150 })} title="Zoom out">−</button>
-      <button style={toolbarButtonStyle(t)} onClick={() => fitView({ padding: 0.25, duration: 250 })} title="Fit to screen">⤢ Fit</button>
-      <button style={toolbarButtonStyle(t)} onClick={resetView} title="Reset view">⟲ Reset</button>
-      <button style={toolbarButtonStyle(t)} onClick={onToggleFullscreen} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
-        {isFullscreen ? '⤡ Exit' : '⤢ Fullscreen'}
-      </button>
-      {onAddNode && (
-        <button style={{ ...toolbarButtonStyle(t), background: t.navActiveBg, border: `1px solid ${t.navActiveBorder}`, color: t.navActiveText }}
-          onClick={onAddNode} title="Add a new node">
-          + Add node
+      <div style={toolbarGroupStyle(t)}>
+        <button className="mb-viz-btn" style={toolbarButtonStyle(t)} onClick={() => zoomOut({ duration: d })} title="Zoom out" aria-label="Zoom out">−</button>
+        <button className="mb-viz-btn" style={toolbarButtonStyle(t)} onClick={() => zoomIn({ duration: d })} title="Zoom in" aria-label="Zoom in">+</button>
+        <Divider t={t} />
+        <button className="mb-viz-btn" style={toolbarButtonStyle(t)} onClick={onFit} title="Show the whole diagram">Fit</button>
+        <button className="mb-viz-btn" style={toolbarButtonStyle(t)} onClick={onReset} title="Back to the starting view">Reset</button>
+        <Divider t={t} />
+        <button className="mb-viz-btn" style={toolbarButtonStyle(t, { active: isFullscreen })} onClick={onToggleFullscreen}
+          title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'} aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
+          {isFullscreen ? '⤡' : '⤢'}
         </button>
+      </div>
+      {onAddNode && (
+        <div style={toolbarGroupStyle(t)}>
+          <button className="mb-viz-btn" style={toolbarButtonStyle(t, { active: true })} onClick={onAddNode} title="Add a new node">+ Add node</button>
+        </div>
       )}
     </div>
   );

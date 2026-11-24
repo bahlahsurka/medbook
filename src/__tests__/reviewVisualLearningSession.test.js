@@ -28,6 +28,9 @@ jest.mock('../services/visualization', () => {
       isConfigured: () => true,
       listSaved: jest.fn(),
       peekSaved: jest.fn(() => undefined),
+      getSavedTypes: jest.fn(() => undefined),
+      subscribeSaved: jest.fn(() => () => {}),
+      prefetchSavedTypes: jest.fn(async () => {}),
       generate: jest.fn(), generateMindMap: jest.fn(), recommend: jest.fn(),
       saveEdit: jest.fn(), restoreOriginal: jest.fn(),
     },
@@ -86,12 +89,16 @@ const SAVED = {
   beta: [],
 };
 
+const SAVED_TYPES = Object.fromEntries(Object.entries(SAVED).map(([id, list]) => [id, list.map(v => v.vizType)]));
+
 let container, root, warnSpy;
 beforeEach(() => {
   window.localStorage.clear();
   mockLoaded.length = 0;
   jest.clearAllMocks();
   VisualizationService.listSaved.mockImplementation(async (id) => SAVED[id] || []);
+  // Stable arrays per entry, as the real service returns (useSyncExternalStore requires it).
+  VisualizationService.getSavedTypes.mockImplementation(id => SAVED_TYPES[id]);
   global.fetch = jest.fn();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -148,6 +155,9 @@ async function openDrawerAndCheck(e, onReviewed) {
   const titleBefore = e.title;
   const ratedBefore = onReviewed.mock.calls.length;
   const snapshotBefore = sessionSnapshots();
+  // Saved count is shown before opening (from the lightweight prefetch index).
+  const trigger = findButton(b => b.textContent.startsWith('Visual Learning'));
+  expect(trigger.textContent).toContain(e === ALPHA ? '2 saved' : 'none yet');
   expect(Object.keys(snapshotBefore).length).toBeGreaterThan(0);
   act(() => { findButton(b => b.textContent.startsWith('Visual Learning')).click(); });
   await flush();
@@ -209,13 +219,20 @@ test('ReviewQueue: Key Points and Visual Learning never disturb the session or g
   act(() => { findButton(b => b.textContent.includes('Tap to reveal')).click(); });
   expectKeyPointsFor(first);
   expect(mockLoaded).toEqual([]); // no visualization code loaded before opening
-  expect(VisualizationService.listSaved).not.toHaveBeenCalled(); // nothing fetched just by reviewing
+  expect(VisualizationService.listSaved).not.toHaveBeenCalled(); // no diagram payloads fetched just by reviewing
+  // Only the lightweight saved-types lookup, batched for the queue window.
+  expect(VisualizationService.prefetchSavedTypes).toHaveBeenCalled();
+  expect(VisualizationService.prefetchSavedTypes.mock.calls[0][0]).toEqual(expect.arrayContaining(['alpha', 'beta']));
 
   // Collapsing Key Points is purely local.
-  act(() => { findButton(b => b.textContent.startsWith('Key Points')).click(); });
-  expect(container.textContent).not.toContain(first === ALPHA ? 'Recognition' : 'Legacy high-yield fact');
+  const kpToggle = () => findButton(b => b.textContent.startsWith('Key Points'));
+  act(() => { kpToggle().click(); });
+  expect(kpToggle().getAttribute('aria-expanded')).toBe('false');
+  // Collapsed, the header still flags hidden red flags.
+  if (first === ALPHA) expect(kpToggle().textContent).toContain('🚩 1');
   expect(ratingBarVisible()).toBe(true);
-  act(() => { findButton(b => b.textContent.startsWith('Key Points')).click(); });
+  act(() => { kpToggle().click(); });
+  expect(kpToggle().getAttribute('aria-expanded')).toBe('true');
   expectKeyPointsFor(first);
 
   await openDrawerAndCheck(first, onReviewed);

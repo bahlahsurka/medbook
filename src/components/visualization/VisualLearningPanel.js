@@ -14,13 +14,15 @@
 // alone never triggers a request either — see `stateByType` below. The
 // only things that ever trigger a network call are the explicit Generate/
 // Regenerate buttons (per type) and the explicit Recommend button.
-// Exception: mode="saved" (review screens) does one read of already-saved
-// rows on mount — a table read only, never a generation.
+// Exceptions (table reads only, never a generation): mode="saved" (review
+// screens) reads the already-saved rows on mount, and full mode does one
+// tiny read of WHICH types are saved, to mark them on the type chips.
 import { useState, useRef, useEffect, lazy, Suspense, useCallback, useMemo } from 'react';
 import { useTheme, SPACE, RADIUS, FONT, elevation } from '../../lib/theme';
 import { IconSparkle, IconNetwork } from '../../lib/icons';
 import VisualizationService, { VisualizationServiceError } from '../../services/visualization';
 import { cloneDiagram } from './graphDiagramEdits';
+import useSavedVisualizationTypes from './useSavedVisualizationTypes';
 
 // One metadata entry per supported type — the selector, the idle-state
 // description, and the Generate button's label all read from this instead
@@ -96,10 +98,12 @@ function fmtSavedDate(iso) {
 
 function RendererFallback({ t }) {
   return (
-    <div style={{ height: 480, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      border: `1px solid ${t.border}`, borderRadius: RADIUS.lg, background: t.surface2 }}>
-      <span style={{ display: 'inline-block', width: 16, height: 16, border: `2px solid ${t.border}`,
+    <div style={{ height: 320, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+      border: `1px solid ${t.border}`, borderRadius: RADIUS.lg, background: t.surface2,
+      color: t.text4, fontSize: FONT.size.xs, fontFamily: 'Inter,sans-serif', animation: 'medbook-scrim-in 200ms ease' }}>
+      <span style={{ display: 'inline-block', width: 14, height: 14, border: `2px solid ${t.border}`,
         borderTop: `2px solid ${t.text3}`, borderRadius: RADIUS.circle, animation: 'medbook-spin .7s linear infinite' }} />
+      Loading diagram…
     </div>
   );
 }
@@ -142,6 +146,8 @@ function VisualLearningPanelContent({ entryId, mode = 'full' }) {
   // entry_id + viz_type row) is the other half of "independent caching
   // behavior per type" — this is the client-side half of that guarantee.
   const [stateByType, setStateByType] = useState(() => (initialSaved ? stateFromSaved(initialSaved) : {}));
+  const savedTypes = useSavedVisualizationTypes(entryId);
+  useEffect(() => { if (!savedOnly) VisualizationService.prefetchSavedTypes([entryId]); }, [savedOnly, entryId]);
 
   useEffect(() => {
     if (!savedOnly || savedStatus !== 'loading') return undefined;
@@ -328,8 +334,12 @@ function VisualLearningPanelContent({ entryId, mode = 'full' }) {
         {visibleTypes.map(({ key, label }) => {
           const typeState = getTypeState(key);
           return (
-            <button key={key} onClick={() => setSelectedType(key)} style={typeChipStyle(t, key === selectedType)}>
+            <button key={key} onClick={() => setSelectedType(key)} style={typeChipStyle(t, key === selectedType)}
+              title={!savedOnly && typeState.status !== 'loaded' && savedTypes?.includes(key) ? 'Saved earlier — reopens from the cache if your Review hasn\'t changed' : undefined}>
               {!savedOnly && typeState.status === 'loaded' && <span style={{ color: t.ok }}>✓</span>}
+              {!savedOnly && typeState.status !== 'loaded' && savedTypes?.includes(key) && (
+                <span aria-label="saved" style={{ width: 6, height: 6, borderRadius: 999, background: t.accent, flexShrink: 0 }} />
+              )}
               {label}
             </button>
           );
@@ -441,7 +451,7 @@ function VisualLearningPanelContent({ entryId, mode = 'full' }) {
             </div>
           )}
           {current.saveStatus === 'saved' && !current.editMode && (
-            <div style={{ fontSize: FONT.size.xs, color: t.ok, marginBottom: SPACE.sm }}>✓ Saved</div>
+            <div style={{ fontSize: FONT.size.xs, color: t.ok, marginBottom: SPACE.sm, animation: 'medbook-scrim-in 220ms ease' }}>✓ Saved</div>
           )}
 
           {current.editMode ? (

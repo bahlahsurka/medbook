@@ -76,8 +76,23 @@ function isRealSavedDiagram(vizType, diagram) {
 const SAVED_CACHE_LIMIT = 40;
 const savedCache = new Map();
 
+// Lightweight "which types are saved" index for many entries at once — fed
+// by prefetchSavedTypes() (entry_id + viz_type only, never graph_data) and
+// by listSaved() results. Lets review screens show a saved count on the
+// Visual Learning button before it's opened.
+const TYPES_CACHE_LIMIT = 2000;
+const typesCache = new Map();
+const typesInFlight = new Set();
+const listeners = new Set();
+function notify() { listeners.forEach(fn => { try { fn(); } catch { /* listener errors are not ours */ } }); }
+function rememberTypes(entryId, types) {
+  typesCache.set(entryId, types);
+  while (typesCache.size > TYPES_CACHE_LIMIT) typesCache.delete(typesCache.keys().next().value);
+}
+
 function invalidateSaved(entryId) {
   savedCache.delete(entryId);
+  if (typesCache.delete(entryId)) notify();
 }
 
 function rememberSaved(entryId, value) {
@@ -142,7 +157,7 @@ const VisualizationService = {
     }
     const entry = { promise: null, value: undefined };
     entry.promise = fetchSaved(entryId).then(
-      list => { entry.value = list; return list; },
+      list => { entry.value = list; rememberTypes(entryId, list.map(v => v.vizType)); notify(); return list; },
       err => { if (savedCache.get(entryId) === entry) invalidateSaved(entryId); throw err; },
     );
     rememberSaved(entryId, entry);
@@ -152,6 +167,51 @@ const VisualizationService = {
   /** Synchronous peek at listSaved()'s cache — the loaded list, or undefined if not loaded yet. */
   peekSaved(entryId) {
     return savedCache.get(entryId)?.value;
+  },
+
+  /**
+   * Which visualization types are saved for an entry, if known (from a
+   * prefetch or a listSaved), else undefined. Synchronous.
+   * @returns {string[]|undefined}
+   */
+  getSavedTypes(entryId) {
+    // Same array instance until it changes (listSaved also records here),
+    // as useSyncExternalStore requires.
+    return typesCache.get(entryId);
+  },
+
+  /** Subscribe to changes in saved-type knowledge (for useSyncExternalStore). */
+  subscribeSaved(listener) {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  },
+
+  /**
+   * One batched, read-only lookup of which types are saved for up to 100
+   * entries (entry_id + viz_type only — no diagram payloads, never Groq).
+   * Entries already known or in flight are skipped, so calling this for a
+   * review window as the user moves through it costs one small request
+   * per ~100 new cards. Failures are silent: counts are a convenience.
+   */
+  async prefetchSavedTypes(entryIds) {
+    const ids = [...new Set(entryIds || [])].filter(id => id && !typesCache.has(id) && !savedCache.get(id)?.value && !typesInFlight.has(id)).slice(0, 100);
+    if (!ids.length) return;
+    ids.forEach(id => typesInFlight.add(id));
+    try {
+      const { data, error } = await supabase
+        .from('entry_visualizations')
+        .select('entry_id, viz_type')
+        .in('entry_id', ids)
+        .neq('graph_data', '{}'); // skip in-progress claim rows
+      if (error) return;
+      const byEntry = new Map(ids.map(id => [id, []]));
+      (data || []).forEach(r => byEntry.get(r.entry_id)?.push(r.viz_type));
+      byEntry.forEach((types, id) => rememberTypes(id, types));
+      notify();
+    } catch { /* offline etc. — counts simply stay unknown */ }
+    finally {
+      ids.forEach(id => typesInFlight.delete(id));
+    }
   },
 
   /** @deprecated Use generate('mind_map', entryId, options) — kept only so nothing outside this module needs to change if it still calls this directly. */

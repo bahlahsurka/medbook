@@ -9,6 +9,7 @@ import { loadSession, saveSession, clearSession, newSessionId } from '../lib/rev
 import { enqueueRating, newRatingId, flushNow } from '../lib/ratingOutbox';
 import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
 import { ReviewVisualLearningButton, ReviewVisualLearningDrawer } from './ReviewVisualLearning';
+import VisualizationService from '../services/visualization';
 import { getSavedKeyPoints, isKeyPointsStale } from '../lib/keyPoints';
 import { IconX } from '../lib/icons';
 import RichRuns from '../lib/RichRuns';
@@ -262,6 +263,12 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
   const openVl = useCallback(() => setVlOpen(true), []);
   const closeVl = useCallback(() => setVlOpen(false), []);
   useEffect(() => { setVlOpen(false); }, [card?.id]);
+  // Saved-diagram counts for the Visual Learning button, ~100 cards at a
+  // time in one lightweight read (no-op once known).
+  useEffect(() => {
+    if (!queue?.length || !VisualizationService.isConfigured()) return;
+    VisualizationService.prefetchSavedTypes(queue.slice(idx, idx + 100).map(e => e.id));
+  }, [queue, idx]);
   const cardHasImages = card?.images?.length > 0;
 
   // Keyboard: Space=reveal, Enter=Easy, g=Good, h=Hard, a=Again.

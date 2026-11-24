@@ -1,79 +1,91 @@
 // components/visualization/clinicalFlowchartGraph.js
 //
-// Converts a validated Clinical Flowchart diagram into @xyflow/react's
-// {nodes, edges} shape, using ELK.js's 'layered' top-to-bottom algorithm
-// (see elkLayout.js) — the standard, correct layout for a directed,
-// branching flow, and genuinely hard to hand-roll well for anything but
-// a trivial linear chain (unlike Mechanism Diagram's simpler staged
-// chain, which gets its own much cheaper sequentialLayout.js instead).
+// Converts a validated Clinical Flowchart into @xyflow/react's {nodes,
+// edges} using ELK 'layered' top-to-bottom (elkLayout.js). Branch
+// conditions are measured and handed to ELK as labels, and the routes ELK
+// returns are drawn as-is (diagramEdges.js RoutedEdge), so conditions sit
+// on their own branch instead of colliding on a shared segment.
+// React Flow's MarkerType.ArrowClosed is the plain string 'arrowclosed', so this module stays importable without the React Flow runtime (e.g. in unit tests).
+const ARROW = 'arrowclosed';
 import { computeElkLayout } from './elkLayout';
+import { nodeData, toneStyle } from './nodeTheme';
+import { measureNode } from './nodeMetrics';
 import { pickHandle } from './pickHandle';
+import { boundsOfRects, pickBestFit } from './viewport';
 
-const CATEGORY_ICON = { red_flag: '🚩', decision: '◆' };
+const NODE_SPEC = {
+  start: { variant: 'root', tone: 'root', shape: 'pill' },
+  decision: { variant: 'primary', tone: 'decision', shape: 'hexagon' },
+  action: { variant: 'standard', tone: 'neutral' },
+  outcome: { variant: 'standard', tone: 'ok', icon: '✓' },
+  red_flag: { variant: 'standard', tone: 'danger', icon: '🚩' },
+};
 
-function styleFor(t, category) {
-  const card = { background: t.surface, color: t.text2, border: `1px solid ${t.border}`, fontWeight: 500, fontSize: 12.5, padding: '9px 14px' };
-  switch (category) {
-    case 'start': return { background: t.accent, color: '#fff', border: `1px solid ${t.accent}`, fontWeight: 700, fontSize: 13.5, padding: '11px 18px', boxShadow: `0 4px 12px -4px ${t.accent}70` };
-    case 'decision': return { ...card, borderLeft: `3px solid ${t.accent}`, color: t.text, fontWeight: 600, selectedRingColor: `${t.accent}55` };
-    case 'red_flag': return { ...card, borderLeft: `3px solid ${t.danger}`, color: t.danger, fontWeight: 600, selectedRingColor: `${t.danger}55` };
-    case 'outcome': return { ...card, borderLeft: `3px solid ${t.ok}`, color: t.ok, fontWeight: 600, selectedRingColor: `${t.ok}55` };
-    default: return { ...card, borderLeft: `3px solid ${t.borderStrong}`, selectedRingColor: 'rgba(37,99,235,.35)' }; // 'action'
-  }
-}
+export const BRANCH_LABEL_SPEC = { fontSize: 11, weight: 700, lineHeight: 1.3, padX: 7, padY: 3, minWidth: 0, maxWidth: 150, extraX: 2, extraY: 2 };
 
-function shapeFor(category) {
-  if (category === 'decision') return 'hexagon';
-  if (category === 'start') return 'pill';
-  return 'rect';
-}
-
-export async function buildClinicalFlowchartFlowGraph(diagram, t) {
+/**
+ * @param {{topic,nodes,edges}} diagram
+ * @param {object} t
+ * @param {{container?:{width,height,insets}}} [options] — with a container,
+ *   left-to-right is used instead of the conventional top-to-bottom only
+ *   when it fits that container clearly better.
+ */
+export async function buildClinicalFlowchartFlowGraph(diagram, t, { container } = {}) {
   const nodes = diagram?.nodes || [];
   const edges = diagram?.edges || [];
-  const positions = await computeElkLayout(nodes.map(n => ({ id: n.id, label: n.label })), edges, { algorithm: 'layered', direction: 'DOWN' });
-  // Phase 4: a node the user has dragged during editing carries its own
-  // `position` field (graphDiagramEdits.js's moveNode) that overrides
-  // ELK's own computed placement for THAT node only — a diagram with no
-  // dragged nodes yet lays out exactly as before.
+  const specOf = (n) => NODE_SPEC[n.category] || NODE_SPEC.action;
+  const built = new Map(nodes.map(n => [n.id, nodeData(n, specOf(n))]));
+  const edgeId = (e, i) => `cf-e${i}-${e.source}-${e.target}`;
+
+  const elkNodes = nodes.map(n => ({ id: n.id, ...built.get(n.id).size }));
+  const elkEdges = edges.map((e, i) => ({
+    id: edgeId(e, i), source: e.source, target: e.target,
+    label: e.label ? { text: e.label, ...measureNode(e.label, BRANCH_LABEL_SPEC) } : undefined,
+  }));
+  const directions = container ? ['DOWN', 'RIGHT'] : ['DOWN'];
+  const layouts = await Promise.all(directions.map(async (direction) => {
+    const result = await computeElkLayout(elkNodes, elkEdges, { algorithm: 'layered', direction });
+    return { key: direction, ...result, bounds: boundsOfRects([...result.positions.values()]) };
+  }));
+  const chosen = layouts.length > 1 ? pickBestFit(layouts, container, 1.25) : layouts[0];
+  const { positions, routes } = chosen;
+  // A node the user dragged while editing carries its own top-left
+  // `position` (graphDiagramEdits.js's moveNode), which always wins; edges
+  // touching it fall back from ELK's route to a live curve.
   const byId = new Map(nodes.map(n => [n.id, n]));
-  const positionOf = (id) => byId.get(id)?.position || positions.get(id) || { x: 0, y: 0 };
+  const layoutAt = (id) => { const p = positions.get(id); return p ? { x: p.x, y: p.y } : { x: 0, y: 0 }; };
+  const positionOf = (id) => byId.get(id)?.position || layoutAt(id);
 
-  const flowNodes = nodes.map(n => {
-    const pos = positionOf(n.id);
-    return {
-      id: n.id,
-      type: 'graphNode',
-      position: { x: pos.x, y: pos.y },
-      data: {
-        label: n.label, style: styleFor(t, n.category), shape: shapeFor(n.category), icon: CATEGORY_ICON[n.category],
-        explanation: n.explanation, sourceType: n.sourceType, sourceRef: n.sourceRef,
-      },
-      draggable: true,
-    };
-  });
+  const flowNodes = nodes.map(n => ({
+    id: n.id,
+    type: 'graphNode',
+    position: positionOf(n.id),
+    data: { ...built.get(n.id).data, style: toneStyle(t, specOf(n).tone) },
+    draggable: true,
+  }));
 
+  const stroke = t.text4;
   const flowEdges = edges.map((e, i) => {
     const s = positionOf(e.source), tp = positionOf(e.target);
     const dx = tp.x - s.x, dy = tp.y - s.y;
     const hasBranchLabel = !!e.label;
+    const route = routes.get(edgeId(e, i));
     return {
-      id: `cf-e${i}-${e.source}-${e.target}`,
+      id: edgeId(e, i),
       source: e.source, target: e.target,
       sourceHandle: pickHandle(dx, dy), targetHandle: pickHandle(-dx, -dy),
+      type: 'routed',
       label: e.label || undefined,
-      // Branch conditions ("Yes" / "No" / a specific threshold) are the
-      // single most important thing to read at a glance on a flowchart —
-      // bold and theme-accented rather than the quieter grey Mind Map/
-      // Knowledge Network use for their more incidental edge labels.
+      // Branch conditions are the most important thing to read on a
+      // flowchart — bold and accent-coloured.
       labelStyle: hasBranchLabel
         ? { fill: t.accent, fontSize: 11, fontWeight: 700, fontFamily: 'Inter,sans-serif' }
         : { fill: t.text3, fontSize: 10.5, fontFamily: 'Inter,sans-serif' },
-      labelBgStyle: { fill: t.surface }, labelBgPadding: [4, 2],
-      style: { stroke: t.borderStrong, strokeWidth: 1.8 },
-      type: 'smoothstep',
+      style: { stroke, strokeWidth: 1.7 },
+      markerEnd: { type: ARROW, color: stroke, width: 16, height: 16 },
+      data: { points: route?.points, labelBox: route?.labelBox, sourceAt: layoutAt(e.source), targetAt: layoutAt(e.target) },
     };
   });
 
-  return { flowNodes, flowEdges };
+  return { flowNodes, flowEdges, meta: { direction: chosen.key } };
 }

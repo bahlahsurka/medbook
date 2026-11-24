@@ -1,79 +1,84 @@
 // components/visualization/elkLayout.js
 //
-// Shared ELK.js wrapper for the two visualization types that are genuinely
-// general/complex graphs — Knowledge Network (many interconnections, no
-// single tree-like hierarchy, can have cycles) and Clinical Flowchart (a
-// true directed, branching flow with Yes/No decisions) — per this phase's
-// own brief: "Use ELK.js... only where genuinely necessary, especially for
-// complex flowcharts or networks." Mind Map (a tree radiating from one
-// center) keeps its own much cheaper radial layout (mindMapLayout.js,
-// unchanged from Phase 2) and Mechanism Diagram (a simple linear stage
-// chain) gets its own purpose-built one (sequentialLayout.js) — neither
-// is a "complex flowchart or network", so bringing ELK's weight to them
-// would be exactly the unnecessary-dependency-use this phase warns against.
+// Shared ELK.js wrapper for the two genuinely general graphs — Clinical
+// Flowchart (directed, branching: 'layered') and Knowledge Network
+// (cross-linked, no single hierarchy: 'stress'). Mind Map and Mechanism
+// Diagram use their own cheaper layouts.
 //
-// Lazy-loaded alongside its two callers' own renderers (KnowledgeNetwork
-// Renderer.js / ClinicalFlowchartRenderer.js), which are themselves
-// React.lazy-loaded from VisualLearningPanel.js — elkjs never reaches the
-// browser until a user actually opens one of those two diagram types.
+// Nodes are laid out at their REAL rendered sizes (nodeTheme.js), and
+// flowchart edge labels are given to ELK as sized labels, so ELK reserves
+// room for "Unstable (SBP < 90)" between layers and returns the
+// orthogonal route + label position it chose. Those routes are drawn as-is
+// by diagramEdges.js's RoutedEdge, which is what keeps branch labels from
+// colliding.
 //
-// Imports elkjs's own browser-safe BUNDLED entry point, not the package's
-// default 'elkjs' export — the default entry conditionally requires the
-// 'web-worker' Node polyfill package for non-browser environments, and
-// webpack's static analysis tries to resolve that require() even though
-// it's inside a runtime typeof-check branch that never actually executes
-// in a browser, which breaks a CRA/webpack production build ("Module not
-// found: Error: Can't resolve 'web-worker'"). elk.bundled.js has the
-// layout algorithms inlined with no worker/Node dependency at all — a
-// well-documented elkjs+webpack compatibility issue, not something to fix
-// by adding a 'web-worker' dependency this app never otherwise needs.
+// Lazy-loaded with its two callers' renderers. Imports elkjs's bundled
+// browser build (the default entry requires a 'web-worker' polyfill that
+// breaks the CRA build).
 import ELK from 'elkjs/lib/elk.bundled.js';
+import { removeOverlaps } from './overlapRemoval';
 
 const elk = new ELK();
 
-// ELK needs SOME box size per node to lay out against — this is a rough
-// estimate from the label's own length, not a promise of the exact
-// rendered DOM size (GraphNode.js can still wrap/grow slightly within
-// this). Good enough for spacing decisions; it doesn't need to be exact.
-function estimateSize(label) {
-  const width = Math.min(220, Math.max(110, (label || '').length * 7 + 40));
-  return { width, height: 48 };
-}
+const LAYERED_OPTIONS = {
+  'elk.algorithm': 'layered',
+  'elk.edgeRouting': 'ORTHOGONAL',
+  'elk.spacing.nodeNode': '30',
+  'elk.layered.spacing.nodeNodeBetweenLayers': '46',
+  'elk.spacing.edgeNode': '18',
+  'elk.spacing.edgeEdge': '14',
+  'elk.spacing.edgeLabel': '6',
+  'elk.layered.spacing.edgeNodeBetweenLayers': '18',
+  'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+  'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+  'elk.edgeLabels.placement': 'CENTER',
+  'elk.padding': '[top=0,left=0,bottom=0,right=0]',
+};
 
 /**
- * @param {Array<{id:string, label?:string}>} nodes
- * @param {Array<{source:string, target:string}>} edges
- * @param {{algorithm?:string, direction?:string}} [options] — 'layered'/
- *   'DOWN' for a flowchart's top-to-bottom decision flow; 'force' (no
- *   direction) for a general, non-hierarchical network.
- * @returns {Promise<Map<string,{x:number,y:number,width:number,height:number}>>}
- *   Positions are ELK's own top-left-origin coordinates — GraphNode/React
- *   Flow treat `position` as a top-left anchor too, so no conversion is
- *   needed between the two.
+ * @param {Array<{id:string, width:number, height:number}>} nodes
+ * @param {Array<{id:string, source:string, target:string, label?:{text:string,width:number,height:number}}>} edges
+ * @param {{algorithm?:'layered'|'stress', direction?:string}} [options]
+ * @returns {Promise<{positions:Map<string,{x,y,width,height}>, routes:Map<string,{points:Array<{x,y}>, labelBox?:{x,y,width,height}}>}>}
+ *   Top-left coordinates, the same anchor React Flow uses.
  */
-export async function computeElkLayout(nodes, edges, { algorithm = 'layered', direction = 'DOWN' } = {}) {
-  if (!nodes.length) return new Map();
-
-  const layoutOptions = {
-    'elk.algorithm': algorithm,
-    'elk.spacing.nodeNode': '36',
-  };
-  if (algorithm === 'layered') {
-    layoutOptions['elk.direction'] = direction;
-    layoutOptions['elk.layered.spacing.nodeNodeBetweenLayers'] = '70';
-  }
-
-  const graph = {
-    id: 'root',
-    layoutOptions,
-    children: nodes.map(n => ({ id: n.id, ...estimateSize(n.label) })),
-    edges: edges.map((e, i) => ({ id: `elk-e${i}`, sources: [e.source], targets: [e.target] })),
-  };
-
-  const result = await elk.layout(graph);
+export async function computeElkLayout(nodes, edges, { algorithm = 'layered', direction = 'DOWN', edgeLength } = {}) {
   const positions = new Map();
-  for (const child of result.children || []) {
-    positions.set(child.id, { x: child.x, y: child.y, width: child.width, height: child.height });
+  const routes = new Map();
+  if (!nodes.length) return { positions, routes };
+  const ids = new Set(nodes.map(n => n.id));
+  const validEdges = edges.filter(e => ids.has(e.source) && ids.has(e.target) && e.source !== e.target);
+
+  if (algorithm === 'stress') {
+    const avgW = nodes.reduce((s, n) => s + n.width, 0) / nodes.length;
+    const result = await elk.layout({
+      id: 'root',
+      layoutOptions: { 'elk.algorithm': 'stress', 'elk.stress.desiredEdgeLength': String(Math.round(edgeLength || avgW * 0.6 + 90)) },
+      children: nodes.map(n => ({ id: n.id, width: n.width, height: n.height })),
+      edges: validEdges.map(e => ({ id: e.id, sources: [e.source], targets: [e.target] })),
+    });
+    const rects = (result.children || []).map(c => ({ id: c.id, x: c.x, y: c.y, w: c.width, h: c.height }));
+    removeOverlaps(rects, { margin: 22 });
+    for (const r of rects) positions.set(r.id, { x: r.x, y: r.y, width: r.w, height: r.h });
+    return { positions, routes };
   }
-  return positions;
+
+  const result = await elk.layout({
+    id: 'root',
+    layoutOptions: { ...LAYERED_OPTIONS, 'elk.direction': direction },
+    children: nodes.map(n => ({ id: n.id, width: n.width, height: n.height })),
+    edges: validEdges.map(e => ({
+      id: e.id, sources: [e.source], targets: [e.target],
+      labels: e.label ? [{ id: `${e.id}-label`, text: e.label.text, width: e.label.width, height: e.label.height }] : undefined,
+    })),
+  });
+  for (const c of result.children || []) positions.set(c.id, { x: c.x, y: c.y, width: c.width, height: c.height });
+  for (const e of result.edges || []) {
+    const sec = e.sections?.[0];
+    if (!sec) continue;
+    const points = [sec.startPoint, ...(sec.bendPoints || []), sec.endPoint].map(p => ({ x: p.x, y: p.y }));
+    const l = e.labels?.[0];
+    routes.set(e.id, { points, labelBox: l && Number.isFinite(l.x) ? { x: l.x, y: l.y, width: l.width, height: l.height } : undefined });
+  }
+  return { positions, routes };
 }

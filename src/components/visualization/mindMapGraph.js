@@ -1,87 +1,141 @@
 // components/visualization/mindMapGraph.js
 //
-// Converts a validated Mind Map diagram ({centralTopic, nodes, edges} —
-// see VisualizationValidator.js) plus computeMindMapLayout's positions
-// into the exact {nodes, edges} shape @xyflow/react's <ReactFlow> renders.
-// Kept separate from MindMapRenderer.js so the pure data transform (easy
-// to unit test) never needs a DOM/React Flow runtime to exercise.
-import { computeMindMapLayout } from './mindMapLayout';
+// Converts a validated Mind Map diagram ({centralTopic, nodes, edges}) plus
+// computeMindMapLayout's centres into @xyflow/react's {nodes, edges}. Pure
+// data transform (unit-tested without a DOM/React Flow runtime).
+import { computeMindMapLayout, MIND_MAP_NODE_SPEC } from './mindMapLayout';
+import { nodeData, toneStyle } from './nodeTheme';
+import { pickHandle } from './pickHandle';
+import { boundsOfRects, pickBestFit } from './viewport';
+import { facingAnchors, sideCurve, polylineMidpoint } from './edgeGeometry';
+import { placeLabels, EDGE_LABEL_SPEC } from './labelPlacement';
+import { measureNode } from './nodeMetrics';
 
 const HANDLE_IDS = ['top', 'right', 'bottom', 'left'];
 
-/** Which of a node's four anchor handles points most toward (dx, dy). */
-function pickHandle(dx, dy) {
-  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? 'right' : 'left';
-  return dy >= 0 ? 'bottom' : 'top';
+// Branch-level connections are heavier and accent-tinted (they carry the
+// map's structure); deeper ones are quieter. A relationship not grounded
+// in the review (touches an ai_context node) is dashed.
+function edgeStyleFor(t, provenance, fromCentre) {
+  const base = fromCentre
+    ? { stroke: `${t.accent}99`, strokeWidth: 2.2 }
+    : { stroke: t.borderStrong, strokeWidth: 1.6 };
+  return provenance === 'entry' ? base : { ...base, stroke: t.text4, strokeDasharray: '5 4' };
 }
 
-// A relationship NOT grounded in the review itself (touches an ai_context
-// node, per VisualizationValidator.js's computed edge.provenance) is drawn
-// lighter/dashed rather than identically to an entry-grounded one — the
-// rendering-layer half of "unsupported or uncertain relationships can be
-// identified rather than silently presented as established facts" (the
-// data-layer half is the provenance field itself).
-function edgeStyleFor(t, provenance) {
-  if (provenance === 'entry') {
-    return { stroke: t.borderStrong, strokeWidth: 1.8 };
-  }
-  return { stroke: t.text4, strokeWidth: 1.4, strokeDasharray: '5 4' };
-}
+const OUTLINE_STEM = 14; // outline connectors drop from this far inside the parent's left edge
+const OUTLINE_ROOT_STEM = 24;
 
 /**
  * @param {{centralTopic:string, nodes:Array, edges:Array}} diagram
- * @param {object} t — current theme tokens (useTheme().t), used for edge colour only;
- *   node colour comes from MindMapNode itself reading useTheme() directly.
- * @param {Set<string>} [expandedIds] — which node ids currently show their
- *   expanded detail (passed through as node data so MindMapNode/the
- *   renderer's detail panel logic stay in sync with one source of truth).
+ * @param {object} t — theme tokens (useTheme().t)
+ * @param {{selectedId?:string, mode?:'balanced'|'right'|'outline', container?:{width,height,insets}}} [options]
+ *   With `container` (and no explicit `mode`), the layout mode that reads
+ *   best in that container is chosen: balanced or one-sided on wide
+ *   screens, a vertical outline tree on phones.
  */
-export function buildFlowGraph(diagram, t, { selectedId } = {}) {
-  const positions = computeMindMapLayout(diagram);
-  // Phase 4: a node the user has dragged during editing carries its own
-  // `position` field (see graphDiagramEdits.js's moveNode) that overrides
-  // computeMindMapLayout's own radial placement for THAT node only — a
-  // diagram with no dragged nodes yet (every pre-Phase-4 diagram) lays out
-  // exactly as before, since no node has this field at all.
-  const positionOf = (n) => n?.position || positions.get(n?.id) || { x: 0, y: 0 };
-  const byId = new Map((diagram?.nodes || []).map(n => [n.id, n]));
+export function buildFlowGraph(diagram, t, { selectedId, mode, container } = {}) {
+  const nodes = diagram?.nodes || [];
+  const built = new Map(nodes.map(n => {
+    const spec = MIND_MAP_NODE_SPEC[n.category] || MIND_MAP_NODE_SPEC.subtopic;
+    return [n.id, nodeData(n, spec)];
+  }));
+  const sizeOf = (n) => built.get(n.id).size;
+  const candidates = mode ? [mode] : !container ? ['balanced'] : container.width < 560 ? ['outline', 'right', 'balanced'] : ['balanced', 'right'];
+  const layouts = candidates.map(m => {
+    const c = computeMindMapLayout(diagram, sizeOf, { mode: m });
+    const rects = nodes.map(n => { const p = c.get(n.id); const s = sizeOf(n); return { x: p.x - s.width / 2, y: p.y - s.height / 2, ...s }; });
+    return { key: m, centres: c, bounds: boundsOfRects(rects) };
+  });
+  const chosen = container && layouts.length > 1 ? pickBestFit(layouts, container) : layouts[0];
+  const centres = chosen.centres;
+  const layoutMode = chosen.key;
+  const central = nodes.find(n => n.category === 'central_topic');
 
-  const flowNodes = (diagram?.nodes || []).map(n => {
-    const pos = positionOf(n);
+  // A node the user dragged while editing carries its own top-left
+  // `position` (graphDiagramEdits.js's moveNode), which always wins.
+  const topLeftOf = (n) => {
+    if (n?.position) return n.position;
+    const c = centres.get(n?.id) || { x: 0, y: 0 };
+    const { width, height } = built.get(n.id).size;
+    return { x: c.x - width / 2, y: c.y - height / 2 };
+  };
+
+  const flowNodes = nodes.map(n => {
+    const spec = MIND_MAP_NODE_SPEC[n.category] || MIND_MAP_NODE_SPEC.subtopic;
+    const { data } = built.get(n.id);
     return {
       id: n.id,
       type: 'mindMapNode',
-      position: { x: pos.x, y: pos.y },
+      position: topLeftOf(n),
       selected: n.id === selectedId,
-      data: { label: n.label, category: n.category, explanation: n.explanation, sourceType: n.sourceType, sourceRef: n.sourceRef },
-      // Central topic is visually the anchor of the whole diagram — pinned
-      // so a viewer dragging another node around never accidentally drags
-      // the one thing everything else is laid out relative to.
+      data: { ...data, style: toneStyle(t, spec.tone) },
+      // The central topic anchors the whole map — pinned so dragging other
+      // nodes never moves the one everything is laid out around.
       draggable: n.category !== 'central_topic',
     };
   });
 
-  const flowEdges = (diagram?.edges || []).map((e, i) => {
-    const sourcePos = positionOf(byId.get(e.source));
-    const targetPos = positionOf(byId.get(e.target));
-    const dx = targetPos.x - sourcePos.x;
-    const dy = targetPos.y - sourcePos.y;
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const layoutRect = (n) => { const c = centres.get(n.id); const s = sizeOf(n); return { x: c.x - s.width / 2, y: c.y - s.height / 2, ...s }; };
+
+  // Outline mode: an elbow from just inside the parent's left edge down to
+  // the child's middle, then into its left side.
+  const outlineRoute = (s, tg) => {
+    const ds = centres.get(s.id)?.depth, dt = centres.get(tg.id)?.depth;
+    if (ds === undefined || dt === undefined || Math.abs(ds - dt) !== 1) return null;
+    const [P, C] = ds < dt ? [layoutRect(s), layoutRect(tg)] : [layoutRect(tg), layoutRect(s)];
+    const stemX = P.x + (Math.min(ds, dt) === 0 ? OUTLINE_ROOT_STEM : OUTLINE_STEM);
+    const midY = C.y + C.height / 2;
+    const pts = [{ x: stemX, y: P.y + P.height }, { x: stemX, y: midY }, { x: C.x, y: midY }];
+    return ds < dt ? pts : pts.reverse();
+  };
+
+  const edges = diagram?.edges || [];
+  const routes = edges.map(e => {
+    const s = byId.get(e.source), tg = byId.get(e.target);
+    return layoutMode === 'outline' && s && tg && !s.position && !tg.position ? outlineRoute(s, tg) : null;
+  });
+  // Explicit labels only where their pill lands clear of nodes and each other.
+  const liveRect = (n) => { const p = topLeftOf(n); const sz = sizeOf(n); return { x: p.x, y: p.y, width: sz.width, height: sz.height }; };
+  const fitting = placeLabels(edges.map((e, i) => {
+    const s = byId.get(e.source), tg = byId.get(e.target);
+    if (!e.label || !s || !tg) return null;
+    let mid;
+    if (routes[i]) mid = polylineMidpoint(routes[i]);
+    else {
+      const toR = (r) => ({ x: r.x, y: r.y, w: r.width, h: r.height });
+      const a = facingAnchors(toR(liveRect(s)), toR(liveRect(tg)), s.position || tg.position ? 'auto' : 'x');
+      mid = sideCurve(a.start, a.startSide, a.end, a.endSide).mid;
+    }
+    const sz = measureNode(e.label, EDGE_LABEL_SPEC);
+    return { key: i, cx: mid.x, cy: mid.y, width: sz.width, height: sz.height };
+  }).filter(Boolean), nodes.map(liveRect));
+
+  const flowEdges = edges.map((e, i) => {
+    const s = byId.get(e.source), tg = byId.get(e.target);
+    const sp = s ? topLeftOf(s) : { x: 0, y: 0 }, tp = tg ? topLeftOf(tg) : { x: 0, y: 0 };
+    const dx = tp.x - sp.x, dy = tp.y - sp.y;
+    const fromCentre = !!central && (e.source === central.id || e.target === central.id);
+    const dragged = !!(s?.position || tg?.position);
+    const route = routes[i];
     return {
       id: `e${i}-${e.source}-${e.target}`,
       source: e.source,
       target: e.target,
       sourceHandle: pickHandle(dx, dy),
       targetHandle: pickHandle(-dx, -dy),
+      type: route ? 'routed' : 'branch',
       label: e.label || undefined,
-      labelStyle: { fill: t.text3, fontSize: 10.5, fontFamily: 'Inter,sans-serif' },
-      labelBgStyle: { fill: t.surface },
-      labelBgPadding: [4, 2],
-      style: edgeStyleFor(t, e.provenance),
-      type: 'smoothstep',
+      labelStyle: { fill: t.text3, fontSize: 10.5, fontWeight: 600 },
+      style: edgeStyleFor(t, e.provenance, fromCentre),
+      data: route
+        ? { points: route, sourceAt: layoutRect(s), targetAt: layoutRect(tg), showLabel: fitting.has(i) }
+        : { axis: dragged ? 'auto' : 'x', showLabel: fitting.has(i) },
     };
   });
 
-  return { flowNodes, flowEdges };
+  return { flowNodes, flowEdges, meta: { mode: layoutMode } };
 }
 
 export { HANDLE_IDS, pickHandle };
