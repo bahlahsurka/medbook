@@ -18,7 +18,7 @@
 // identity color (see lib/colorContrast.js) and a small set of translucent
 // white overlays used only in dark mode (unfilled-track fill, hairlines,
 // hover sweep) — never a new hue or a decorative background wash.
-import { SPACE, RADIUS, FONT, MOTION } from '../lib/theme';
+import { SPACE, RADIUS, FONT, MOTION, fs } from '../lib/theme';
 import { formatCoveragePct } from '../lib/syllabusProgress';
 import { ensureDarkContrastFloor, barFillGradient } from '../lib/colorContrast';
 
@@ -45,7 +45,7 @@ export function OverallSyllabusProgress({ colors: c, total, reviewed, unreviewed
     <div style={{ fontFamily:SANS }}>
       <div style={{ display:'flex', alignItems:'baseline', gap:compact?10:14, flexWrap:'wrap' }}>
         <div style={{
-          fontSize: compact ? 32 : FONT.size.display, fontWeight:FONT.weight.bold, color:c.text,
+          fontSize: compact ? fs(32) : FONT.size.display, fontWeight:FONT.weight.bold, color:c.text,
           lineHeight:1, letterSpacing:-1, fontVariantNumeric:'tabular-nums' }}>
           {pctLabel}
         </div>

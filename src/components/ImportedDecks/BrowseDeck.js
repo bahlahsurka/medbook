@@ -7,7 +7,7 @@
 // same hook the entry list and global search already use.
 
 import { useState, useEffect, useCallback } from 'react';
-import { useTheme } from '../../lib/theme';
+import { useTheme, fs } from '../../lib/theme';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import * as api from '../../lib/importedDecks/api';
 import { FLAGS, FLAG_COLORS, FLAG_NAMES } from '../../lib/importedDecks/flags';
@@ -59,36 +59,36 @@ export default function BrowseDeck({ deck, userId, onExit }) {
   return (
     <div style={{ maxWidth: 680, margin: '0 auto', fontFamily: 'Inter,sans-serif' }}>
       <button onClick={onExit} style={{ background: 'none', border: 'none', color: t.text3,
-        cursor: 'pointer', fontSize: 13, fontWeight: 500, marginBottom: 14, padding: 0 }}>
+        cursor: 'pointer', fontSize: fs(13), fontWeight: 500, marginBottom: 14, padding: 0 }}>
         ← {deck.display_name}
       </button>
 
-      <div style={{ fontSize: 16, fontWeight: 700, color: t.text, marginBottom: 14 }}>
-        Browse <span style={{ fontSize: 13, color: t.text4, fontWeight: 400 }}>({total.toLocaleString()})</span>
+      <div style={{ fontSize: fs(16), fontWeight: 700, color: t.text, marginBottom: 14 }}>
+        Browse <span style={{ fontSize: fs(13), color: t.text4, fontWeight: 400 }}>({total.toLocaleString()})</span>
       </div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search cards…"
           style={{ flex: 1, minWidth: 160, background: t.surface2, border: `1px solid ${t.borderStrong}`,
-            borderRadius: 8, color: t.text, padding: '9px 12px', fontSize: 13.5, outline: 'none',
+            borderRadius: 8, color: t.text, padding: '9px 12px', fontSize: fs(13.5), outline: 'none',
             fontFamily: 'Inter,sans-serif' }} />
         <select value={state} onChange={e => setState(e.target.value)}
           style={{ background: t.surface2, border: `1px solid ${t.borderStrong}`, borderRadius: 8,
-            color: t.text, padding: '9px 10px', fontSize: 13, fontFamily: 'Inter,sans-serif' }}>
+            color: t.text, padding: '9px 10px', fontSize: fs(13), fontFamily: 'Inter,sans-serif' }}>
           <option value="">All states</option>
           {STATES.map(s => <option key={s} value={s}>{s[0].toUpperCase() + s.slice(1)}</option>)}
         </select>
         {allTags.length > 0 && (
           <select value={tag} onChange={e => setTag(e.target.value)}
             style={{ background: t.surface2, border: `1px solid ${t.borderStrong}`, borderRadius: 8,
-              color: t.text, padding: '9px 10px', fontSize: 13, fontFamily: 'Inter,sans-serif' }}>
+              color: t.text, padding: '9px 10px', fontSize: fs(13), fontFamily: 'Inter,sans-serif' }}>
             <option value="">All tags</option>
             {allTags.map(tg => <option key={tg} value={tg}>{tg}</option>)}
           </select>
         )}
         <select value={flag} onChange={e => setFlag(e.target.value)}
           style={{ background: t.surface2, border: `1px solid ${t.borderStrong}`, borderRadius: 8,
-            color: t.text, padding: '9px 10px', fontSize: 13, fontFamily: 'Inter,sans-serif' }}>
+            color: t.text, padding: '9px 10px', fontSize: fs(13), fontFamily: 'Inter,sans-serif' }}>
           <option value="">All flags</option>
           <option value="0">🏳 No flag</option>
           {FLAGS.map(f => <option key={f} value={f}>🚩 {FLAG_NAMES[f]}</option>)}
@@ -96,14 +96,14 @@ export default function BrowseDeck({ deck, userId, onExit }) {
       </div>
 
       {err && <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: 8,
-        padding: '10px 14px', fontSize: 13, color: t.danger, marginBottom: 14 }}>{err}</div>}
+        padding: '10px 14px', fontSize: fs(13), color: t.danger, marginBottom: 14 }}>{err}</div>}
 
       {rows === null ? (
-        <div style={{ textAlign: 'center', padding: '40px 0', color: t.text4, fontSize: 13 }}>Loading…</div>
+        <div style={{ textAlign: 'center', padding: '40px 0', color: t.text4, fontSize: fs(13) }}>Loading…</div>
       ) : rows.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '50px 20px' }}>
-          <div style={{ fontSize: 32, marginBottom: 10 }}>🔍</div>
-          <div style={{ fontSize: 13.5, color: t.text3 }}>
+          <div style={{ fontSize: fs(32), marginBottom: 10 }}>🔍</div>
+          <div style={{ fontSize: fs(13.5), color: t.text3 }}>
             {debSearch || state || tag ? 'No cards match these filters.' : 'No cards in this deck.'}
           </div>
         </div>
@@ -117,7 +117,7 @@ export default function BrowseDeck({ deck, userId, onExit }) {
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 14, marginTop: 18 }}>
           <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
             style={{ ...pageBtn(t), opacity: page === 0 ? 0.4 : 1 }}>‹ Prev</button>
-          <span style={{ fontSize: 12.5, color: t.text3 }}>Page {page + 1} of {totalPages}</span>
+          <span style={{ fontSize: fs(12.5), color: t.text3 }}>Page {page + 1} of {totalPages}</span>
           <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
             style={{ ...pageBtn(t), opacity: page >= totalPages - 1 ? 0.4 : 1 }}>Next ›</button>
         </div>
@@ -137,7 +137,7 @@ export default function BrowseDeck({ deck, userId, onExit }) {
 
 function pageBtn(t) {
   return { background: t.surface2, border: `1px solid ${t.border}`, color: t.text2, borderRadius: 6,
-    padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', fontFamily: 'Inter,sans-serif' };
+    padding: '6px 12px', fontSize: fs(12.5), cursor: 'pointer', fontFamily: 'Inter,sans-serif' };
 }
 
 // Row shows enough to identify a card WITHOUT loading the full sandboxed
@@ -152,20 +152,20 @@ function CardRow({ card, t, onOpen }) {
       <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
         background: STATE_COLOR[card.state] || t.text4 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis',
+        <div style={{ fontSize: fs(13), color: t.text, overflow: 'hidden', textOverflow: 'ellipsis',
           whiteSpace: 'nowrap' }}>{preview || '(empty)'}</div>
         <div style={{ display: 'flex', gap: 8, marginTop: 3, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 10.5, color: t.text4, textTransform: 'capitalize' }}>{card.state}</span>
+          <span style={{ fontSize: fs(10.5), color: t.text4, textTransform: 'capitalize' }}>{card.state}</span>
           {(card.tags || []).slice(0, 3).map(tg => (
-            <span key={tg} style={{ fontSize: 10, color: t.text4, background: t.surface3,
+            <span key={tg} style={{ fontSize: fs(10), color: t.text4, background: t.surface3,
               borderRadius: 8, padding: '1px 7px' }}>{tg}</span>
           ))}
-          {card.due_at && <span style={{ fontSize: 10.5, color: t.text4 }}>
+          {card.due_at && <span style={{ fontSize: fs(10.5), color: t.text4 }}>
             due {new Date(card.due_at).toLocaleDateString()}
           </span>}
         </div>
       </div>
-      <span style={{ fontSize: 13, color: t.text4, flexShrink: 0 }}>›</span>
+      <span style={{ fontSize: fs(13), color: t.text4, flexShrink: 0 }}>›</span>
     </div>
   );
 }
@@ -216,12 +216,12 @@ function CardPreviewModal({ t, card, onClose, onFlagChange }) {
       <div onClick={e => e.stopPropagation()} style={{ background: t.surface, borderRadius: 14, padding: 20,
         maxWidth: 520, width: '100%', boxShadow: `0 8px 32px ${t.shadowStrong}`, fontFamily: 'Inter,sans-serif' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: t.text }}>Card Preview</span>
+          <span style={{ fontSize: fs(13), fontWeight: 700, color: t.text }}>Card Preview</span>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: t.text3,
-            cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
+            cursor: 'pointer', fontSize: fs(18), lineHeight: 1 }}>×</button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 12, opacity: flagBusy ? 0.5 : 1 }}>
-          <span style={{ fontSize: 11.5, color: t.text3, fontWeight: 600, marginRight: 1 }}>Flag:</span>
+          <span style={{ fontSize: fs(11.5), color: t.text3, fontWeight: 600, marginRight: 1 }}>Flag:</span>
           {FLAGS.map(f => (
             <button key={f} onClick={() => toggleFlag(f)} disabled={flagBusy}
               title={card.flag === f ? `Clear flag (${FLAG_NAMES[f]})` : FLAG_NAMES[f]}
@@ -231,10 +231,10 @@ function CardPreviewModal({ t, card, onClose, onFlagChange }) {
         </div>
         {note && model
           ? <CardRenderer card={card} note={note} model={model} resolvedMedia={resolvedMedia} revealed={revealed} />
-          : <div style={{ padding: '20px 0', textAlign: 'center', color: t.text4, fontSize: 13 }}>Loading…</div>}
+          : <div style={{ padding: '20px 0', textAlign: 'center', color: t.text4, fontSize: fs(13) }}>Loading…</div>}
         <button onClick={() => setRevealed(p => !p)} style={{ marginTop: 12, width: '100%',
           background: t.accent, color: '#fff', border: 'none', borderRadius: 8, padding: '10px 16px',
-          fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+          fontSize: fs(13), fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
           {revealed ? 'Hide Answer' : 'Show Answer'}
         </button>
       </div>

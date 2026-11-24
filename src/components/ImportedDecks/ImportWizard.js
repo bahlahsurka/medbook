@@ -5,7 +5,7 @@
 // language of DeckBrowser's own Modal.
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useTheme } from '../../lib/theme';
+import { useTheme, fs } from '../../lib/theme';
 import * as api from '../../lib/importedDecks/api';
 import { uploadApkg, createImportJob, startProcessing } from '../../lib/importedDecks/upload';
 import { savePendingImport, loadPendingImport, clearPendingImport, warmPendingImportDB } from '../../lib/importedDecks/pendingImport';
@@ -152,7 +152,7 @@ export default function ImportWizard({ userId, onClose, onImported }) {
   };
 
   const B = (bg, color = '#fff') => ({ background: bg, color, border: 'none', borderRadius: 8,
-    padding: '12px 22px', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' });
+    padding: '12px 22px', fontSize: fs(14), fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' });
 
   return (
     <div onClick={step === 'pick' ? closeAndClear : undefined} style={{ position: 'fixed', inset: 0,
@@ -188,8 +188,8 @@ function PickStep({ t, B, err, onClose, fileInputRef, onPick }) {
   const [dragOver, setDragOver] = useState(false);
   return (
     <>
-      <div style={{ fontSize: 17, fontWeight: 700, color: t.text, marginBottom: 6 }}>Import Anki Deck</div>
-      <div style={{ fontSize: 13, color: t.text3, marginBottom: 18 }}>
+      <div style={{ fontSize: fs(17), fontWeight: 700, color: t.text, marginBottom: 6 }}>Import Anki Deck</div>
+      <div style={{ fontSize: fs(13), color: t.text3, marginBottom: 18 }}>
         Choose a .apkg file exported from Anki.
       </div>
 
@@ -204,17 +204,17 @@ function PickStep({ t, B, err, onClose, fileInputRef, onPick }) {
           padding: '40px 20px', textAlign: 'center', cursor: 'pointer',
           background: dragOver ? t.navActiveBg : t.surface2, marginBottom: 16,
           transition: 'all .15s' }}>
-        <div style={{ fontSize: 34, marginBottom: 10 }}>📥</div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: t.text, marginBottom: 4 }}>
+        <div style={{ fontSize: fs(34), marginBottom: 10 }}>📥</div>
+        <div style={{ fontSize: fs(14), fontWeight: 600, color: t.text, marginBottom: 4 }}>
           Tap to choose a .apkg file
         </div>
-        <div style={{ fontSize: 12, color: t.text4 }}>or drag one here</div>
+        <div style={{ fontSize: fs(12), color: t.text4 }}>or drag one here</div>
       </div>
       <input ref={fileInputRef} type="file" accept=".apkg" style={{ display: 'none' }}
         onChange={e => onPick(e.target.files?.[0])} />
 
       {err && <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: 8,
-        padding: '10px 14px', fontSize: 13, color: t.danger, marginBottom: 14 }}>{err}</div>}
+        padding: '10px 14px', fontSize: fs(13), color: t.danger, marginBottom: 14 }}>{err}</div>}
 
       <button onClick={onClose} style={{ ...B(t.surface3, t.text2), width: '100%' }}>Cancel</button>
     </>
@@ -239,23 +239,23 @@ function OptionsStep({ t, B, file, resumed, importMedia, setImportMedia, onBack,
           boxShadow: '0 1px 3px rgba(0,0,0,.3)' }} />
       </label>
       <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: t.text }}>{label}</div>
-        {note && <div style={{ fontSize: 11.5, color: t.text4, marginTop: 2, lineHeight: 1.5 }}>{note}</div>}
+        <div style={{ fontSize: fs(13.5), fontWeight: 600, color: t.text }}>{label}</div>
+        {note && <div style={{ fontSize: fs(11.5), color: t.text4, marginTop: 2, lineHeight: 1.5 }}>{note}</div>}
       </div>
     </div>
   );
 
   return (
     <>
-      <div style={{ fontSize: 17, fontWeight: 700, color: t.text, marginBottom: 4 }}>Import Options</div>
-      <div style={{ fontSize: 12.5, color: t.text4, marginBottom: resumed ? 8 : 16, overflow: 'hidden',
+      <div style={{ fontSize: fs(17), fontWeight: 700, color: t.text, marginBottom: 4 }}>Import Options</div>
+      <div style={{ fontSize: fs(12.5), color: t.text4, marginBottom: resumed ? 8 : 16, overflow: 'hidden',
         textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {file?.name} · {file ? (file.size / 1024 / 1024).toFixed(1) : '0'} MB
       </div>
 
       {resumed && (
         <div style={{ background: t.navActiveBg, border: `1px solid ${t.navActiveBorder}`, borderRadius: 8,
-          padding: '9px 12px', fontSize: 12, color: t.navActiveText, marginBottom: 16, lineHeight: 1.5 }}>
+          padding: '9px 12px', fontSize: fs(12), color: t.navActiveText, marginBottom: 16, lineHeight: 1.5 }}>
           Picked up where you left off. This file was still waiting after the last attempt was interrupted.
         </div>
       )}
@@ -269,7 +269,7 @@ function OptionsStep({ t, B, file, resumed, importMedia, setImportMedia, onBack,
       {row('Import scheduling history', false, null,
         'Not supported. A shared/imported deck always starts fresh rather than inheriting someone else’s review intervals.', true)}
 
-      <div style={{ fontSize: 12, color: t.text4, lineHeight: 1.6, margin: '16px 0' }}>
+      <div style={{ fontSize: fs(12), color: t.text4, lineHeight: 1.6, margin: '16px 0' }}>
         The original .apkg is temporary. It's automatically deleted once the import is verified.
         If the import fails, it's kept so you don't have to re-upload.
       </div>
@@ -286,13 +286,13 @@ function OptionsStep({ t, B, file, resumed, importMedia, setImportMedia, onBack,
 function UploadingStep({ t, B, file, pct, onCancel }) {
   return (
     <>
-      <div style={{ fontSize: 17, fontWeight: 700, color: t.text, marginBottom: 4 }}>Uploading…</div>
-      <div style={{ fontSize: 12.5, color: t.text4, marginBottom: 20 }}>{file?.name}</div>
+      <div style={{ fontSize: fs(17), fontWeight: 700, color: t.text, marginBottom: 4 }}>Uploading…</div>
+      <div style={{ fontSize: fs(12.5), color: t.text4, marginBottom: 20 }}>{file?.name}</div>
       <div style={{ height: 8, background: t.surface3, borderRadius: 6, marginBottom: 10, overflow: 'hidden' }}>
         <div style={{ height: '100%', background: t.accent, borderRadius: 6,
           width: `${pct}%`, transition: 'width .2s' }} />
       </div>
-      <div style={{ fontSize: 13, color: t.text3, marginBottom: 20 }}>{pct}%</div>
+      <div style={{ fontSize: fs(13), color: t.text3, marginBottom: 20 }}>{pct}%</div>
       <button onClick={onCancel} style={{ ...B(t.surface3, t.text2), width: '100%' }}>Cancel Upload</button>
     </>
   );
@@ -330,8 +330,8 @@ function ProcessingStep({ t, B, job, onClose, onNudge }) {
 
   return (
     <>
-      <div style={{ fontSize: 17, fontWeight: 700, color: t.text, marginBottom: 4 }}>Importing Deck</div>
-      <div style={{ fontSize: 13, color: t.accent, fontWeight: 600, marginBottom: 18 }}>{stage}…</div>
+      <div style={{ fontSize: fs(17), fontWeight: 700, color: t.text, marginBottom: 4 }}>Importing Deck</div>
+      <div style={{ fontSize: fs(13), color: t.accent, fontWeight: 600, marginBottom: 18 }}>{stage}…</div>
 
       {job?.status === 'importing_cards' && notesLine && (
         <ProgressLine t={t} label="Importing cards" value={notesLine} />
@@ -340,22 +340,22 @@ function ProcessingStep({ t, B, job, onClose, onNudge }) {
         <ProgressLine t={t} label="Importing media" value={mediaLine} />
       )}
       {!['importing_cards', 'importing_media'].includes(job?.status) && (
-        <div style={{ fontSize: 12.5, color: t.text4, marginBottom: 16 }}>
+        <div style={{ fontSize: fs(12.5), color: t.text4, marginBottom: 16 }}>
           Working. This can take a few minutes for a large deck.
         </div>
       )}
 
       {looksStalled && (
         <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: 8,
-          padding: '10px 14px', fontSize: 12.5, color: t.danger, marginBottom: 14, lineHeight: 1.6 }}>
+          padding: '10px 14px', fontSize: fs(12.5), color: t.danger, marginBottom: 14, lineHeight: 1.6 }}>
           No progress in a couple of minutes. The background hand-off may have dropped.
           Tap Resume below; whatever's already imported is safe either way.
         </div>
       )}
       {nudgeErr && <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: 8,
-        padding: '10px 14px', fontSize: 12.5, color: t.danger, marginBottom: 14 }}>{nudgeErr}</div>}
+        padding: '10px 14px', fontSize: fs(12.5), color: t.danger, marginBottom: 14 }}>{nudgeErr}</div>}
 
-      <div style={{ fontSize: 11.5, color: t.text4, lineHeight: 1.6, marginBottom: 18 }}>
+      <div style={{ fontSize: fs(11.5), color: t.text4, lineHeight: 1.6, marginBottom: 18 }}>
         You can safely close this and come back. The import keeps running, and reopening
         Import will pick up right where it left off.
       </div>
@@ -375,8 +375,8 @@ function ProcessingStep({ t, B, job, onClose, onNudge }) {
 function ProgressLine({ t, label, value }) {
   return (
     <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 12.5, color: t.text3, marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 700, color: t.text }}>{value}</div>
+      <div style={{ fontSize: fs(12.5), color: t.text3, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: fs(20), fontWeight: 700, color: t.text }}>{value}</div>
     </div>
   );
 }
@@ -389,15 +389,15 @@ function FailedStep({ t, B, job, err, onRetry, onClose }) {
   const canRetry = !!job?.id;
   return (
     <>
-      <div style={{ fontSize: 34, marginBottom: 10 }}>⚠️</div>
-      <div style={{ fontSize: 17, fontWeight: 700, color: t.text, marginBottom: 6 }}>Import Failed</div>
+      <div style={{ fontSize: fs(34), marginBottom: 10 }}>⚠️</div>
+      <div style={{ fontSize: fs(17), fontWeight: 700, color: t.text, marginBottom: 6 }}>Import Failed</div>
       {job?.status && (
-        <div style={{ fontSize: 12, color: t.text4, marginBottom: 12 }}>
+        <div style={{ fontSize: fs(12), color: t.text4, marginBottom: 12 }}>
           Stopped at: {STAGE_LABEL[job.status] || job.status}
         </div>
       )}
       <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: 8,
-        padding: '10px 14px', fontSize: 13, color: t.danger, marginBottom: 18, lineHeight: 1.6 }}>
+        padding: '10px 14px', fontSize: fs(13), color: t.danger, marginBottom: 18, lineHeight: 1.6 }}>
         {message}
       </div>
       <div style={{ display: 'flex', gap: 10 }}>
@@ -412,11 +412,11 @@ function FailedStep({ t, B, job, err, onRetry, onClose }) {
 function CompleteStep({ t, B, job, onClose }) {
   return (
     <>
-      <div style={{ fontSize: 40, marginBottom: 12, textAlign: 'center' }}>✅</div>
-      <div style={{ fontSize: 17, fontWeight: 700, color: t.text, marginBottom: 6, textAlign: 'center' }}>
+      <div style={{ fontSize: fs(40), marginBottom: 12, textAlign: 'center' }}>✅</div>
+      <div style={{ fontSize: fs(17), fontWeight: 700, color: t.text, marginBottom: 6, textAlign: 'center' }}>
         Import Complete
       </div>
-      <div style={{ fontSize: 13, color: t.text3, marginBottom: 20, textAlign: 'center' }}>
+      <div style={{ fontSize: fs(13), color: t.text3, marginBottom: 20, textAlign: 'center' }}>
         {job?.imported_notes ? `${job.imported_notes.toLocaleString()} notes imported. ` : ''}
         The original .apkg has been deleted.
       </div>

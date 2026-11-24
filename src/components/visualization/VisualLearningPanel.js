@@ -25,8 +25,8 @@ import { cloneDiagram } from './graphDiagramEdits';
 import useSavedVisualizationTypes from './useSavedVisualizationTypes';
 import { contentHashHex } from '../../lib/contentHash';
 
-// One metadata entry per supported type — the selector, the idle-state
-// description, and the Generate button's label all read from this instead
+// One metadata entry per supported type — the format dropdown and the
+// Generate button's label all read from this instead
 // of hardcoding "Mind Map" the way this panel did before Phase 3's other
 // five types existed. Keep in sync with visualizationRegistry.js's own
 // SUPPORTED_VIZ_TYPES (that file is server-only, so this is a deliberate,
@@ -37,12 +37,12 @@ import { contentHashHex } from '../../lib/contentHash';
 // `editable`+`onDraftChange`); the other two swap in a dedicated
 // purpose-built editor component instead of a graph editor.
 const VISUALIZATION_TYPES = [
-  { key: 'mind_map', label: 'Mind Map', description: 'A central topic with its branches, red flags, and high-yield facts.', family: 'graph' },
-  { key: 'knowledge_network', label: 'Knowledge Network', description: 'Related concepts cross-linked by multiple kinds of relationships.', family: 'graph' },
-  { key: 'clinical_flowchart', label: 'Clinical Flowchart', description: 'A step-by-step clinical decision pathway, with clear branch conditions.', family: 'graph' },
-  { key: 'mechanism_diagram', label: 'Mechanism Diagram', description: 'A cause → mechanism → consequence chain showing how it happens.', family: 'graph' },
-  { key: 'comparison_map', label: 'Comparison Map', description: 'A side-by-side grid comparing related conditions, drugs, or treatments.', family: 'comparison' },
-  { key: 'visual_summary', label: 'Visual Summary', description: 'A compact, prioritized set of highlights for quick revision.', family: 'summary' },
+  { key: 'mind_map', label: 'Mind Map', family: 'graph' },
+  { key: 'knowledge_network', label: 'Knowledge Network', family: 'graph' },
+  { key: 'clinical_flowchart', label: 'Clinical Flowchart', family: 'graph' },
+  { key: 'mechanism_diagram', label: 'Mechanism Diagram', family: 'graph' },
+  { key: 'comparison_map', label: 'Comparison Map', family: 'comparison' },
+  { key: 'visual_summary', label: 'Visual Summary', family: 'summary' },
 ];
 const TYPE_BY_KEY = Object.fromEntries(VISUALIZATION_TYPES.map(t => [t.key, t]));
 
@@ -109,17 +109,6 @@ function RendererFallback({ t }) {
   );
 }
 
-function typeChipStyle(t, isSelected) {
-  return {
-    fontSize: FONT.size.xs, fontWeight: FONT.weight.semibold, fontFamily: 'Inter,sans-serif',
-    background: isSelected ? t.navActiveBg : t.surface2,
-    border: `1px solid ${isSelected ? t.navActiveBorder : t.border}`,
-    color: isSelected ? t.navActiveText : t.text3,
-    borderRadius: RADIUS.pill, padding: '6px 12px', cursor: 'pointer',
-    display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap',
-  };
-}
-
 /**
  * @param {{entryId: string}} props — the one thing this needs from
  *   DetailView; it fetches/generates everything else itself through
@@ -127,8 +116,8 @@ function typeChipStyle(t, isSelected) {
  *   (DetailView's own runAnalyze) owns the AI Analysis request instead of
  *   AISections.js making it.
  */
-function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
-  const { t } = useTheme();
+function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible = false, onHasDiagramChange }) {
+  const { t, isDark } = useTheme();
   // mode="saved" (review screens): read-only view of already-saved diagrams.
   // Loads them once via VisualizationService.listSaved (a plain RLS-scoped
   // table read, never /api/visualize, so never Groq) and hides every
@@ -183,8 +172,6 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
     setStateByType(prev => ({ ...prev, [key]: { ...(prev[key] || EMPTY_TYPE_STATE), ...patch } }));
   }, []);
 
-  const [showContextInput, setShowContextInput] = useState(false);
-  const [extraContext, setExtraContext] = useState('');
   const [showCoverage, setShowCoverage] = useState(false);
 
   const [recommendState, setRecommendState] = useState({ status: 'idle', recommended: [], rationale: '', error: '' });
@@ -215,7 +202,7 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
     requestInFlight.current.add(key);
     updateTypeState(key, { status: 'loading', error: '', errorKind: '', startedAt: Date.now() });
     try {
-      const res = await VisualizationService.generate(key, entryId, { extraContext: extraContext.trim(), regenerate });
+      const res = await VisualizationService.generate(key, entryId, { regenerate });
       updateTypeState(key, { status: 'loaded', result: res });
     } catch (e) {
       const message = e instanceof VisualizationServiceError ? e.message : 'Something went wrong generating this diagram.';
@@ -223,7 +210,7 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
     } finally {
       requestInFlight.current.delete(key);
     }
-  }, [entryId, extraContext, updateTypeState]);
+  }, [entryId, updateTypeState]);
 
   const runRecommend = useCallback(async () => {
     if (recommendInFlight.current) return;
@@ -365,149 +352,112 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
   // read straight from the table falls back to the client-side hash check.
   const isStale = typeof current.result?.stale === 'boolean' ? current.result.stale : !!staleByType[selectedType];
   const visibleTypes = savedOnly ? VISUALIZATION_TYPES.filter(({ key }) => stateByType[key]?.status === 'loaded') : VISUALIZATION_TYPES;
+  const isSavedType = (key) => !!stateByType[key]?.result?.visualization || !!savedTypes?.includes(key);
+
+  // Tells the entry page whether this entry has any diagram, so on wide
+  // screens it can move this panel to the full-width slot above the notes.
+  // Counts a diagram that is being regenerated too, so it doesn't jump.
+  const hasDiagram = useMemo(() => Object.values(stateByType).some(st => !!st.result?.visualization), [stateByType]);
+  useEffect(() => { if (!savedOnly) onHasDiagramChange?.(hasDiagram); }, [savedOnly, hasDiagram, onHasDiagramChange]);
+
+  // Collapse is per visit only: every time the entry opens it starts expanded.
+  const [collapsed, setCollapsed] = useState(false);
+  const canCollapse = collapsible && hasDiagram;
 
   if (savedOnly && (savedStatus !== 'loaded' || visibleTypes.length === 0)) {
     return <SavedModeState t={t} status={savedStatus} error={savedError}
       onRetry={() => { setSavedError(''); setSavedStatus('loading'); }} />;
   }
 
+  const loaded = current.status === 'loaded' && current.result;
+  const savedAt = fmtSavedDate(current.result?.visualization?.updatedAt);
+  const typeSelect = (
+    <TypeSelect t={t} isDark={isDark} value={selectedType} onChange={setSelectedType}
+      options={visibleTypes} isSaved={savedOnly ? null : isSavedType} />
+  );
+
+  const moreItems = [];
+  if (loaded && !savedOnly && !current.editMode && current.result.visualization?.isEdited) {
+    moreItems.push({ label: '⟲ Restore original AI version', onClick: () => requestRestore(selectedType) });
+  }
+  if (loaded && !savedOnly && !current.editMode) {
+    moreItems.push({ label: `🗑 Delete ${currentMeta.label}`, danger: true, onClick: () => requestDelete(selectedType) });
+  }
+
   return (
-    <div className={savedOnly ? undefined : 'mb-detail-card'} style={savedOnly ? undefined : { background: t.surface, border: `1px solid ${t.border}`,
-      borderRadius: RADIUS.lg, boxShadow: elevation(t, 'sm') }}>
+    <div className={savedOnly ? undefined : 'mb-detail-card'} data-testid={savedOnly ? undefined : 'visual-learning-panel'}
+      style={savedOnly ? undefined : { background: t.surface, border: `1px solid ${t.border}`,
+        borderRadius: RADIUS.lg, boxShadow: elevation(t, 'sm') }}>
 
-      {!savedOnly && <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: SPACE.md, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: FONT.size.micro, color: t.text4, letterSpacing: .8, fontWeight: FONT.weight.semibold,
-          textTransform: 'uppercase', flex: 1, display: 'flex', alignItems: 'center', gap: 7 }}>
-          <IconNetwork size={13} style={{ color: t.text4, flexShrink: 0 }} /> Visual Learning
-        </div>
-        <span style={{ fontSize: FONT.size.micro, color: t.text4, background: t.surface3, borderRadius: RADIUS.sm,
-          padding: '2px 7px', fontWeight: FONT.weight.semibold }}>
-          Preview
-        </span>
-      </div>}
-
-      {/* Type selector — explicit, never auto-generates. A ✓ marks a type
-          already generated this session so switching back to it is known
-          to be instant. */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: SPACE.sm }}>
-        {visibleTypes.map(({ key, label }) => {
-          const typeState = getTypeState(key);
-          return (
-            <button key={key} onClick={() => setSelectedType(key)} style={typeChipStyle(t, key === selectedType)}
-              title={!savedOnly && typeState.status !== 'loaded' && savedTypes?.includes(key) ? 'Saved to this entry' : undefined}>
-              {!savedOnly && typeState.status === 'loaded' && <span style={{ color: t.ok }}>✓</span>}
-              {!savedOnly && typeState.status !== 'loaded' && savedTypes?.includes(key) && (
-                <span aria-label="saved" style={{ width: 6, height: 6, borderRadius: 999, background: t.accent, flexShrink: 0 }} />
-              )}
-              {label}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Recommend — optional, advisory, never auto-generates anything.
-          Picking a recommended chip only switches the selector above;
-          generating still requires the usual explicit Generate click. */}
-      {!savedOnly && <div style={{ marginBottom: SPACE.md }}>
-        {recommendState.status !== 'loaded' && (
-          <button onClick={runRecommend} disabled={recommendState.status === 'loading'}
-            style={{ background: 'none', border: 'none', color: t.text3, fontSize: FONT.size.xs,
-              cursor: recommendState.status === 'loading' ? 'default' : 'pointer', padding: 0,
-              textDecoration: 'underline', fontFamily: 'Inter,sans-serif', display: 'flex', alignItems: 'center', gap: 5 }}>
-            <IconSparkle size={11} />
-            {recommendState.status === 'loading' ? 'Thinking about the best format…' : 'Not sure which format fits? Recommend one'}
-          </button>
-        )}
-        {recommendState.status === 'error' && (
-          <div style={{ fontSize: FONT.size.micro, color: t.text4, marginTop: 4 }}>{recommendState.error}</div>
-        )}
-        {recommendState.status === 'loaded' && (
-          <div style={{ background: t.surface2, border: `1px solid ${t.border}`, borderRadius: RADIUS.md,
-            padding: '8px 10px', fontSize: FONT.size.xs, color: t.text2 }}>
-            <div style={{ marginBottom: 6 }}>{recommendState.rationale}</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {recommendState.recommended.map(key => (
-                <button key={key} onClick={() => setSelectedType(key)} style={typeChipStyle(t, key === selectedType)}>
-                  {TYPE_BY_KEY[key]?.label || key}
-                </button>
-              ))}
-              <button onClick={() => setRecommendState({ status: 'idle', recommended: [], rationale: '', error: '' })}
-                style={{ background: 'none', border: 'none', color: t.text4, fontSize: FONT.size.micro, cursor: 'pointer', padding: '6px 4px' }}>
-                Dismiss
-              </button>
-            </div>
-          </div>
-        )}
-      </div>}
-      {savedOnly && <div style={{ marginBottom: SPACE.sm }} />}
-
-      {current.status === 'loaded' && current.result ? (
-        <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: SPACE.sm, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: FONT.size.xs, color: t.text4 }}>
-              {savedOnly
-                ? `Saved${fmtSavedDate(current.result.visualization?.updatedAt) ? ` ${fmtSavedDate(current.result.visualization.updatedAt)}` : ''}`
-                : current.result.cached
-                  ? `✓ Saved to this entry${fmtSavedDate(current.result.visualization?.updatedAt) ? ` · ${fmtSavedDate(current.result.visualization.updatedAt)}` : ''}`
-                  : `✓ Generated and saved to this entry${current.result.timing?.totalMs ? ` in ${(current.result.timing.totalMs / 1000).toFixed(1)}s` : ''}`}
-              {current.result.visualization?.aiModel ? ` · ${current.result.visualization.aiModel}` : ''}
-              {current.result.visualization?.isEdited && !current.editMode && (
-                <span style={{ marginLeft: 6, color: t.navActiveText, fontWeight: FONT.weight.semibold }}>· Edited by you</span>
-              )}
-            </span>
-
-            {/* Compact editing toolbar — Edit/Save/Discard/Restore. Save/
-                Discard/Restore only ever appear once editing is actually
-                active or there's something to restore, so view mode stays
-                exactly as clean as Phase 3 shipped it. */}
-            {savedOnly && current.result.visualization?.isEdited && (
-              <span style={{ fontSize: FONT.size.micro, color: t.text4 }}>· original AI version kept</span>
+      {!savedOnly && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: collapsed && canCollapse ? 0 : SPACE.lg }}>
+          <div style={{ fontSize: FONT.size.xs, color: t.text3, letterSpacing: .8, fontWeight: FONT.weight.bold,
+            textTransform: 'uppercase', flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <IconNetwork size={15} style={{ color: t.text3, flexShrink: 0 }} /> Visual Learning
+            {collapsed && canCollapse && loaded && (
+              <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: FONT.weight.semibold, color: t.text2, fontSize: FONT.size.base }}>
+                · {currentMeta.label}
+              </span>
             )}
-            {savedOnly ? (
-              <span style={{ fontSize: FONT.size.micro, color: t.text4, marginLeft: 'auto' }}>Edit or regenerate from the entry page</span>
-            ) : <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginLeft: 'auto' }}>
-              {current.editMode ? (
-                <>
-                  {current.isDirty && <span style={{ fontSize: FONT.size.micro, color: t.warn, alignSelf: 'center', fontWeight: FONT.weight.semibold }}>● Unsaved changes</span>}
-                  <button onClick={() => performSave(selectedType)} disabled={isBusy} style={saveButtonStyle(t, isBusy)}>
-                    {isBusy ? 'Saving…' : '✓ Save Changes'}
-                  </button>
-                  <button onClick={() => requestDiscard(selectedType)} disabled={isBusy} style={regenerateButtonStyle(t)}>Discard Changes</button>
-                </>
-              ) : (
-                <>
-                  <button onClick={() => startEdit(selectedType)} style={regenerateButtonStyle(t)}>✎ Edit</button>
-                  <button onClick={() => requestRegenerate(selectedType)} disabled={current.status === 'loading'} style={regenerateButtonStyle(t)}>↻ Regenerate</button>
-                  <button onClick={() => requestDelete(selectedType)} disabled={isBusy} style={{ ...regenerateButtonStyle(t), color: t.danger }}>🗑 Delete</button>
-                </>
+          </div>
+          {canCollapse && (
+            <button onClick={() => setCollapsed(c => !c)} aria-expanded={!collapsed} style={secondaryButtonStyle(t)}>
+              {collapsed ? '▾ Expand' : '▴ Collapse'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {!(collapsed && canCollapse) && (loaded ? (
+        <>
+          {/* One header bar: format · saved date · actions. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: SPACE.md, flexWrap: 'wrap' }}>
+            {typeSelect}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: FONT.size.sm, color: t.text3, flexWrap: 'wrap' }}>
+              <span>{current.result.cached || savedOnly ? `Saved${savedAt ? ` · ${savedAt}` : ''}` : 'Generated and saved'}</span>
+              {current.result.visualization?.isEdited && !current.editMode && (
+                <span style={{ color: t.navActiveText, background: t.navActiveBg, border: `1px solid ${t.navActiveBorder}`,
+                  borderRadius: RADIUS.pill, padding: '2px 9px', fontWeight: FONT.weight.semibold, fontSize: FONT.size.xs }}>Edited by you</span>
               )}
-              {current.result.visualization?.isEdited && (
-                <button onClick={() => requestRestore(selectedType)} disabled={isBusy} style={regenerateButtonStyle(t)}>⟲ Restore Original AI Version</button>
-              )}
-            </div>}
+              <InfoTip t={t} text="AI-generated from your notes. It has not been checked for medical accuracy, so verify it before relying on it." />
+            </span>
+            {!savedOnly && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginLeft: 'auto', alignItems: 'center' }}>
+                {current.editMode ? (
+                  <>
+                    {current.isDirty && <span style={{ fontSize: FONT.size.sm, color: t.warn, fontWeight: FONT.weight.semibold }}>● Unsaved changes</span>}
+                    <button onClick={() => performSave(selectedType)} disabled={isBusy} style={saveButtonStyle(t, isBusy)}>
+                      {isBusy ? 'Saving…' : '✓ Save changes'}
+                    </button>
+                    <button onClick={() => requestDiscard(selectedType)} disabled={isBusy} style={secondaryButtonStyle(t)}>Discard</button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => startEdit(selectedType)} style={secondaryButtonStyle(t)}>✎ Edit</button>
+                    <button onClick={() => requestRegenerate(selectedType)} disabled={current.status === 'loading'} style={secondaryButtonStyle(t)}>↻ Regenerate</button>
+                    {moreItems.length > 0 && <MoreMenu t={t} items={moreItems} />}
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           {isStale && !current.editMode && (
-            <div role="status" style={{ background: t.warnBg, border: `1px solid ${t.warnBorder}`, borderRadius: RADIUS.md,
-              padding: '8px 12px', marginBottom: SPACE.sm, fontSize: FONT.size.xs, color: t.text2, lineHeight: 1.5 }}>
-              <strong style={{ color: t.warn }}>May be out of date.</strong> Your Review changed after this diagram was made.
-              {savedOnly ? ' Regenerate it from the entry page to update it.' : ' Use ↻ Regenerate to rebuild it from the current Review.'}
-              {current.result.visualization?.isEdited ? ' Your edits are kept until you do.' : ''}
+            <div role="status" style={noticeStyle(t, 'warn')}>
+              <strong style={{ color: t.warn }}>May be out of date</strong> — your Review changed after this diagram was made.
+              {savedOnly ? '' : ' Regenerate to update it.'}
             </div>
           )}
 
-          {/* Inline confirmation — shown instead of acting immediately
-              whenever discarding/restoring would lose something real. */}
           {current.confirmAction && (
-            <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: RADIUS.md,
-              padding: '10px 12px', marginBottom: SPACE.sm, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: FONT.size.xs, color: t.danger, flex: 1 }}>
+            <div style={{ ...noticeStyle(t, 'danger'), display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ color: t.danger, flex: 1, minWidth: 200 }}>
                 {current.confirmAction === 'discard'
                   ? 'Discard your unsaved changes? This can\'t be undone.'
                   : current.confirmAction === 'regenerate'
-                    ? 'Regenerate this diagram? Your edited version and the current AI version will be replaced by a new one.'
+                    ? 'Regenerate this diagram? Your edited version will be replaced by a new one.'
                     : current.confirmAction === 'delete'
-                      ? `Delete this ${currentMeta?.label || 'diagram'} from the entry? It will no longer appear here or in review. This can't be undone.`
+                      ? `Delete this ${currentMeta?.label || 'diagram'}? It will be removed from this entry and from review. This can't be undone.`
                       : 'Restore the original AI version? Your saved edits will be replaced and can\'t be recovered.'}
               </span>
               <button
@@ -515,21 +465,20 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
                   : current.confirmAction === 'regenerate' ? (cancelConfirm(selectedType), run(selectedType, true))
                   : current.confirmAction === 'delete' ? performDelete(selectedType)
                   : performRestore(selectedType))}
-                style={{ ...saveButtonStyle(t, false), background: t.danger, border: `1px solid ${t.danger}`, color: '#fff' }}>
+                style={{ ...secondaryButtonStyle(t), background: t.danger, border: `1px solid ${t.danger}`, color: '#fff' }}>
                 Yes, {current.confirmAction}
               </button>
-              <button onClick={() => cancelConfirm(selectedType)} style={regenerateButtonStyle(t)}>Cancel</button>
+              <button onClick={() => cancelConfirm(selectedType)} style={secondaryButtonStyle(t)}>Cancel</button>
             </div>
           )}
 
           {current.saveStatus === 'error' && (
-            <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: RADIUS.md,
-              padding: '10px 14px', fontSize: 12.5, color: t.danger, marginBottom: SPACE.sm }}>
-              {current.saveError}{current.editMode ? ' Your edits are still here — try saving again.' : ''}
+            <div style={noticeStyle(t, 'danger')}>
+              <span style={{ color: t.danger }}>{current.saveError}{current.editMode ? ' Your edits are still here — try saving again.' : ''}</span>
             </div>
           )}
           {current.saveStatus === 'saved' && !current.editMode && (
-            <div style={{ fontSize: FONT.size.xs, color: t.ok, marginBottom: SPACE.sm, animation: 'medbook-scrim-in 220ms ease' }}>✓ Saved</div>
+            <div style={{ fontSize: FONT.size.sm, color: t.ok, marginBottom: SPACE.sm, animation: 'medbook-scrim-in 220ms ease' }}>✓ Saved</div>
           )}
 
           {current.editMode ? (
@@ -538,7 +487,7 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
                 <Renderer diagram={current.draft} editable onDraftChange={next => changeDraft(selectedType, next)} />
               </Suspense>
             ) : (
-              <div style={{ width: '100%', height: 'clamp(320px, 65vh, 480px)', borderRadius: RADIUS.lg, overflow: 'hidden', border: `1px solid ${t.accent}55` }}>
+              <div style={{ width: '100%', height: 'clamp(320px, 65vh, 520px)', borderRadius: RADIUS.lg, overflow: 'hidden', border: `1px solid ${t.accent}55` }}>
                 <Suspense fallback={<RendererFallback t={t} />}>
                   <Editor diagram={current.draft} onDraftChange={next => changeDraft(selectedType, next)} />
                 </Suspense>
@@ -552,96 +501,159 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes }) {
 
           {current.result.coverage?.uncoveredStatements?.length > 0 && (
             <div style={{ marginTop: SPACE.sm }}>
-              <button onClick={() => setShowCoverage(s => !s)}
-                style={{ background: 'none', border: 'none', color: t.warn, fontSize: FONT.size.xs,
-                  cursor: 'pointer', padding: 0, fontWeight: FONT.weight.semibold, fontFamily: 'Inter,sans-serif' }}>
+              <button onClick={() => setShowCoverage(v => !v)}
+                style={{ background: 'none', border: 'none', color: t.warn, fontSize: FONT.size.sm,
+                  cursor: 'pointer', padding: '4px 0', fontWeight: FONT.weight.semibold, fontFamily: 'Inter,sans-serif' }}>
                 ⚠ {current.result.coverage.uncoveredStatements.length} statement{current.result.coverage.uncoveredStatements.length !== 1 ? 's' : ''} from your Review may not be shown {showCoverage ? '▾' : '▸'}
               </button>
               {showCoverage && (
-                <div style={{ background: t.warnBg, border: `1px solid ${t.warnBorder}`, borderRadius: RADIUS.md,
-                  padding: '10px 12px', marginTop: 6, fontSize: 11.5, color: t.text2 }}>
-                  <ul style={{ margin: '0 0 8px', paddingLeft: 16 }}>
-                    {current.result.coverage.uncoveredStatements.map((s, i) => <li key={i} style={{ marginBottom: 4 }}>{s}</li>)}
-                  </ul>
-                  <div style={{ color: t.text4, fontSize: FONT.size.micro, lineHeight: 1.5 }}>{current.result.coverage.disclaimer}</div>
-                </div>
+                <ul style={{ ...noticeStyle(t, 'warn'), margin: '6px 0 0', paddingLeft: 30 }}>
+                  {current.result.coverage.uncoveredStatements.map((line, i) => <li key={i} style={{ marginBottom: 4 }}>{line}</li>)}
+                </ul>
               )}
-            </div>
-          )}
-
-          {current.result.disclaimer && (
-            <div style={{ fontSize: FONT.size.micro, color: t.text4, marginTop: SPACE.sm, lineHeight: 1.5 }}>
-              {current.result.disclaimer}
             </div>
           )}
         </>
       ) : (
         <>
-          {current.status !== 'error' && (
-            <div style={{ fontSize: 12.5, color: t.text4, lineHeight: 1.6, marginBottom: SPACE.md }}>
-              {currentMeta.description} Your Review itself is never changed.
-            </div>
-          )}
-
           {current.error && (
-            <div style={{
-              background: current.errorKind === 'in_progress' ? t.navActiveBg : t.dangerBg,
-              border: `1px solid ${current.errorKind === 'in_progress' ? t.navActiveBorder : t.dangerBorder}`,
-              borderRadius: RADIUS.md, padding: '10px 14px', fontSize: 12.5,
-              color: current.errorKind === 'in_progress' ? t.navActiveText : t.danger, marginBottom: SPACE.md,
-            }}>
-              {current.error}
+            <div style={noticeStyle(t, current.errorKind === 'in_progress' ? 'info' : 'danger')}>
+              <span style={{ color: current.errorKind === 'in_progress' ? t.navActiveText : t.danger }}>{current.error}</span>
             </div>
           )}
 
-          <button onClick={() => setShowContextInput(s => !s)} disabled={current.status === 'loading'}
-            style={{ background: 'none', border: 'none', color: t.text3, fontSize: FONT.size.xs,
-              cursor: 'pointer', padding: 0, marginBottom: SPACE.sm, textDecoration: 'underline',
-              fontFamily: 'Inter,sans-serif' }}>
-            {showContextInput ? 'Hide additional context' : '+ Add optional additional medical context'}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            {typeSelect}
+            <button onClick={() => run(selectedType, false)} disabled={current.status === 'loading'} style={primaryButtonStyle(t, current.status === 'loading')}>
+              {current.status === 'loading' ? (
+                <>
+                  <span style={{ display: 'inline-block', width: 12, height: 12, border: `2px solid ${t.border}`,
+                    borderTop: `2px solid ${t.text3}`, borderRadius: RADIUS.circle, animation: 'medbook-spin .7s linear infinite' }} />
+                  {elapsedSec < 6 ? 'Generating…' : `Still working… ${elapsedSec}s`}
+                </>
+              ) : (
+                <><IconSparkle size={14} /> Generate {currentMeta.label}</>
+              )}
+            </button>
+          </div>
 
-          {showContextInput && (
-            <div style={{ marginBottom: SPACE.md }}>
-              <textarea
-                value={extraContext}
-                onChange={e => setExtraContext(e.target.value)}
-                disabled={current.status === 'loading'}
-                placeholder="Optional — e.g. a related guideline or dosing detail NOT in your Review. Clearly kept separate from your own notes; the diagram marks anything built from this as supplementary, not from your Review."
-                rows={3}
-                style={{ width: '100%', background: t.surface2, border: `1px solid ${t.borderStrong}`,
-                  borderRadius: RADIUS.sm, color: t.text, padding: '8px 10px', fontSize: 12.5,
-                  lineHeight: 1.5, outline: 'none', boxSizing: 'border-box', resize: 'vertical',
-                  fontFamily: 'Inter,sans-serif' }}
-              />
-            </div>
+          {/* Suggest a format — optional and secondary; it only switches the
+              dropdown, never generates on its own. */}
+          {!savedOnly && recommendState.status !== 'loaded' && (
+            <button onClick={runRecommend} disabled={recommendState.status === 'loading' || current.status === 'loading'}
+              style={{ ...secondaryButtonStyle(t), marginTop: SPACE.md, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <IconSparkle size={13} />
+              {recommendState.status === 'loading' ? 'Finding the best format…' : 'Suggest the best format'}
+            </button>
           )}
-
-          <button onClick={() => run(selectedType, false)} disabled={current.status === 'loading'} style={generateButtonStyle(t, current.status === 'loading')}>
-            {current.status === 'loading' ? (
-              <>
-                <span style={{ display: 'inline-block', width: 10, height: 10, border: `2px solid ${t.border}`,
-                  borderTop: `2px solid ${t.text3}`, borderRadius: RADIUS.circle, animation: 'medbook-spin .7s linear infinite' }} />
-                {elapsedSec < 6 ? 'Generating…' : `Still working… (${elapsedSec}s)`}
-              </>
-            ) : (
-              <><IconSparkle size={12} /> Generate {currentMeta.label}</>
-            )}
-          </button>
-          {current.status === 'loading' && elapsedSec >= 6 && (
-            <div style={{ fontSize: FONT.size.micro, color: t.text4, marginTop: 6 }}>
-              More complex reviews can take longer to organise into a diagram.
+          {!savedOnly && recommendState.status === 'error' && (
+            <div style={{ fontSize: FONT.size.sm, color: t.text3, marginTop: 8 }}>{recommendState.error}</div>
+          )}
+          {!savedOnly && recommendState.status === 'loaded' && (
+            <div style={{ ...noticeStyle(t, 'info'), marginTop: SPACE.md, marginBottom: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontWeight: FONT.weight.semibold, color: t.text2 }}>
+                <IconSparkle size={13} /> Suggested format
+              </div>
+              {recommendState.rationale && <div style={{ color: t.text2, marginBottom: 10 }}>{recommendState.rationale}</div>}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {recommendState.recommended.map(key => (
+                  <button key={key} onClick={() => setSelectedType(key)} style={key === selectedType ? selectedChipStyle(t) : secondaryButtonStyle(t)}>
+                    {TYPE_BY_KEY[key]?.label || key}
+                  </button>
+                ))}
+                <button onClick={() => setRecommendState({ status: 'idle', recommended: [], rationale: '', error: '' })}
+                  style={{ ...secondaryButtonStyle(t), background: 'none', border: '1px solid transparent', color: t.text3 }}>
+                  Dismiss
+                </button>
+              </div>
             </div>
           )}
         </>
-      )}
+      ))}
     </div>
   );
 }
 
+// Native <select> (keyboard/screen-reader friendly), styled to match the app.
+function TypeSelect({ t, isDark, value, onChange, options, isSaved }) {
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex', minWidth: 0 }}>
+      <select aria-label="Diagram format" value={value} onChange={e => onChange(e.target.value)}
+        style={{
+          appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none', colorScheme: isDark ? 'dark' : 'light',
+          background: t.surface2, border: `1px solid ${t.borderStrong}`, borderRadius: RADIUS.md, color: t.text,
+          fontSize: FONT.size.md, fontWeight: FONT.weight.semibold, fontFamily: 'Inter,sans-serif',
+          padding: '0 38px 0 14px', height: 40, cursor: 'pointer', maxWidth: '100%',
+        }}>
+        {options.map(({ key, label }) => (
+          <option key={key} value={key}>{label}{isSaved && isSaved(key) ? '  ✓' : ''}</option>
+        ))}
+      </select>
+      <span aria-hidden style={{ position: 'absolute', right: 13, top: '50%', transform: 'translateY(-50%)',
+        pointerEvents: 'none', color: t.text3, fontSize: FONT.size.sm }}>▼</span>
+    </span>
+  );
+}
+
+// ⓘ — the AI caveat, shown on hover/focus/tap instead of a paragraph.
+function InfoTip({ t, text }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex' }}
+      onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button type="button" aria-label="About this diagram" title={text} onClick={() => setOpen(o => !o)}
+        onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
+        style={{ width: 22, height: 22, borderRadius: RADIUS.circle, border: `1px solid ${t.borderStrong}`, background: t.surface2,
+          color: t.text3, fontSize: FONT.size.xs, fontWeight: FONT.weight.bold, cursor: 'help', padding: 0, lineHeight: 1,
+          fontFamily: 'Georgia,serif', fontStyle: 'italic' }}>i</button>
+      {open && (
+        <span role="tooltip" style={{ position: 'absolute', top: 'calc(100% + 8px)', left: -8, zIndex: 30, width: 260,
+          background: t.surface, border: `1px solid ${t.border}`, borderRadius: RADIUS.md, boxShadow: elevation(t, 'lg'),
+          padding: '10px 12px', fontSize: FONT.size.sm, color: t.text2, lineHeight: 1.5, fontWeight: FONT.weight.regular }}>
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// ⋯ — less frequent / destructive actions (Delete, Restore original).
+function MoreMenu({ t, items }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onKey = e => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+  return (
+    <span ref={ref} style={{ position: 'relative', display: 'inline-flex' }}>
+      <button aria-label="More actions" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(o => !o)}
+        style={{ ...secondaryButtonStyle(t), width: 40, padding: 0, fontSize: FONT.size.lg, letterSpacing: 1 }}>⋯</button>
+      {open && (
+        <span role="menu" style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 30, minWidth: 230,
+          background: t.surface, border: `1px solid ${t.border}`, borderRadius: RADIUS.md, boxShadow: elevation(t, 'lg'),
+          padding: 6, display: 'flex', flexDirection: 'column' }}>
+          {items.map(item => (
+            <button key={item.label} role="menuitem" onClick={() => { setOpen(false); item.onClick(); }}
+              style={{ textAlign: 'left', background: 'none', border: 'none', borderRadius: RADIUS.sm, padding: '10px 12px',
+                color: item.danger ? t.danger : t.text2, fontSize: FONT.size.base, fontWeight: FONT.weight.semibold,
+                fontFamily: 'Inter,sans-serif', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              {item.label}
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function SavedModeState({ t, status, error, onRetry }) {
-  const box = { border: `1px dashed ${t.border}`, borderRadius: RADIUS.lg, padding: '18px 16px',
-    fontSize: 12.5, color: t.text3, lineHeight: 1.6, textAlign: 'center' };
+  const box = { border: `1px dashed ${t.border}`, borderRadius: RADIUS.lg, padding: '20px 18px',
+    fontSize: FONT.size.base, color: t.text3, lineHeight: 1.6, textAlign: 'center' };
   if (status === 'loading') {
     return (
       <div style={{ ...box, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
@@ -656,7 +668,7 @@ function SavedModeState({ t, status, error, onRetry }) {
       <div style={{ ...box, borderStyle: 'solid', borderColor: t.dangerBorder, background: t.dangerBg, color: t.danger }}>
         {error}
         <div style={{ marginTop: 10 }}>
-          <button onClick={onRetry} style={regenerateButtonStyle(t)}>Try again</button>
+          <button onClick={onRetry} style={secondaryButtonStyle(t)}>Try again</button>
         </div>
       </div>
     );
@@ -664,35 +676,42 @@ function SavedModeState({ t, status, error, onRetry }) {
   return (
     <div style={box}>
       <div style={{ fontWeight: FONT.weight.semibold, color: t.text2, marginBottom: 4 }}>No saved visualizations yet</div>
-      Open this entry's detail page to generate a Mind Map, Flowchart, or another diagram. It will show up here on your next review.
+      Generate one from this entry's page and it will show up here.
     </div>
   );
 }
 
-function generateButtonStyle(t, busy) {
-  return {
-    fontSize: FONT.size.xs, fontWeight: FONT.weight.semibold, fontFamily: 'Inter,sans-serif',
-    background: busy ? t.surface3 : t.navActiveBg, border: `1px solid ${busy ? t.border : t.navActiveBorder}`,
-    color: busy ? t.text4 : t.navActiveText, borderRadius: RADIUS.sm - 1, padding: '7px 14px',
-    cursor: busy ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+function noticeStyle(t, tone) {
+  const map = {
+    warn: [t.warnBg, t.warnBorder], danger: [t.dangerBg, t.dangerBorder], info: [t.navActiveBg, t.navActiveBorder],
   };
+  const [bg, border] = map[tone] || map.info;
+  return { background: bg, border: `1px solid ${border}`, borderRadius: RADIUS.md, padding: '10px 14px',
+    marginBottom: SPACE.md, fontSize: FONT.size.base, color: t.text2, lineHeight: 1.5 };
 }
 
-function regenerateButtonStyle(t) {
-  return {
-    fontSize: FONT.size.xs, fontWeight: FONT.weight.semibold, fontFamily: 'Inter,sans-serif',
-    background: t.surface3, border: `1px solid ${t.border}`, color: t.text3,
-    borderRadius: RADIUS.sm - 1, padding: '5px 10px', cursor: 'pointer', minHeight: 30,
-  };
+const BUTTON_BASE = {
+  fontFamily: 'Inter,sans-serif', fontWeight: FONT.weight.semibold, fontSize: FONT.size.base,
+  borderRadius: RADIUS.md, height: 40, padding: '0 16px', display: 'inline-flex', alignItems: 'center',
+  justifyContent: 'center', gap: 8, whiteSpace: 'nowrap', boxSizing: 'border-box',
+};
+
+function primaryButtonStyle(t, busy) {
+  return { ...BUTTON_BASE, background: busy ? t.surface3 : t.accent, border: `1px solid ${busy ? t.border : t.accent}`,
+    color: busy ? t.text3 : '#fff', cursor: busy ? 'default' : 'pointer' };
+}
+
+function secondaryButtonStyle(t) {
+  return { ...BUTTON_BASE, background: t.surface2, border: `1px solid ${t.borderStrong}`, color: t.text2, cursor: 'pointer' };
+}
+
+function selectedChipStyle(t) {
+  return { ...BUTTON_BASE, background: t.navActiveBg, border: `1px solid ${t.navActiveBorder}`, color: t.navActiveText, cursor: 'pointer' };
 }
 
 function saveButtonStyle(t, busy) {
-  return {
-    fontSize: FONT.size.xs, fontWeight: FONT.weight.semibold, fontFamily: 'Inter,sans-serif',
-    background: busy ? t.surface3 : t.okBg, border: `1px solid ${busy ? t.border : t.okBorder}`,
-    color: busy ? t.text4 : t.ok, borderRadius: RADIUS.sm - 1, padding: '5px 10px',
-    cursor: busy ? 'default' : 'pointer', minHeight: 30,
-  };
+  return { ...BUTTON_BASE, background: busy ? t.surface3 : t.okBg, border: `1px solid ${busy ? t.border : t.okBorder}`,
+    color: busy ? t.text4 : t.ok, cursor: busy ? 'default' : 'pointer' };
 }
 
 /**
@@ -704,7 +723,7 @@ function saveButtonStyle(t, busy) {
  * own hooks). Keeps this self-contained — DetailView.js doesn't need to
  * know this check exists at all.
  */
-export default function VisualLearningPanel({ entryId, mode = 'full', notes }) {
+export default function VisualLearningPanel(props) {
   if (!VisualizationService.isConfigured()) return null;
-  return <VisualLearningPanelContent entryId={entryId} mode={mode} notes={notes} />;
+  return <VisualLearningPanelContent {...props} />;
 }

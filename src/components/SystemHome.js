@@ -21,7 +21,7 @@
 // from next_review/review_count that already exist) and a client-side sort
 // mode that doesn't touch persistence.
 import React, { useState, useMemo, useRef } from 'react';
-import { SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
+import { SPACE, RADIUS, FONT, MOTION, elevation, fs } from '../lib/theme';
 import { IconRepeat, IconPlus, IconChevronRight, IconInbox, IconListBullet } from '../lib/icons';
 import { SYSTEM_BLURBS } from '../lib/systemContent';
 import FilterChips from './FilterChips';
@@ -112,7 +112,7 @@ function SystemHero({ t, isDark, system, color, total, progress, onAdd, onReview
   );
 
   const titleEl = (
-    <h1 style={{ margin:0, fontSize: isMobile?28:38, fontWeight:FONT.weight.bold,
+    <h1 style={{ margin:0, fontSize: isMobile?fs(28):fs(38), fontWeight:FONT.weight.bold,
       color:t.text, letterSpacing:'-0.02em', lineHeight:1.08 }}>
       {system}
     </h1>

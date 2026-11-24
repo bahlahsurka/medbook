@@ -11,7 +11,7 @@
 // window (My Cards' own brief asks for the former explicitly).
 
 import { useEffect, useMemo, useState } from 'react';
-import { useTheme } from '../lib/theme';
+import { useTheme, fs } from '../lib/theme';
 import * as ownCardsApi from '../lib/ownCards/api';
 import { computeStreak, TrendChart, RetentionRing, DueForecastBars } from './StatsCharts';
 
@@ -88,37 +88,37 @@ export default function OwnCardsStats({ userId, onExit }) {
 
   const card = { background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12,
     padding: 18, boxShadow: `0 1px 2px ${t.shadow}` };
-  const capLabel = { fontSize: 11, color: t.text4, letterSpacing: .6, fontWeight: 700, textTransform: 'uppercase' };
+  const capLabel = { fontSize: fs(11), color: t.text4, letterSpacing: .6, fontWeight: 700, textTransform: 'uppercase' };
 
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', fontFamily: 'Inter,sans-serif' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: t.text }}>My Cards — Study Stats</div>
-          <div style={{ fontSize: 13, color: t.text3, marginTop: 2 }}>How My Cards studying is actually going.</div>
+          <div style={{ fontSize: fs(16), fontWeight: 700, color: t.text }}>My Cards — Study Stats</div>
+          <div style={{ fontSize: fs(13), color: t.text3, marginTop: 2 }}>How My Cards studying is actually going.</div>
         </div>
         <button onClick={onExit} style={{ background: t.surface2, border: `1px solid ${t.border}`, color: t.text2,
-          borderRadius: 8, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+          borderRadius: 8, padding: '8px 14px', fontSize: fs(13), fontWeight: 600, cursor: 'pointer',
           fontFamily: 'Inter,sans-serif' }}>
           ← Back
         </button>
       </div>
 
       {stats === undefined && (
-        <div style={{ textAlign: 'center', padding: '60px 0', color: t.text4, fontSize: 13 }}>Loading stats…</div>
+        <div style={{ textAlign: 'center', padding: '60px 0', color: t.text4, fontSize: fs(13) }}>Loading stats…</div>
       )}
 
       {stats === null && (
         <div style={{ ...card, textAlign: 'center', padding: '40px 20px' }}>
-          <div style={{ fontSize: 32, marginBottom: 10 }}>📊</div>
-          <div style={{ fontSize: 14, color: t.text3 }}>Stats aren't available right now.</div>
+          <div style={{ fontSize: fs(32), marginBottom: 10 }}>📊</div>
+          <div style={{ fontSize: fs(14), color: t.text3 }}>Stats aren't available right now.</div>
         </div>
       )}
 
       {derived && !derived.hasAnyData && (
         <div style={{ ...card, textAlign: 'center', padding: '40px 20px' }}>
-          <div style={{ fontSize: 32, marginBottom: 10 }}>📊</div>
-          <div style={{ fontSize: 14, color: t.text3 }}>No reviews logged yet. Study a folder to see stats here.</div>
+          <div style={{ fontSize: fs(32), marginBottom: 10 }}>📊</div>
+          <div style={{ fontSize: fs(14), color: t.text3 }}>No reviews logged yet. Study a folder to see stats here.</div>
         </div>
       )}
 
@@ -127,13 +127,13 @@ export default function OwnCardsStats({ userId, onExit }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
             <div style={card}>
               <div style={capLabel}>Current streak</div>
-              <div style={{ fontSize: 30, fontWeight: 700, color: t.text, marginTop: 6, display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                {derived.streak > 0 && '🔥'} {derived.streak} <span style={{ fontSize: 14, fontWeight: 500, color: t.text3 }}>day{derived.streak === 1 ? '' : 's'}</span>
+              <div style={{ fontSize: fs(30), fontWeight: 700, color: t.text, marginTop: 6, display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                {derived.streak > 0 && '🔥'} {derived.streak} <span style={{ fontSize: fs(14), fontWeight: 500, color: t.text3 }}>day{derived.streak === 1 ? '' : 's'}</span>
               </div>
             </div>
             <div style={card}>
               <div style={capLabel}>Total reviews</div>
-              <div style={{ fontSize: 30, fontWeight: 700, color: t.text, marginTop: 6 }}>
+              <div style={{ fontSize: fs(30), fontWeight: 700, color: t.text, marginTop: 6 }}>
                 {derived.totalAllTime.toLocaleString()}
               </div>
             </div>
@@ -145,7 +145,7 @@ export default function OwnCardsStats({ userId, onExit }) {
               dayLabels={last7Days.map(d => d.toLocaleDateString('en-GB', { weekday: 'short' }))} />
             <div style={{ display: 'flex', marginTop: 8 }}>
               {last7Days.map((d, i) => (
-                <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 10.5, color: t.text4 }}>
+                <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: fs(10.5), color: t.text4 }}>
                   {d.toLocaleDateString('en-GB', { weekday: 'short' })}
                 </div>
               ))}
@@ -155,11 +155,11 @@ export default function OwnCardsStats({ userId, onExit }) {
           <div style={{ ...card, marginBottom: 16 }}>
             <div style={{ ...capLabel, marginBottom: 10 }}>Retention — cards reviewed {MATURE_THRESHOLD}+ times</div>
             {derived.retentionPct == null ? (
-              <div style={{ fontSize: 13, color: t.text4, padding: '8px 0' }}>No cards have reached {MATURE_THRESHOLD} reviews yet.</div>
+              <div style={{ fontSize: fs(13), color: t.text4, padding: '8px 0' }}>No cards have reached {MATURE_THRESHOLD} reviews yet.</div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                 <RetentionRing t={t} pct={derived.retentionPct} />
-                <div style={{ fontSize: 12, color: t.text4, maxWidth: 260, lineHeight: 1.5 }}>
+                <div style={{ fontSize: fs(12), color: t.text4, maxWidth: 260, lineHeight: 1.5 }}>
                   Share of ratings that were Good or Easy, among the {derived.matureCount} rating{derived.matureCount === 1 ? '' : 's'} on cards you've already reviewed {MATURE_THRESHOLD}+ times.
                 </div>
               </div>
@@ -169,7 +169,7 @@ export default function OwnCardsStats({ userId, onExit }) {
           <div style={{ ...card, marginBottom: 16 }}>
             <div style={{ ...capLabel, marginBottom: 10 }}>Due forecast — next 7 days</div>
             {forecast == null ? (
-              <div style={{ fontSize: 13, color: t.text4, padding: '8px 0' }}>Loading…</div>
+              <div style={{ fontSize: fs(13), color: t.text4, padding: '8px 0' }}>Loading…</div>
             ) : (
               <DueForecastBars t={t} values={forecast}
                 dayLabels={next7Days.map((d, i) => i === 0 ? 'Today' : d.toLocaleDateString('en-GB', { weekday: 'short' }))} />
@@ -183,8 +183,8 @@ export default function OwnCardsStats({ userId, onExit }) {
                 <div key={key} style={{ background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 8,
                   padding: '10px 12px', textAlign: 'center' }}>
                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: t[meta.tokenKey], margin: '0 auto 6px' }} />
-                  <div style={{ fontSize: 18, fontWeight: 700, color: t.text }}>{derived.breakdown[key]}</div>
-                  <div style={{ fontSize: 11.5, color: t.text3, fontWeight: 600, marginTop: 2 }}>{meta.label}</div>
+                  <div style={{ fontSize: fs(18), fontWeight: 700, color: t.text }}>{derived.breakdown[key]}</div>
+                  <div style={{ fontSize: fs(11.5), color: t.text3, fontWeight: 600, marginTop: 2 }}>{meta.label}</div>
                 </div>
               ))}
             </div>

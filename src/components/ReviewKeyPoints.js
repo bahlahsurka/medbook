@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useTheme, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
+import { useTheme, RADIUS, FONT, MOTION, elevation, fs } from '../lib/theme';
 import KeyPointsContent from './KeyPointsContent';
 
 // Legacy fallback: a SUBSET of the old six-section AI Analysis output —
@@ -76,7 +76,7 @@ export default function ReviewKeyPoints({ sections, keyPoints, isStale = false }
       <button onClick={toggle} aria-expanded={!collapsed}
         style={{ width:'100%', display:'flex', alignItems:'center', gap:8, background:'none', border:'none',
           padding:'10px 0', minHeight:40, cursor:'pointer', fontFamily:'Inter,sans-serif', textAlign:'left' }}>
-        <span style={{ fontSize:11, color:t.text4, letterSpacing:.8, fontWeight:700, textTransform:'uppercase', flex:1 }}>
+        <span style={{ fontSize:fs(11), color:t.text4, letterSpacing:.8, fontWeight:700, textTransform:'uppercase', flex:1 }}>
           Key Points
           {collapsed && <span style={{ marginLeft:6, textTransform:'none', letterSpacing:0, fontWeight:FONT.weight.medium }}>· {pointCount}</span>}
         </span>
@@ -89,7 +89,7 @@ export default function ReviewKeyPoints({ sections, keyPoints, isStale = false }
         {isStale && !collapsed && (
           <span style={{ fontSize:FONT.size.micro, color:t.warn, fontWeight:FONT.weight.semibold }}>Review edited since</span>
         )}
-        <span aria-hidden style={{ fontSize:10, color:t.text4, transform: collapsed ? 'none' : 'rotate(90deg)',
+        <span aria-hidden style={{ fontSize:fs(10), color:t.text4, transform: collapsed ? 'none' : 'rotate(90deg)',
           transition:`transform ${MOTION.fast} ${MOTION.ease}` }}>▶</span>
       </button>
 
@@ -102,12 +102,12 @@ export default function ReviewKeyPoints({ sections, keyPoints, isStale = false }
             <div key={s.key} style={{ borderLeft:`3px solid ${s.accent}`, paddingLeft:14,
               marginBottom: i < legacy.length - 1 ? 18 : 0 }}>
               <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:7 }}>
-                <span style={{ fontSize:13 }}>{s.icon}</span>
-                <span style={{ fontSize:12.5, fontWeight:700, color:t.text }}>{s.label}</span>
+                <span style={{ fontSize:fs(13) }}>{s.icon}</span>
+                <span style={{ fontSize:fs(12.5), fontWeight:700, color:t.text }}>{s.label}</span>
               </div>
               <ul style={{ margin:0, paddingLeft:16 }}>
                 {s.items.map((item, j) => (
-                  <li key={j} style={{ fontSize:12.5, color:t.text2, lineHeight:1.65, marginBottom:4 }}>{item}</li>
+                  <li key={j} style={{ fontSize:fs(12.5), color:t.text2, lineHeight:1.65, marginBottom:4 }}>{item}</li>
                 ))}
               </ul>
             </div>

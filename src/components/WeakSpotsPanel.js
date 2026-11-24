@@ -17,6 +17,7 @@
 import { useEffect, useState } from 'react';
 import * as ownCardsApi from '../lib/ownCards/api';
 import { OWN_CARDS_DEFAULTS } from '../lib/ownCards/settings';
+import { fs } from '../lib/theme';
 
 const MAX_ROWS = 5;
 
@@ -33,7 +34,7 @@ export default function WeakSpotsPanel({ t, userId, onStudySystem }) {
 
   return (
     <div style={{ background:t.surface, border:`1px solid ${t.border}`, borderRadius:12, padding:14, marginBottom:16, fontFamily:'Inter,sans-serif' }}>
-      <div style={{ fontSize:11, color:t.text4, letterSpacing:.6, fontWeight:700, textTransform:'uppercase', marginBottom:8 }}>
+      <div style={{ fontSize:fs(11), color:t.text4, letterSpacing:.6, fontWeight:700, textTransform:'uppercase', marginBottom:8 }}>
         Weak spots
       </div>
       <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
@@ -42,14 +43,14 @@ export default function WeakSpotsPanel({ t, userId, onStudySystem }) {
             display:'flex', justifyContent:'space-between', alignItems:'center', width:'100%',
             background:t.surface2, border:`1px solid ${t.border}`, borderRadius:8, padding:'8px 10px',
             cursor:'pointer', fontFamily:'Inter,sans-serif', textAlign:'left' }}>
-            <span style={{ fontSize:13, fontWeight:600, color:t.text }}>{s.system}</span>
-            <span style={{ fontSize:12, color: s.retentionPct < 70 ? t.danger : t.text3, fontWeight:600 }}>
+            <span style={{ fontSize:fs(13), fontWeight:600, color:t.text }}>{s.system}</span>
+            <span style={{ fontSize:fs(12), color: s.retentionPct < 70 ? t.danger : t.text3, fontWeight:600 }}>
               {s.retentionPct}% · {s.total} review{s.total!==1?'s':''}
             </span>
           </button>
         ))}
       </div>
-      <div style={{ fontSize:10.5, color:t.text4, marginTop:8, lineHeight:1.5 }}>
+      <div style={{ fontSize:fs(10.5), color:t.text4, marginTop:8, lineHeight:1.5 }}>
         Systems with {OWN_CARDS_DEFAULTS.weakSpotMinReviews}+ graded reviews, weakest first. Tap one to study it.
       </div>
     </div>

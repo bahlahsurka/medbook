@@ -67,27 +67,6 @@ function LoadingFill({ t }) {
   );
 }
 
-function Legend({ t, items }) {
-  return (
-    <div className="mb-viz-fade" style={{
-      position: 'absolute', bottom: 10, left: SPACE.md, zIndex: 5, display: 'flex', gap: 10, flexWrap: 'wrap',
-      alignItems: 'center', maxWidth: 'calc(100% - 24px)', padding: '5px 9px', borderRadius: RADIUS.md,
-      background: t.surface, border: `1px solid ${t.border}`, fontFamily: 'Inter,sans-serif',
-    }}>
-      {items.map(({ tone, label }) => {
-        const s = toneStyle(t, tone);
-        return (
-          <span key={label} title={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: FONT.size.micro, color: t.text3 }}>
-            <span style={{ width: 11, height: 11, borderRadius: 3, flexShrink: 0, background: s.background,
-              border: `1px solid ${s.border}`, borderLeft: s.rule ? `3px solid ${s.rule}` : `1px solid ${s.border}` }} />
-            <span className="mb-viz-legend-label">{label}</span>
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
 function GraphCanvas({ diagram, editable, onDraftChange, config, size, onBounds, isFullscreen, onToggleFullscreen }) {
   const { t, isDark } = useTheme();
   const rf = useReactFlow();
@@ -101,7 +80,7 @@ function GraphCanvas({ diagram, editable, onDraftChange, config, size, onBounds,
   if (!optsRef.current && size) {
     const width = size.width || 760;
     optsRef.current = {
-      container: { width, height: maxCanvasHeight(window.innerHeight), insets: insetsFor(width, !!config.legend) },
+      container: { width, height: maxCanvasHeight(window.innerHeight), insets: insetsFor(width, false) },
       ...(config.layoutOptionsFor ? config.layoutOptionsFor(width) : {}),
     };
   }
@@ -139,7 +118,7 @@ function GraphCanvas({ diagram, editable, onDraftChange, config, size, onBounds,
   const [shown, setShown] = useState(false);
   const [partial, setPartial] = useState(false);
   const [explored, setExplored] = useState(false);
-  const insets = useMemo(() => insetsFor(size?.width, !!config.legend), [size?.width, config.legend]);
+  const insets = useMemo(() => insetsFor(size?.width, false), [size?.width]);
 
   const applyView = useCallback((mode, animate) => {
     if (!base || !size || !size.width || !size.height) return;
@@ -236,7 +215,6 @@ function GraphCanvas({ diagram, editable, onDraftChange, config, size, onBounds,
       </ReactFlow>
       <DiagramToolbar isFullscreen={isFullscreen} onToggleFullscreen={onToggleFullscreen} onFit={fitAll} onReset={reset}
         onAddNode={editable ? handleAddNode : undefined} animate={!reduced} />
-      {config.legend && <Legend t={t} items={config.legend} />}
       {partial && !explored && shown && (
         <div className="mb-viz-fade" style={{
           position: 'absolute', zIndex: 4, pointerEvents: 'none',
@@ -291,7 +269,7 @@ export default function GraphDiagram({ diagram, editable = false, onDraftChange,
   }, [isFullscreen]);
 
   const height = bounds && size?.width
-    ? preferredCanvasHeight({ bounds, width: size.width, insets: insetsFor(size.width, !!config.legend), viewportHeight: window.innerHeight })
+    ? preferredCanvasHeight({ bounds, width: size.width, insets: insetsFor(size.width, false), viewportHeight: window.innerHeight })
     : 340;
 
   // The SAME element switches between inline and fullscreen styling, so the

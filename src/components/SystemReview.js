@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { DIFF_COLOR } from '../lib/constants';
-import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation, BREAKPOINT } from '../lib/theme';
+import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation, BREAKPOINT, fs } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue, buildCycledQueueWithScheduled } from '../lib/reviewQueue';
 import { normalizeSections } from '../services/ai';
@@ -49,19 +49,19 @@ function Lightbox({ images, start, onClose }) {
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.92)', zIndex:400,
       display:'flex', alignItems:'center', justifyContent:'center' }}>
       <button onClick={onClose} style={{ position:'absolute', top:16, right:20,
-        background:'rgba(255,255,255,.15)', border:'none', color:'#fff', fontSize:20,
+        background:'rgba(255,255,255,.15)', border:'none', color:'#fff', fontSize:fs(20),
         cursor:'pointer', width:40, height:40, borderRadius:'50%',
         display:'flex', alignItems:'center', justifyContent:'center' }}>✕</button>
       {images.length > 1 && <>
         <div style={{ position:'absolute', top:20, left:'50%', transform:'translateX(-50%)',
-          color:'#fff', fontSize:13, background:'rgba(0,0,0,.5)', padding:'4px 14px', borderRadius:20 }}>
+          color:'#fff', fontSize:fs(13), background:'rgba(0,0,0,.5)', padding:'4px 14px', borderRadius:20 }}>
           {idx + 1}/{images.length}
         </div>
         <button onClick={prev} style={{ position:'absolute', left:12, background:'rgba(255,255,255,.15)',
-          border:'none', color:'#fff', fontSize:28, cursor:'pointer', width:44, height:44,
+          border:'none', color:'#fff', fontSize:fs(28), cursor:'pointer', width:44, height:44,
           borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center' }}>‹</button>
         <button onClick={next} style={{ position:'absolute', right:12, background:'rgba(255,255,255,.15)',
-          border:'none', color:'#fff', fontSize:28, cursor:'pointer', width:44, height:44,
+          border:'none', color:'#fff', fontSize:fs(28), cursor:'pointer', width:44, height:44,
           borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center' }}>›</button>
       </>}
       <img src={images[idx]} alt=""
@@ -472,9 +472,9 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
     <div style={{position:'fixed',inset:0,background:t.overlay,zIndex:300,
       display:'flex',alignItems:'center',justifyContent:'center',padding:16,fontFamily:'Inter,sans-serif'}}>
       <div style={{background:t.surface,borderRadius:14,padding:32,maxWidth:440,width:'100%',textAlign:'center',boxShadow:`0 8px 32px ${t.shadowStrong}`}}>
-        <div style={{fontSize:40,marginBottom:12}}>📋</div>
-        <div style={{fontSize:16,fontWeight:700,color:t.text,marginBottom:8}}>No entries in {system}</div>
-        <div style={{fontSize:14,color:t.text3,marginBottom:20}}>Add some entries first.</div>
+        <div style={{fontSize:fs(40),marginBottom:12}}>📋</div>
+        <div style={{fontSize:fs(16),fontWeight:700,color:t.text,marginBottom:8}}>No entries in {system}</div>
+        <div style={{fontSize:fs(14),color:t.text3,marginBottom:20}}>Add some entries first.</div>
         <button onClick={onClose} style={B(t.surface3,t.text2)}>Close</button>
       </div>
     </div>
@@ -488,9 +488,9 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
     <div style={{position:'fixed',inset:0,background:t.overlay,zIndex:300,
       display:'flex',alignItems:'center',justifyContent:'center',padding:16,fontFamily:'Inter,sans-serif'}}>
       <div style={{background:t.surface,borderRadius:14,padding:32,maxWidth:440,width:'100%',textAlign:'center',boxShadow:`0 8px 32px ${t.shadowStrong}`}}>
-        <div style={{fontSize:40,marginBottom:12}}>↩️</div>
-        <div style={{fontSize:16,fontWeight:700,color:t.text,marginBottom:8}}>Resume your last session?</div>
-        <div style={{fontSize:14,color:t.text3,marginBottom:20}}>
+        <div style={{fontSize:fs(40),marginBottom:12}}>↩️</div>
+        <div style={{fontSize:fs(16),fontWeight:700,color:t.text,marginBottom:8}}>Resume your last session?</div>
+        <div style={{fontSize:fs(14),color:t.text3,marginBottom:20}}>
           You reviewed <strong>{pendingResume.reviewed || 0}</strong> of <strong>{pendingResume.entryIds.length}</strong> {system} cards last time.
         </div>
         <div style={{display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap'}}>
@@ -512,13 +512,13 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
     <div style={{position:'fixed',inset:0,background:t.overlay,zIndex:300,
       display:'flex',alignItems:'center',justifyContent:'center',padding:16,fontFamily:'Inter,sans-serif'}}>
       <div style={{background:t.surface,borderRadius:14,padding:32,maxWidth:440,width:'100%',textAlign:'center',boxShadow:`0 8px 32px ${t.shadowStrong}`}}>
-        <div style={{fontSize:40,marginBottom:12}}>✅</div>
-        <div style={{fontSize:16,fontWeight:700,color:t.text,marginBottom:8}}>All caught up in {system}</div>
-        <div style={{fontSize:14,color:t.text3,marginBottom:6}}>
+        <div style={{fontSize:fs(40),marginBottom:12}}>✅</div>
+        <div style={{fontSize:fs(16),fontWeight:700,color:t.text,marginBottom:8}}>All caught up in {system}</div>
+        <div style={{fontSize:fs(14),color:t.text3,marginBottom:6}}>
           Nothing due right now. {upcoming.length} card{upcoming.length!==1?'s':''} scheduled for later.
         </div>
         {nextDue && (
-          <div style={{fontSize:12,color:t.text4,marginBottom:20}}>
+          <div style={{fontSize:fs(12),color:t.text4,marginBottom:20}}>
             Next due {nextDue.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}
           </div>
         )}
@@ -534,11 +534,11 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
     <div style={{position:'fixed',inset:0,background:t.overlay,zIndex:300,
       display:'flex',alignItems:'center',justifyContent:'center',padding:16,fontFamily:'Inter,sans-serif'}}>
       <div style={{background:t.surface,borderRadius:14,padding:32,maxWidth:440,width:'100%',textAlign:'center',boxShadow:`0 8px 32px ${t.shadowStrong}`}}>
-        <div style={{fontSize:40,marginBottom:12}}>{done?'✅':'⏸️'}</div>
-        <div style={{fontSize:16,fontWeight:700,color:t.text,marginBottom:8}}>
+        <div style={{fontSize:fs(40),marginBottom:12}}>{done?'✅':'⏸️'}</div>
+        <div style={{fontSize:fs(16),fontWeight:700,color:t.text,marginBottom:8}}>
           {done?'Session complete!':'Session ended'}
         </div>
-        <div style={{fontSize:14,color:t.text3,marginBottom:20}}>
+        <div style={{fontSize:fs(14),color:t.text3,marginBottom:20}}>
           Reviewed <strong>{reviewed}</strong> of <strong>{total}</strong> {system} cards.
         </div>
         <div style={{display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap'}}>
@@ -787,5 +787,5 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
 
 function B(bg, color='#fff') {
   return {background:bg,color,border:'none',borderRadius:8,padding:'10px 20px',
-    fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'Inter,sans-serif'};
+    fontSize:fs(13),fontWeight:600,cursor:'pointer',fontFamily:'Inter,sans-serif'};
 }

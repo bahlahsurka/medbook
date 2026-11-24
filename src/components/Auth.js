@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { useTheme, RADIUS } from '../lib/theme';
+import { useTheme, RADIUS, fs } from '../lib/theme';
 
 // Google's standard multi-colour "G" mark, permitted for use on
 // "Sign in with Google" buttons.
@@ -92,9 +92,9 @@ export default function Auth() {
     if (error) { setMsg({ ok:false, text:error.message }); setGoogleLoading(false); }
   };
 
-  const lbl = { fontSize:11, color:t.text3, letterSpacing:.5, fontWeight:600, display:'block', marginBottom:6, textTransform:'uppercase' };
-  const inp = { width:'100%', background:t.surface2, border:`1px solid ${t.borderStrong}`, borderRadius:8, color:t.text, padding:'10px 12px', fontSize:14, outline:'none', boxSizing:'border-box' };
-  const link = { fontSize:13, color:t.accent, cursor:'pointer', textDecoration:'underline', textUnderlineOffset:3 };
+  const lbl = { fontSize:fs(11), color:t.text3, letterSpacing:.5, fontWeight:600, display:'block', marginBottom:6, textTransform:'uppercase' };
+  const inp = { width:'100%', background:t.surface2, border:`1px solid ${t.borderStrong}`, borderRadius:8, color:t.text, padding:'10px 12px', fontSize:fs(14), outline:'none', boxSizing:'border-box' };
+  const link = { fontSize:fs(13), color:t.accent, cursor:'pointer', textDecoration:'underline', textUnderlineOffset:3 };
 
   const shell = (children) => (
     <div style={{ minHeight:'100vh', background:t.appBg, display:'flex',
@@ -112,9 +112,9 @@ export default function Auth() {
         <div style={{ textAlign:'center', marginBottom:32 }}>
           <div style={{ display:'inline-flex', alignItems:'center', justifyContent:'center',
             width:48, height:48, borderRadius:RADIUS.lg, background:t.accent,
-            marginBottom:14, fontSize:22, color:'#fff' }}>⚕</div>
-          <div style={{ fontSize:22, fontWeight:700, color:t.text }}>MedBook</div>
-          <div style={{ fontSize:13, color:t.text3, marginTop:4 }}>Your personal USMLE notebook</div>
+            marginBottom:14, fontSize:fs(22), color:'#fff' }}>⚕</div>
+          <div style={{ fontSize:fs(22), fontWeight:700, color:t.text }}>MedBook</div>
+          <div style={{ fontSize:fs(13), color:t.text3, marginTop:4 }}>Your personal USMLE notebook</div>
         </div>
         <div style={{ background:t.surface, border:`1px solid ${t.border}`, borderRadius:RADIUS.lg,
           padding:'28px 24px', boxShadow:`0 1px 3px ${t.shadow}` }}>
@@ -126,23 +126,23 @@ export default function Auth() {
 
   if (isRecovery) return shell(
     <>
-      <div style={{ fontSize:15, fontWeight:600, color:t.text, marginBottom:20 }}>Set a new password</div>
+      <div style={{ fontSize:fs(15), fontWeight:600, color:t.text, marginBottom:20 }}>Set a new password</div>
       <form onSubmit={handleSetNewPassword} style={{ display:'flex', flexDirection:'column', gap:14 }}>
         <div>
           <label style={lbl}>NEW PASSWORD</label>
           <input type="password" value={newPassword} onChange={e=>setNewPassword(e.target.value)}
             required placeholder="••••••••" style={inp} minLength={6} autoFocus disabled={msg?.ok} />
         </div>
-        {msg && <div style={{ padding:'10px 14px', borderRadius:8, fontSize:13,
+        {msg && <div style={{ padding:'10px 14px', borderRadius:8, fontSize:fs(13),
           background:msg.ok?t.okBg:t.dangerBg, color:msg.ok?t.ok:t.danger,
           border:`1px solid ${msg.ok?t.okBorder:t.dangerBorder}` }}>{msg.text}</div>}
         {msg?.ok ? (
           <button type="button" onClick={continueToApp} style={{ background:t.accent, color:'#fff',
-            border:'none', borderRadius:8, padding:11, fontSize:14, fontWeight:600,
+            border:'none', borderRadius:8, padding:11, fontSize:fs(14), fontWeight:600,
             cursor:'pointer', marginTop:4 }}>Continue to MedBook</button>
         ) : (
           <button type="submit" disabled={pwSaving} style={{ background:t.accent, color:'#fff',
-            border:'none', borderRadius:8, padding:11, fontSize:14, fontWeight:600,
+            border:'none', borderRadius:8, padding:11, fontSize:fs(14), fontWeight:600,
             cursor:pwSaving?'not-allowed':'pointer', opacity:pwSaving?.7:1, marginTop:4 }}>
             {pwSaving ? 'Saving…' : 'Set New Password'}
           </button>
@@ -153,7 +153,7 @@ export default function Auth() {
 
   return shell(
     <>
-      <div style={{ fontSize:15, fontWeight:600, color:t.text, marginBottom:20 }}>
+      <div style={{ fontSize:fs(15), fontWeight:600, color:t.text, marginBottom:20 }}>
         {mode==='login'?'Sign in':mode==='signup'?'Create account':'Reset password'}
       </div>
       <form onSubmit={handle} style={{ display:'flex', flexDirection:'column', gap:14 }}>
@@ -169,7 +169,7 @@ export default function Auth() {
               required placeholder="••••••••" style={inp} minLength={6} />
           </div>
         )}
-        {msg && <div style={{ padding:'10px 14px', borderRadius:8, fontSize:13,
+        {msg && <div style={{ padding:'10px 14px', borderRadius:8, fontSize:fs(13),
           background:msg.ok?t.okBg:t.dangerBg, color:msg.ok?t.ok:t.danger,
           border:`1px solid ${msg.ok?t.okBorder:t.dangerBorder}` }}>{msg.text}</div>}
 
@@ -183,7 +183,7 @@ export default function Auth() {
         `}</style>
         <div className="medbook-auth-actions">
           <button type="submit" disabled={loading} style={{ background:t.accent, color:'#fff',
-            border:'none', borderRadius:8, padding:11, fontSize:14, fontWeight:600,
+            border:'none', borderRadius:8, padding:11, fontSize:fs(14), fontWeight:600,
             cursor:loading?'not-allowed':'pointer', opacity:loading?.7:1 }}>
             {loading?'Please wait…':mode==='login'?'Sign In':mode==='signup'?'Create Account':'Send Reset Email'}
           </button>
@@ -192,7 +192,7 @@ export default function Auth() {
             <button type="button" onClick={handleGoogle} disabled={googleLoading} style={{
               display:'flex', alignItems:'center', justifyContent:'center', gap:10,
               background:t.surface2, color:t.text, border:`1px solid ${t.borderStrong}`,
-              borderRadius:8, padding:11, fontSize:14, fontWeight:600,
+              borderRadius:8, padding:11, fontSize:fs(14), fontWeight:600,
               cursor:googleLoading?'not-allowed':'pointer', opacity:googleLoading?.7:1,
               fontFamily:'Inter,sans-serif' }}>
               <GoogleIcon />

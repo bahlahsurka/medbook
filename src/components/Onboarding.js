@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useTheme, RADIUS } from '../lib/theme';
+import { useTheme, RADIUS, fs } from '../lib/theme';
 
 const STEPS = [
   { icon:'📋', title:'Welcome to MedBook', body:'Your personal USMLE Step 2 notebook. Organised by organ system, accessible on all your devices.' },
@@ -21,9 +21,9 @@ export default function Onboarding({ onDone }) {
       <div style={{ background:t.surface, borderRadius:RADIUS.xl, width:'100%', maxWidth:400,
         padding:'36px 28px', textAlign:'center', boxShadow:`0 8px 32px ${t.shadowStrong}` }}>
 
-        <div style={{ fontSize:48, marginBottom:16 }}>{s.icon}</div>
-        <div style={{ fontSize:18, fontWeight:700, color:t.text, marginBottom:12 }}>{s.title}</div>
-        <div style={{ fontSize:14, color:t.text3, lineHeight:1.7, marginBottom:28 }}>{s.body}</div>
+        <div style={{ fontSize:fs(48), marginBottom:16 }}>{s.icon}</div>
+        <div style={{ fontSize:fs(18), fontWeight:700, color:t.text, marginBottom:12 }}>{s.title}</div>
+        <div style={{ fontSize:fs(14), color:t.text3, lineHeight:1.7, marginBottom:28 }}>{s.body}</div>
 
         <div style={{ display:'flex', justifyContent:'center', gap:6, marginBottom:24 }}>
           {STEPS.map((_,i) => (
@@ -35,20 +35,20 @@ export default function Onboarding({ onDone }) {
         <div style={{ display:'flex', gap:10 }}>
           {step > 0 && (
             <button onClick={()=>setStep(p=>p-1)} style={{ flex:1, background:t.surface3,
-              border:`1px solid ${t.border}`, borderRadius:9, padding:12, fontSize:14,
+              border:`1px solid ${t.border}`, borderRadius:9, padding:12, fontSize:fs(14),
               fontWeight:600, cursor:'pointer', color:t.text2, fontFamily:'Inter,sans-serif' }}>
               Back
             </button>
           )}
           <button onClick={()=>{ if(isLast) onDone(); else setStep(p=>p+1); }}
             style={{ flex:2, background:t.accent, color:'#fff', border:'none',
-              borderRadius:9, padding:12, fontSize:14, fontWeight:600,
+              borderRadius:9, padding:12, fontSize:fs(14), fontWeight:600,
               cursor:'pointer', fontFamily:'Inter,sans-serif' }}>
             {isLast ? 'Start using MedBook' : 'Next'}
           </button>
         </div>
 
-        <div onClick={onDone} style={{ marginTop:14, fontSize:12, color:t.text4,
+        <div onClick={onDone} style={{ marginTop:14, fontSize:fs(12), color:t.text4,
           cursor:'pointer', textDecoration:'underline' }}>Skip intro</div>
       </div>
     </div>

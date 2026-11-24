@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useCallback, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import { SYS_COLOR, DIFF_COLOR } from '../lib/constants';
-import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, BREAKPOINT } from '../lib/theme';
+import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, BREAKPOINT, fs } from '../lib/theme';
 import { getReviewQueueTheme } from '../lib/reviewQueueTheme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { buildCycledQueue } from '../lib/reviewQueue';
@@ -117,7 +117,7 @@ function Lightbox({ images, start, onClose }) {
         width:40, height:40, borderRadius:RADIUS.circle }}><IconX size={18} /></LbBtn>
       {images.length > 1 && <>
         <div style={{ position:'absolute', top:20, left:'50%', transform:'translateX(-50%)',
-          color:'#fff', fontSize:13, background:'rgba(0,0,0,.5)', padding:'4px 14px', borderRadius:RADIUS.pill }}>
+          color:'#fff', fontSize:fs(13), background:'rgba(0,0,0,.5)', padding:'4px 14px', borderRadius:RADIUS.pill }}>
           {idx + 1}/{images.length}
         </div>
         <LbBtn onClick={prev} title="Previous image" style={{ position:'absolute', left:12,
@@ -1078,7 +1078,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
               textTransform:'uppercase', marginBottom:8 }}>
               Study Session
             </div>
-            <div style={{ fontFamily:SANS, fontSize:28, fontWeight:FONT.weight.bold,
+            <div style={{ fontFamily:SANS, fontSize:fs(28), fontWeight:FONT.weight.bold,
               color:rt.text, lineHeight:1.15, letterSpacing:-.3 }}>
               Review Queue
             </div>

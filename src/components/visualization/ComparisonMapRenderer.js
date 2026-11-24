@@ -13,14 +13,6 @@ import ContentDiagramFrame from './ContentDiagramFrame';
 
 function cellKey(subjectId, dimensionId) { return `${subjectId}\u0000${dimensionId}`; }
 
-function DifferenceLegend({ t }) {
-  return (
-    <span className="mb-viz-legend-label" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: FONT.size.micro, color: t.text3, whiteSpace: 'nowrap', fontFamily: 'Inter,sans-serif' }}>
-      <span style={{ width: 3, height: 12, borderRadius: 2, background: t.warn }} /> Key difference
-    </span>
-  );
-}
-
 /** @param {{diagram:{topic,subjects,dimensions,cells}}} props — a validated Comparison Map diagram. */
 export default function ComparisonMapRenderer({ diagram }) {
   const { t, isDark } = useTheme();
@@ -46,7 +38,6 @@ export default function ComparisonMapRenderer({ diagram }) {
   return (
     <ContentDiagramFrame
       title={diagram?.topic || 'Comparison'}
-      legend={<DifferenceLegend t={t} />}
       overlay={<DiagramDetailPanel node={selectedNode} onClose={() => setSelectedKey(null)} />}
     >
       <table style={{ borderCollapse: 'separate', borderSpacing: 0, width: '100%', minWidth: 140 + subjects.length * 150, tableLayout: 'fixed', fontFamily: 'Inter,sans-serif' }}>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
+import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation, fs } from '../lib/theme';
 import { useReviewKeyboard } from '../lib/useReviewKeyboard';
 import { SYS_COLOR } from '../lib/constants';
 import { IconLayers, IconPlay, IconPlus, IconEdit, IconTrash, IconCheck, IconChevronLeft } from '../lib/icons';
@@ -1031,7 +1031,7 @@ export default function FlashCards({ userId, userSystems }) {
         </div>
       ) : visibleFolderCards.length === 0 ? (
         <div style={{ textAlign:'center', padding:'50px 20px' }}>
-          <div style={{ fontSize:28, marginBottom:10 }}>🔍</div>
+          <div style={{ fontSize:fs(28), marginBottom:10 }}>🔍</div>
           <div style={{ fontSize:FONT.size.base, color:t.text3 }}>No cards match "{folderSearch}".</div>
         </div>
       ) : (
@@ -1138,7 +1138,7 @@ function AreaTabs({ t, area, setArea }) {
         <button key={tab.id} onClick={()=>setArea(tab.id)} style={{
           background: area===tab.id ? t.surface : 'transparent',
           color: area===tab.id ? t.text : t.text3,
-          border:'none', borderRadius:RADIUS.sm, padding:'7px 16px', fontSize:13,
+          border:'none', borderRadius:RADIUS.sm, padding:'7px 16px', fontSize:fs(13),
           fontWeight:600, cursor:'pointer', fontFamily:'Inter,sans-serif', flexShrink:0,
           boxShadow: area===tab.id ? elevation(t,'sm') : 'none' }}>
           {tab.label}

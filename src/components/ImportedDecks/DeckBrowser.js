@@ -11,7 +11,7 @@
 // doesn't exist yet, not that nothing is due — rendered as "-", not "0".
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useTheme } from '../../lib/theme';
+import { useTheme, fs } from '../../lib/theme';
 import * as api from '../../lib/importedDecks/api';
 import { IconChevronRight } from '../../lib/icons';
 
@@ -201,7 +201,7 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick, 
   };
 
   const B = (bg, color = '#fff') => ({ background: bg, color, border: 'none', borderRadius: 8,
-    padding: '10px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' });
+    padding: '10px 20px', fontSize: fs(13), fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' });
 
   if (roots === null) return (
     <div style={{ textAlign: 'center', paddingTop: 60, color: t.text4, fontFamily: 'Inter,sans-serif' }}>
@@ -283,8 +283,8 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick, 
       <style>{css}</style>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
-        <div style={{ fontSize: 16, fontWeight: 700, color: t.text }}>
-          Imported Decks <span style={{ fontSize: 13, color: t.text4, fontWeight: 400 }}>({roots.length})</span>
+        <div style={{ fontSize: fs(16), fontWeight: 700, color: t.text }}>
+          Imported Decks <span style={{ fontSize: fs(13), color: t.text4, fontWeight: 400 }}>({roots.length})</span>
         </div>
         {/* flexWrap here too (not just on the outer row above) is a
             narrow-phone safety net, not the primary fix — the two buttons
@@ -302,15 +302,15 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick, 
 
       {err && (
         <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: 8,
-          padding: '10px 14px', fontSize: 13, color: t.danger, marginBottom: 14 }}>{err}</div>
+          padding: '10px 14px', fontSize: fs(13), color: t.danger, marginBottom: 14 }}>{err}</div>
       )}
 
       {/* Empty state — Phase I3 */}
       {roots.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>📥</div>
-          <div style={{ fontSize: 14, color: t.text3, marginBottom: 6 }}>No imported decks yet.</div>
-          <div style={{ fontSize: 13, color: t.text4, marginBottom: 20 }}>
+          <div style={{ fontSize: fs(40), marginBottom: 12 }}>📥</div>
+          <div style={{ fontSize: fs(14), color: t.text3, marginBottom: 6 }}>No imported decks yet.</div>
+          <div style={{ fontSize: fs(13), color: t.text4, marginBottom: 20 }}>
             Import an Anki .apkg deck to study it inside MedBook.
           </div>
           <button onClick={onImportClick} style={B(t.accent)}>+ Import Anki Deck</button>
@@ -337,7 +337,7 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick, 
         <Modal t={t} onClose={() => setRenameTarget(null)} title={`Rename "${renameTarget.display_name}"`}>
           <input value={renameValue} onChange={e => setRenameValue(e.target.value)} autoFocus
             style={{ width: '100%', background: t.surface2, border: `1px solid ${t.borderStrong}`,
-              borderRadius: 8, color: t.text, padding: '10px 12px', fontSize: 14, outline: 'none',
+              borderRadius: 8, color: t.text, padding: '10px 12px', fontSize: fs(14), outline: 'none',
               boxSizing: 'border-box', fontFamily: 'Inter,sans-serif', marginBottom: 16 }} />
           <div style={{ display: 'flex', gap: 10 }}>
             <button onClick={doRename} disabled={!renameValue.trim() || busyId === renameTarget.id} style={B(t.accent)}>
@@ -351,17 +351,17 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick, 
       {/* Delete confirmation — Phase I2, explicit about what's removed */}
       {confirmDelete && (
         <Modal t={t} onClose={() => setConfirmDelete(null)} title={`Delete "${confirmDelete.display_name}"?`}>
-          <div style={{ fontSize: 13.5, color: t.text2, lineHeight: 1.7, marginBottom: 8 }}>This will remove:</div>
-          <ul style={{ fontSize: 13.5, color: t.text2, lineHeight: 1.8, margin: '0 0 14px', paddingLeft: 20 }}>
+          <div style={{ fontSize: fs(13.5), color: t.text2, lineHeight: 1.7, marginBottom: 8 }}>This will remove:</div>
+          <ul style={{ fontSize: fs(13.5), color: t.text2, lineHeight: 1.8, margin: '0 0 14px', paddingLeft: 20 }}>
             <li>Imported cards</li>
             <li>Notes</li>
             <li>Deck hierarchy</li>
             <li>Associated imported media</li>
           </ul>
-          <div style={{ fontSize: 13, color: t.text3, marginBottom: 6 }}>
+          <div style={{ fontSize: fs(13), color: t.text3, marginBottom: 6 }}>
             Your Review Entries and My Cards will not be affected.
           </div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: t.danger, marginBottom: 18 }}>
+          <div style={{ fontSize: fs(13), fontWeight: 600, color: t.danger, marginBottom: 18 }}>
             This cannot be undone.
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
@@ -377,7 +377,7 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick, 
       {/* Reset progress confirmation — Phase I2 */}
       {confirmReset && (
         <Modal t={t} onClose={() => setConfirmReset(null)} title={`Reset progress in "${confirmReset.display_name}"?`}>
-          <div style={{ fontSize: 13.5, color: t.text2, lineHeight: 1.7, marginBottom: 14 }}>
+          <div style={{ fontSize: fs(13.5), color: t.text2, lineHeight: 1.7, marginBottom: 14 }}>
             This resets every card's scheduling state back to New. Cards, notes, media, tags, and
             the deck hierarchy are not affected.
           </div>
@@ -397,25 +397,25 @@ export default function DeckBrowser({ userId, onStudy, onBrowse, onImportClick, 
           lib/importedDecks/api.js. */}
       {optionsTarget && (
         <Modal t={t} onClose={() => setOptionsTarget(null)} title={`Deck Options: "${optionsTarget.display_name}"`}>
-          <div style={{ fontSize: 13, color: t.text3, lineHeight: 1.6, marginBottom: 18 }}>
+          <div style={{ fontSize: fs(13), color: t.text3, lineHeight: 1.6, marginBottom: 18 }}>
             Limits apply per calendar day, to a study session started from this deck. Leave a field
             blank for no limit.
           </div>
-          <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: t.text2, marginBottom: 6 }}>
+          <label style={{ display: 'block', fontSize: fs(12.5), fontWeight: 600, color: t.text2, marginBottom: 6 }}>
             New cards / day
           </label>
           <input type="number" min="0" inputMode="numeric" value={optNewPerDay}
             onChange={e => setOptNewPerDay(e.target.value)} placeholder="Unlimited"
             style={{ width: '100%', background: t.surface2, border: `1px solid ${t.borderStrong}`,
-              borderRadius: 8, color: t.text, padding: '10px 12px', fontSize: 14, outline: 'none',
+              borderRadius: 8, color: t.text, padding: '10px 12px', fontSize: fs(14), outline: 'none',
               boxSizing: 'border-box', fontFamily: 'Inter,sans-serif', marginBottom: 14 }} />
-          <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: t.text2, marginBottom: 6 }}>
+          <label style={{ display: 'block', fontSize: fs(12.5), fontWeight: 600, color: t.text2, marginBottom: 6 }}>
             Max reviews / day
           </label>
           <input type="number" min="0" inputMode="numeric" value={optMaxReviews}
             onChange={e => setOptMaxReviews(e.target.value)} placeholder="Unlimited"
             style={{ width: '100%', background: t.surface2, border: `1px solid ${t.borderStrong}`,
-              borderRadius: 8, color: t.text, padding: '10px 12px', fontSize: 14, outline: 'none',
+              borderRadius: 8, color: t.text, padding: '10px 12px', fontSize: fs(14), outline: 'none',
               boxSizing: 'border-box', fontFamily: 'Inter,sans-serif', marginBottom: 20 }} />
           <div style={{ display: 'flex', gap: 10 }}>
             <button onClick={doSaveOptions} disabled={optSaving} style={B(t.accent)}>
@@ -486,7 +486,7 @@ function DeckNode({ deck, depth, expanded, childrenMap, onToggleExpand, onStudy,
         </button>
 
         <div className="mb-deck-info">
-          <div className="mb-deck-name" style={{ fontSize: 14, fontWeight: 600, color: t.text }}>
+          <div className="mb-deck-name" style={{ fontSize: fs(14), fontWeight: 600, color: t.text }}>
             {deck.display_name}
           </div>
           {/* One text line with middle-dot separators, not three separate
@@ -500,7 +500,7 @@ function DeckNode({ deck, depth, expanded, childrenMap, onToggleExpand, onStudy,
               Due gets a restrained color-only emphasis (not a badge) when
               there's actually something due — it's the one number that
               means "something to act on right now". */}
-          <div style={{ fontSize: 11.5, color: t.text4, marginTop: 3 }}>
+          <div style={{ fontSize: fs(11.5), color: t.text4, marginTop: 3 }}>
             {(deck.new_cards ?? 0).toLocaleString()} new · <span style={{
               color: hasDue ? t.accent : t.text4, fontWeight: hasDue ? 700 : 400 }}>
               {deck.due_cards == null ? '-' : deck.due_cards.toLocaleString()} due
@@ -511,7 +511,7 @@ function DeckNode({ deck, depth, expanded, childrenMap, onToggleExpand, onStudy,
         <div className="mb-deck-menu-wrap" style={{ position: 'relative' }}>
           <button onClick={() => setMenuOpen(p => !p)} title="More actions" aria-label="More actions" style={{
             background: t.surface2, border: `1px solid ${t.border}`, color: t.text2,
-            borderRadius: 6, padding: '6px 9px', fontSize: 12, cursor: 'pointer' }}>
+            borderRadius: 6, padding: '6px 9px', fontSize: fs(12), cursor: 'pointer' }}>
             ⋯
           </button>
           {menuOpen && (
@@ -528,7 +528,7 @@ function DeckNode({ deck, depth, expanded, childrenMap, onToggleExpand, onStudy,
                   ['Delete', () => onDeleteRequest(deck)],
                 ].map(([label, fn]) => (
                   <div key={label} onClick={() => { setMenuOpen(false); fn(); }} style={{
-                    padding: '9px 14px', fontSize: 12.5, cursor: 'pointer',
+                    padding: '9px 14px', fontSize: fs(12.5), cursor: 'pointer',
                     color: label === 'Delete' ? t.danger : t.text2,
                     fontFamily: 'Inter,sans-serif' }}>
                     {label}
@@ -543,14 +543,14 @@ function DeckNode({ deck, depth, expanded, childrenMap, onToggleExpand, onStudy,
           <button className="mb-deck-study-btn" onClick={() => onStudy(deck)} disabled={!canStudy} style={{
             background: canStudy ? t.accent : t.surface3,
             color: canStudy ? '#fff' : t.text4,
-            border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600,
+            border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: fs(12), fontWeight: 600,
             cursor: canStudy ? 'pointer' : 'default',
             fontFamily: 'Inter,sans-serif' }}>
             ▶ Study
           </button>
           <button className="mb-deck-browse-btn" onClick={() => onBrowse(deck)} style={{
             background: t.surface2, border: `1px solid ${t.border}`, color: t.text2,
-            borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600,
+            borderRadius: 6, padding: '6px 12px', fontSize: fs(12), fontWeight: 600,
             cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
             Browse
           </button>
@@ -568,13 +568,13 @@ function DeckNode({ deck, depth, expanded, childrenMap, onToggleExpand, onStudy,
 
           {!hasKidsLoaded && (
             <div style={{ marginLeft: `calc(var(--mb-deck-indent) * ${Math.min(depth + 1, MAX_INDENT_DEPTH)})`,
-              fontSize: 12, color: t.text4, padding: '6px 0' }}>
+              fontSize: fs(12), color: t.text4, padding: '6px 0' }}>
               Loading subdecks…
             </div>
           )}
           {hasKidsLoaded && kids.length === 0 && (
             <div style={{ marginLeft: `calc(var(--mb-deck-indent) * ${Math.min(depth + 1, MAX_INDENT_DEPTH)})`,
-              fontSize: 12, color: t.text4, padding: '6px 0' }}>
+              fontSize: fs(12), color: t.text4, padding: '6px 0' }}>
               No subdecks.
             </div>
           )}
@@ -599,7 +599,7 @@ function Modal({ t, title, onClose, children }) {
       <div onClick={e => e.stopPropagation()} style={{ background: t.surface, borderRadius: 14,
         padding: 24, maxWidth: 420, width: '100%', boxShadow: `0 8px 32px ${t.shadowStrong}`,
         fontFamily: 'Inter,sans-serif', maxHeight: '85vh', overflowY: 'auto' }}>
-        <div style={{ fontSize: 16, fontWeight: 700, color: t.text, marginBottom: 16 }}>{title}</div>
+        <div style={{ fontSize: fs(16), fontWeight: 700, color: t.text, marginBottom: 16 }}>{title}</div>
         {children}
       </div>
     </div>

@@ -7,7 +7,7 @@ import { useDebouncedValue } from './lib/useDebouncedValue';
 import { useStudySession } from './lib/useStudySession';
 import { useRatingOutboxSync, mergeOutboxIntoRows } from './lib/ratingOutbox';
 import { useServiceWorkerUpdate } from './lib/useServiceWorkerUpdate';
-import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation, BREAKPOINT } from './lib/theme';
+import { useTheme, SPACE, RADIUS, FONT, MOTION, Z, elevation, BREAKPOINT, fs } from './lib/theme';
 import { IconMenu, IconX, IconChevronLeft, IconPlus, IconInbox, IconSearch } from './lib/icons';
 import Auth from './components/Auth';
 import LandingPage from './components/LandingPage';
@@ -829,18 +829,18 @@ export default function App() {
             ) : (
               <div style={{textAlign:'center',paddingTop:80}}>
                 <Spinner track={t.spinnerTrack} accent={t.accent} />
-                <div style={{fontSize:13,color:t.text3,marginTop:16}}>Loading your notebook…</div>
+                <div style={{fontSize:fs(13),color:t.text3,marginTop:16}}>Loading your notebook…</div>
               </div>
             )
           )}
 
           {!fetching && fetchErr && (
             <div style={{textAlign:'center',paddingTop:60}}>
-              <div style={{fontSize:14,color:'#dc2626',marginBottom:8}}>Could not load entries</div>
-              <div style={{fontSize:12,color:t.text4,marginBottom:20}}>{fetchErr}</div>
+              <div style={{fontSize:fs(14),color:'#dc2626',marginBottom:8}}>Could not load entries</div>
+              <div style={{fontSize:fs(12),color:t.text4,marginBottom:20}}>{fetchErr}</div>
               <button onClick={()=>loadEntries(userId,userSystems)}
                 style={{background:t.accent,color:'#fff',border:'none',borderRadius:8,
-                  padding:'10px 24px',fontSize:14,fontWeight:600,cursor:'pointer'}}>Retry</button>
+                  padding:'10px 24px',fontSize:fs(14),fontWeight:600,cursor:'pointer'}}>Retry</button>
             </div>
           )}
 

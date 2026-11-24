@@ -59,7 +59,7 @@
 // decrement — no undo work, no added latency.
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useTheme } from '../../lib/theme';
+import { useTheme, fs } from '../../lib/theme';
 import * as api from '../../lib/importedDecks/api';
 import * as favoritesApi from '../../lib/importedDecks/favorites';
 import * as ownCardsApi from '../../lib/ownCards/api';
@@ -718,7 +718,7 @@ export default function StudySession({ deck, userId, onExit }) {
   }, [measureHeight]);
 
   const B = (bg, color = '#fff') => ({ background: bg, color, border: 'none', borderRadius: 10,
-    padding: '14px 10px', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' });
+    padding: '14px 10px', fontSize: fs(13), fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' });
 
   // Explicit "Resume Study?" choice — shown only when there's real
   // progress worth asking about (see resumeChoice's own init above). This
@@ -729,9 +729,9 @@ export default function StudySession({ deck, userId, onExit }) {
   // exists to fix).
   if (resumeChoice === null) return (
     <div style={{ maxWidth: 420, margin: '80px auto 0', textAlign: 'center', fontFamily: 'Inter,sans-serif' }}>
-      <div style={{ fontSize: 34, marginBottom: 14 }}>↩️</div>
-      <div style={{ fontSize: 16, fontWeight: 700, color: t.text, marginBottom: 6 }}>Resume Study?</div>
-      <div style={{ fontSize: 13, color: t.text3, marginBottom: 22 }}>
+      <div style={{ fontSize: fs(34), marginBottom: 14 }}>↩️</div>
+      <div style={{ fontSize: fs(16), fontWeight: 700, color: t.text, marginBottom: 6 }}>Resume Study?</div>
+      <div style={{ fontSize: fs(13), color: t.text3, marginBottom: 22 }}>
         {deck.display_name}: card {pendingResume.idx + 1} of {pendingResume.cardIds.length}
       </div>
       <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
@@ -751,9 +751,9 @@ export default function StudySession({ deck, userId, onExit }) {
 
   if (paused) return (
     <div style={{ maxWidth: 420, margin: '80px auto 0', textAlign: 'center', fontFamily: 'Inter,sans-serif' }}>
-      <div style={{ fontSize: 34, marginBottom: 14 }}>⏸</div>
-      <div style={{ fontSize: 16, fontWeight: 700, color: t.text, marginBottom: 6 }}>Session Paused</div>
-      <div style={{ fontSize: 13, color: t.text3, marginBottom: 22 }}>
+      <div style={{ fontSize: fs(34), marginBottom: 14 }}>⏸</div>
+      <div style={{ fontSize: fs(16), fontWeight: 700, color: t.text, marginBottom: 6 }}>Session Paused</div>
+      <div style={{ fontSize: fs(13), color: t.text3, marginBottom: 22 }}>
         Card {idx + 1} of {queue.length}. Your place is saved.
       </div>
       <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
@@ -765,8 +765,8 @@ export default function StudySession({ deck, userId, onExit }) {
 
   if (!queue.length) return (
     <div style={{ maxWidth: 420, margin: '60px auto 0', textAlign: 'center', fontFamily: 'Inter,sans-serif' }}>
-      <div style={{ fontSize: 36, marginBottom: 12 }}>🎉</div>
-      <div style={{ fontSize: 15, color: t.text3, marginBottom: 20 }}>No cards are due in "{deck.display_name}" right now.</div>
+      <div style={{ fontSize: fs(36), marginBottom: 12 }}>🎉</div>
+      <div style={{ fontSize: fs(15), color: t.text3, marginBottom: 20 }}>No cards are due in "{deck.display_name}" right now.</div>
       <button onClick={onExit} style={B(t.surface3, t.text2)}>← Back to Deck</button>
     </div>
   );
@@ -775,9 +775,9 @@ export default function StudySession({ deck, userId, onExit }) {
     finishedNormally();
     return (
       <div style={{ maxWidth: 420, margin: '60px auto 0', textAlign: 'center', fontFamily: 'Inter,sans-serif' }}>
-        <div style={{ fontSize: 40, marginBottom: 14 }}>✅</div>
-        <div style={{ fontSize: 16, fontWeight: 700, color: t.text, marginBottom: 6 }}>Session Complete</div>
-        <div style={{ fontSize: 13, color: t.text3, marginBottom: 22 }}>
+        <div style={{ fontSize: fs(40), marginBottom: 14 }}>✅</div>
+        <div style={{ fontSize: fs(16), fontWeight: 700, color: t.text, marginBottom: 6 }}>Session Complete</div>
+        <div style={{ fontSize: fs(13), color: t.text3, marginBottom: 22 }}>
           You went through all {queue.length} cards in "{deck.display_name}".
         </div>
         <button onClick={onExit} style={{ ...B(t.accent) }}>← Back to Deck</button>
@@ -971,7 +971,7 @@ export default function StudySession({ deck, userId, onExit }) {
                       style={iconBtnStyle({ background: flagPickerOpen ? t.surface3 : t.surface2 })}>
                       {/* 🚩 is a fixed-color emoji glyph — CSS `color` can't tint it, so
                           the current flag color is shown as a separate dot instead. */}
-                      <span style={{ position: 'relative', fontSize: 14, lineHeight: 1 }}>
+                      <span style={{ position: 'relative', fontSize: fs(14), lineHeight: 1 }}>
                         🚩
                         {card.flag > 0 && (
                           <span style={{ position: 'absolute', right: -3, bottom: -2, width: 6, height: 6,
@@ -1052,7 +1052,7 @@ export default function StudySession({ deck, userId, onExit }) {
       </div>
 
       {err && <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: 8,
-        padding: '10px 14px', fontSize: 13, color: t.danger, marginBottom: 10, flexShrink: 0 }}>{err}</div>}
+        padding: '10px 14px', fontSize: fs(13), color: t.danger, marginBottom: 10, flexShrink: 0 }}>{err}</div>}
 
       {card && note && model && (
         // flex:1 + minHeight:0 is what actually lets this claim the leftover
@@ -1081,15 +1081,15 @@ export default function StudySession({ deck, userId, onExit }) {
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto', background: t.surface,
           border: `1px solid ${t.border}`, borderRadius: 12, padding: '22px 20px',
           display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-          <div style={{ fontSize: 12, color: t.text4, fontWeight: 700, textTransform: 'uppercase',
+          <div style={{ fontSize: fs(12), color: t.text4, fontWeight: 700, textTransform: 'uppercase',
             letterSpacing: .6, marginBottom: 10 }}>Question</div>
-          <div data-selectable="true" style={{ fontSize: 18, fontWeight: 600, color: t.text, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}
+          <div data-selectable="true" style={{ fontSize: fs(18), fontWeight: 600, color: t.text, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}
             dangerouslySetInnerHTML={{ __html: renderOwnCardText(card.question, false) }} />
           {revealed && (
             <div style={{ marginTop: 22, paddingTop: 18, borderTop: `1px solid ${t.border}` }}>
-              <div style={{ fontSize: 12, color: t.ok, fontWeight: 700, textTransform: 'uppercase',
+              <div style={{ fontSize: fs(12), color: t.ok, fontWeight: 700, textTransform: 'uppercase',
                 letterSpacing: .6, marginBottom: 10 }}>Answer</div>
-              <div data-selectable="true" style={{ fontSize: 16.5, color: t.text2, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}
+              <div data-selectable="true" style={{ fontSize: fs(16.5), color: t.text2, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}
                 dangerouslySetInnerHTML={{ __html: renderOwnCardText(card.answer, true) }} />
             </div>
           )}
@@ -1106,13 +1106,13 @@ export default function StudySession({ deck, userId, onExit }) {
           <div style={{ display: 'flex', gap: 10 }}>
             <button onClick={() => setSourceModalOpen(true)} style={{
               flex: 1, background: t.navActiveBg, border: `1px solid ${t.navActiveBorder}`, color: t.navActiveText,
-              borderRadius: 12, padding: '14px 10px', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+              borderRadius: 12, padding: '14px 10px', fontSize: fs(14), fontWeight: 700, cursor: 'pointer',
               fontFamily: 'Inter,sans-serif' }}>
               Source
             </button>
             <button onClick={continueAfterMiss} style={{
               flex: 1, background: t.accent, color: '#fff', border: 'none', borderRadius: 12,
-              padding: '14px 10px', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+              padding: '14px 10px', fontSize: fs(14), fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
               Continue →
             </button>
           </div>
@@ -1120,7 +1120,7 @@ export default function StudySession({ deck, userId, onExit }) {
           // Large single tap target — the primary touch action (Phase L4).
           <button onClick={() => setRevealed(true)} className="mb-ss-showanswer" style={{
             width: '100%', background: t.accent, color: '#fff', border: 'none', borderRadius: 12,
-            padding: '14px 10px', fontSize: 14.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+            padding: '14px 10px', fontSize: fs(14.5), fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
             Show Answer
           </button>
         ) : (
@@ -1142,8 +1142,8 @@ export default function StudySession({ deck, userId, onExit }) {
                   borderRight: i < RATINGS.length - 1 ? '1px solid rgba(255,255,255,0.22)' : 'none',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
                 }}>
-                <span style={{ fontSize: 13, fontWeight: 700 }}>{label}</span>
-                <span style={{ fontSize: 10.5, fontWeight: 500, opacity: 0.78 }}>{intervals?.[key]?.label}</span>
+                <span style={{ fontSize: fs(13), fontWeight: 700 }}>{label}</span>
+                <span style={{ fontSize: fs(10.5), fontWeight: 500, opacity: 0.78 }}>{intervals?.[key]?.label}</span>
               </button>
             ))}
           </div>

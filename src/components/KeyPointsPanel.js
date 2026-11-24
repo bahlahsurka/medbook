@@ -12,7 +12,7 @@
 // `keyPoints` key) and must be the one place that merges a write to either
 // without clobbering the other (see DetailView.js's own comment on this).
 import { useState } from 'react';
-import { useTheme, SPACE, RADIUS, FONT, elevation, MOTION } from '../lib/theme';
+import { useTheme, SPACE, RADIUS, FONT, elevation, MOTION, fs } from '../lib/theme';
 import { IconBrainSpark } from '../lib/icons';
 import KeyPointsContent from './KeyPointsContent';
 
@@ -71,7 +71,7 @@ export default function KeyPointsPanel({ keyPoints, fidelityWarnings = [], fidel
             </span>
           )}
           {hasContent && (
-            <span aria-hidden style={{ fontSize: 11, transform: collapsed ? 'none' : 'rotate(90deg)', transition: `transform ${MOTION.fast} ${MOTION.ease}` }}>▶</span>
+            <span aria-hidden style={{ fontSize: fs(11), transform: collapsed ? 'none' : 'rotate(90deg)', transition: `transform ${MOTION.fast} ${MOTION.ease}` }}>▶</span>
           )}
         </button>
         {isStale && !collapsed && (
@@ -81,9 +81,9 @@ export default function KeyPointsPanel({ keyPoints, fidelityWarnings = [], fidel
           </span>
         )}
         <button className="mb-detailbtn" onClick={onGenerate} disabled={busy} style={{
-          fontSize: FONT.size.xs, fontWeight: FONT.weight.semibold, fontFamily: 'Inter,sans-serif',
+          fontSize: FONT.size.base, fontWeight: FONT.weight.semibold, fontFamily: 'Inter,sans-serif',
           background: busy ? t.surface3 : t.navActiveBg, border: `1px solid ${busy ? t.border : t.navActiveBorder}`,
-          color: busy ? t.text4 : t.navActiveText, borderRadius: RADIUS.sm - 1, padding: '5px 12px',
+          color: busy ? t.text4 : t.navActiveText, borderRadius: RADIUS.md, padding: '0 16px', height: 38, boxSizing: 'border-box',
           cursor: busy ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: 6,
         }}>
           {busy ? (
@@ -100,7 +100,7 @@ export default function KeyPointsPanel({ keyPoints, fidelityWarnings = [], fidel
         <div>
           {error && (
             <div style={{ background: t.dangerBg, border: `1px solid ${t.dangerBorder}`, borderRadius: RADIUS.md,
-              padding: '10px 14px', fontSize: 12.5, color: t.danger, marginBottom: SPACE.md }}>
+              padding: '10px 14px', fontSize: fs(12.5), color: t.danger, marginBottom: SPACE.md }}>
               {error}
               <div style={{ marginTop: 6, fontSize: FONT.size.xs }}>Your Review and any existing Key Points are untouched. You can retry.</div>
             </div>
@@ -111,15 +111,15 @@ export default function KeyPointsPanel({ keyPoints, fidelityWarnings = [], fidel
               <KeyPointsContent sections={keyPoints.sections} fidelityWarnings={fidelityWarnings} fidelityDisclaimer={fidelityDisclaimer} />
 
               {generatedAt && (
-                <div style={{ fontSize: 10.5, color: t.text4, textAlign: 'right', marginTop: 10 }}>
+                <div style={{ fontSize: fs(10.5), color: t.text4, textAlign: 'right', marginTop: 10 }}>
                   Generated {fmtDate(generatedAt)}{model ? ` · ${model}` : ''}
                 </div>
               )}
             </>
           ) : !busy && !error && (
-            <div style={{ fontSize: 12.5, color: t.text4, lineHeight: 1.6 }}>
+            <div style={{ fontSize: fs(12.5), color: t.text4, lineHeight: 1.6 }}>
               Click <strong>Generate</strong> for a concise, exam-oriented summary of this entry — key findings, mechanisms,
-              investigations, treatments, and any red flags, organized under short headings. Your Review itself is never changed.
+              investigations, treatments, and any red flags, organized under short headings.
             </div>
           )}
         </div>

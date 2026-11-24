@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { useTheme, RADIUS } from '../lib/theme';
+import { useTheme, RADIUS, fs } from '../lib/theme';
 
 const PRESET_COLORS = [
   '#2563eb','#dc2626','#16a34a','#d97706','#7c3aed',
@@ -91,13 +91,13 @@ export default function ManageSystems({ systems, onSave, onClose, userId }) {
         <div style={{ padding:'18px 20px 14px', borderBottom:`1px solid ${t.border}`,
           display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
           <div>
-            <div style={{ fontSize:15, fontWeight:700, color:t.text }}>Manage Systems</div>
-            <div style={{ fontSize:11, color:t.text4, marginTop:2 }}>
+            <div style={{ fontSize:fs(15), fontWeight:700, color:t.text }}>Manage Systems</div>
+            <div style={{ fontSize:fs(11), color:t.text4, marginTop:2 }}>
               Syncs across all your devices automatically
             </div>
           </div>
           <button onClick={onClose} style={{ background:'none', border:'none',
-            fontSize:20, color:t.text4, cursor:'pointer' }}>✕</button>
+            fontSize:fs(20), color:t.text4, cursor:'pointer' }}>✕</button>
         </div>
 
         <div style={{ flex:1, overflowY:'auto', padding:'10px 16px' }}>
@@ -117,18 +117,18 @@ export default function ManageSystems({ systems, onSave, onClose, userId }) {
                   onKeyDown={e=>{ if(e.key==='Enter')saveEditName(idx); if(e.key==='Escape')setEditIdx(null); }}
                   autoFocus
                   style={{ flex:1, border:`1px solid ${t.accent}`, borderRadius:6,
-                    padding:'4px 8px', fontSize:13, outline:'none', color:t.text,
+                    padding:'4px 8px', fontSize:fs(13), outline:'none', color:t.text,
                     background:t.surface, fontFamily:'Inter,sans-serif' }} />
               ) : (
-                <span style={{ flex:1, fontSize:13, color:t.text, fontWeight:500 }}>
+                <span style={{ flex:1, fontSize:fs(13), color:t.text, fontWeight:500 }}>
                   {sys.name}
                   {sys._oldName && sys._oldName !== sys.name && (
-                    <span style={{ fontSize:10, color:t.warn, marginLeft:6,
+                    <span style={{ fontSize:fs(10), color:t.warn, marginLeft:6,
                       background:t.warnBg, borderRadius:RADIUS.sm, padding:'1px 6px',
                       border:`1px solid ${t.warnBorder}` }}>renamed, will update entries</span>
                   )}
                   {sys.custom && !sys._oldName && (
-                    <span style={{ fontSize:10, color:t.text4, marginLeft:6,
+                    <span style={{ fontSize:fs(10), color:t.text4, marginLeft:6,
                       background:t.surface3, borderRadius:RADIUS.sm, padding:'1px 5px' }}>custom</span>
                   )}
                 </span>
@@ -154,7 +154,7 @@ export default function ManageSystems({ systems, onSave, onClose, userId }) {
         </div>
 
         <div style={{ padding:'12px 16px', borderTop:`1px solid ${t.border}`, flexShrink:0 }}>
-          {err && <div style={{ fontSize:12, color:t.danger, marginBottom:8 }}>{err}</div>}
+          {err && <div style={{ fontSize:fs(12), color:t.danger, marginBottom:8 }}>{err}</div>}
           <div style={{ display:'flex', gap:8, alignItems:'center' }}>
             <div style={{ position:'relative', flexShrink:0 }}>
               <div style={{ width:32, height:32, borderRadius:8, background:newColor,
@@ -166,10 +166,10 @@ export default function ManageSystems({ systems, onSave, onClose, userId }) {
               onKeyDown={e=>e.key==='Enter'&&addSystem()}
               placeholder="New system name…"
               style={{ flex:1, border:`1px solid ${t.borderStrong}`, borderRadius:8,
-                padding:'8px 12px', fontSize:13, outline:'none', color:t.text,
+                padding:'8px 12px', fontSize:fs(13), outline:'none', color:t.text,
                 background:t.surface2, fontFamily:'Inter,sans-serif' }} />
             <button onClick={addSystem} style={{ background:t.accent, color:'#fff',
-              border:'none', borderRadius:8, padding:'8px 16px', fontSize:13,
+              border:'none', borderRadius:8, padding:'8px 16px', fontSize:fs(13),
               fontWeight:600, cursor:'pointer', flexShrink:0, fontFamily:'Inter,sans-serif' }}>
               + Add
             </button>
@@ -188,13 +188,13 @@ export default function ManageSystems({ systems, onSave, onClose, userId }) {
           display:'flex', gap:10, flexShrink:0 }}>
           <button onClick={handleSave} disabled={saving} style={{
             flex:1, background:saving?'#93c5fd':t.accent, color:'#fff', border:'none',
-            borderRadius:8, padding:11, fontSize:14, fontWeight:600,
+            borderRadius:8, padding:11, fontSize:fs(14), fontWeight:600,
             cursor:saving?'not-allowed':'pointer', fontFamily:'Inter,sans-serif' }}>
             {saving?'Saving…':'Save Changes'}
           </button>
           <button onClick={onClose} style={{ background:t.surface3, color:t.text3,
             border:`1px solid ${t.border}`, borderRadius:8, padding:'11px 20px',
-            fontSize:14, cursor:'pointer', fontFamily:'Inter,sans-serif' }}>Cancel</button>
+            fontSize:fs(14), cursor:'pointer', fontFamily:'Inter,sans-serif' }}>Cancel</button>
         </div>
       </div>
     </div>
@@ -205,7 +205,7 @@ function IBtn({ onClick, color, children, disabled }) {
   return (
     <button onClick={onClick} disabled={disabled} style={{
       background:`${color}18`, color, border:`1px solid ${color}40`,
-      borderRadius:6, padding:'4px 8px', fontSize:12,
+      borderRadius:6, padding:'4px 8px', fontSize:fs(12),
       cursor:disabled?'not-allowed':'pointer', opacity:disabled?.4:1,
       fontWeight:600, fontFamily:'Inter,sans-serif'
     }}>{children}</button>
