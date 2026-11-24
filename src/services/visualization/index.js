@@ -8,6 +8,7 @@
 // VisualizationValidator.js vs PromptBuilder.js/ResponseParser.js) carried
 // through to the client side too.
 import { supabase } from '../../lib/supabase.js';
+import { toVisualizationResponseShape } from '../ai/visualizationStorage.js';
 
 /** Thrown for anything that isn't a structural-validation failure the server already reported as such. */
 export class VisualizationServiceError extends Error {
@@ -60,6 +61,42 @@ function callVisualizeEndpoint(payload) {
   return postJson('/api/visualize', payload, 'Visualization request'); // { cached, visualization, disclaimer }
 }
 
+// Same "is this a finished diagram, not an in-progress claim row" checks as
+// visualizationRegistry.js's isRealDiagram (that module is server-only).
+function isRealSavedDiagram(vizType, diagram) {
+  if (!diagram || typeof diagram !== 'object') return false;
+  if (vizType === 'comparison_map') return Array.isArray(diagram.cells) && diagram.cells.length > 0;
+  if (vizType === 'visual_summary') return Array.isArray(diagram.highlights) && diagram.highlights.length > 0;
+  return Array.isArray(diagram.nodes) && diagram.nodes.length > 0;
+}
+
+// Read-only cache for listSaved(), keyed by entry id. Holds the in-flight
+// promise too, so concurrent opens share one query. Small LRU bound so a
+// long review session can't grow it without limit.
+const SAVED_CACHE_LIMIT = 40;
+const savedCache = new Map();
+
+function invalidateSaved(entryId) {
+  savedCache.delete(entryId);
+}
+
+function rememberSaved(entryId, value) {
+  savedCache.delete(entryId);
+  savedCache.set(entryId, value);
+  while (savedCache.size > SAVED_CACHE_LIMIT) savedCache.delete(savedCache.keys().next().value);
+}
+
+async function fetchSaved(entryId) {
+  const { data, error } = await supabase
+    .from('entry_visualizations')
+    .select('id, entry_id, viz_type, graph_data, extra_context, ai_provider, ai_model, source_content_hash, created_at, updated_at')
+    .eq('entry_id', entryId);
+  if (error) throw new VisualizationServiceError(`Could not load saved visualizations: ${error.message}`, 'api');
+  return (data || [])
+    .map(toVisualizationResponseShape)
+    .filter(v => isRealSavedDiagram(v.vizType, v.graphData));
+}
+
 const VisualizationService = {
   /** Is at least one provider configured? UI uses this to hide the Visual Learning entry point, same as AIService.isConfigured(). */
   isConfigured() { return ENABLED; },
@@ -78,7 +115,43 @@ const VisualizationService = {
   async generate(vizType, entryId, { extraContext, regenerate = false } = {}) {
     if (!entryId) throw new VisualizationServiceError('Missing entry id.', 'validation');
     if (!vizType) throw new VisualizationServiceError('Missing visualization type.', 'validation');
-    return callVisualizeEndpoint({ entryId, vizType, extraContext, regenerate: !!regenerate });
+    try {
+      return await callVisualizeEndpoint({ entryId, vizType, extraContext, regenerate: !!regenerate });
+    } finally {
+      invalidateSaved(entryId);
+    }
+  },
+
+  /**
+   * Read-only: the entry's already-saved visualizations (current version,
+   * with original/edited info), straight from entry_visualizations under
+   * RLS. Never calls /api/visualize, so it can never trigger a Groq
+   * generation — even when a saved diagram is stale. Unfinished claim rows
+   * are filtered out. Cached per entry for the browser session; invalidated
+   * whenever generate/saveEdit/restoreOriginal touches that entry.
+   *
+   * @param {string} entryId
+   * @returns {Promise<object[]>} visualization objects (toVisualizationResponseShape)
+   */
+  listSaved(entryId) {
+    if (!entryId) return Promise.reject(new VisualizationServiceError('Missing entry id.', 'validation'));
+    const hit = savedCache.get(entryId);
+    if (hit) {
+      rememberSaved(entryId, hit);
+      return hit.promise;
+    }
+    const entry = { promise: null, value: undefined };
+    entry.promise = fetchSaved(entryId).then(
+      list => { entry.value = list; return list; },
+      err => { if (savedCache.get(entryId) === entry) invalidateSaved(entryId); throw err; },
+    );
+    rememberSaved(entryId, entry);
+    return entry.promise;
+  },
+
+  /** Synchronous peek at listSaved()'s cache — the loaded list, or undefined if not loaded yet. */
+  peekSaved(entryId) {
+    return savedCache.get(entryId)?.value;
   },
 
   /** @deprecated Use generate('mind_map', entryId, options) — kept only so nothing outside this module needs to change if it still calls this directly. */
@@ -116,7 +189,11 @@ const VisualizationService = {
   async saveEdit(vizType, entryId, editedGraphData, { baseUpdatedAt } = {}) {
     if (!entryId) throw new VisualizationServiceError('Missing entry id.', 'validation');
     if (!vizType) throw new VisualizationServiceError('Missing visualization type.', 'validation');
-    return postJson('/api/visualize-edit', { entryId, vizType, action: 'save', editedGraphData, baseUpdatedAt }, 'Save');
+    try {
+      return await postJson('/api/visualize-edit', { entryId, vizType, action: 'save', editedGraphData, baseUpdatedAt }, 'Save');
+    } finally {
+      invalidateSaved(entryId);
+    }
   },
 
   /**
@@ -129,7 +206,11 @@ const VisualizationService = {
   async restoreOriginal(vizType, entryId, { baseUpdatedAt } = {}) {
     if (!entryId) throw new VisualizationServiceError('Missing entry id.', 'validation');
     if (!vizType) throw new VisualizationServiceError('Missing visualization type.', 'validation');
-    return postJson('/api/visualize-edit', { entryId, vizType, action: 'restore', baseUpdatedAt }, 'Restore');
+    try {
+      return await postJson('/api/visualize-edit', { entryId, vizType, action: 'restore', baseUpdatedAt }, 'Restore');
+    } finally {
+      invalidateSaved(entryId);
+    }
   },
 };
 

@@ -14,6 +14,8 @@
 // alone never triggers a request either — see `stateByType` below. The
 // only things that ever trigger a network call are the explicit Generate/
 // Regenerate buttons (per type) and the explicit Recommend button.
+// Exception: mode="saved" (review screens) does one read of already-saved
+// rows on mount — a table read only, never a generation.
 import { useState, useRef, useEffect, lazy, Suspense, useCallback, useMemo } from 'react';
 import { useTheme, SPACE, RADIUS, FONT, elevation } from '../../lib/theme';
 import { IconSparkle, IconNetwork } from '../../lib/icons';
@@ -74,6 +76,24 @@ const EMPTY_TYPE_STATE = {
   saveStatus: 'idle', saveError: '', confirmAction: null,
 };
 
+// mode="saved": seeds per-type state from already-saved rows so the normal
+// loaded-diagram rendering path is reused unchanged.
+function stateFromSaved(list) {
+  const out = {};
+  for (const v of list || []) {
+    if (TYPE_BY_KEY[v.vizType]) out[v.vizType] = { ...EMPTY_TYPE_STATE, status: 'loaded', result: { cached: true, visualization: v } };
+  }
+  return out;
+}
+function firstSavedType(list) {
+  return VISUALIZATION_TYPES.find(({ key }) => (list || []).some(v => v.vizType === key))?.key || 'mind_map';
+}
+
+function fmtSavedDate(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); } catch { return ''; }
+}
+
 function RendererFallback({ t }) {
   return (
     <div style={{ height: 480, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -102,9 +122,17 @@ function typeChipStyle(t, isSelected) {
  *   (DetailView's own runAnalyze) owns the AI Analysis request instead of
  *   AISections.js making it.
  */
-function VisualLearningPanelContent({ entryId }) {
+function VisualLearningPanelContent({ entryId, mode = 'full' }) {
   const { t } = useTheme();
-  const [selectedType, setSelectedType] = useState('mind_map');
+  // mode="saved" (review screens): read-only view of already-saved diagrams.
+  // Loads them once via VisualizationService.listSaved (a plain RLS-scoped
+  // table read, never /api/visualize, so never Groq) and hides every
+  // generate/regenerate/recommend/edit control.
+  const savedOnly = mode === 'saved';
+  const [initialSaved] = useState(() => (savedOnly ? VisualizationService.peekSaved(entryId) : undefined));
+  const [savedStatus, setSavedStatus] = useState(() => (!savedOnly ? 'off' : initialSaved ? 'loaded' : 'loading'));
+  const [savedError, setSavedError] = useState('');
+  const [selectedType, setSelectedType] = useState(() => (initialSaved ? firstSavedType(initialSaved) : 'mind_map'));
 
   // Independent per-type state — each of the six types has its own
   // status/result/error, so switching tabs is purely a client-side view
@@ -113,7 +141,23 @@ function VisualLearningPanelContent({ entryId }) {
   // to it, with zero extra network call. Server-side caching (per
   // entry_id + viz_type row) is the other half of "independent caching
   // behavior per type" — this is the client-side half of that guarantee.
-  const [stateByType, setStateByType] = useState({});
+  const [stateByType, setStateByType] = useState(() => (initialSaved ? stateFromSaved(initialSaved) : {}));
+
+  useEffect(() => {
+    if (!savedOnly || savedStatus !== 'loading') return undefined;
+    let cancelled = false;
+    VisualizationService.listSaved(entryId).then(list => {
+      if (cancelled) return;
+      setStateByType(stateFromSaved(list));
+      setSelectedType(firstSavedType(list));
+      setSavedStatus('loaded');
+    }, e => {
+      if (cancelled) return;
+      setSavedError(e instanceof VisualizationServiceError ? e.message : 'Could not load saved visualizations.');
+      setSavedStatus('error');
+    });
+    return () => { cancelled = true; };
+  }, [savedOnly, savedStatus, entryId]);
   const getTypeState = useCallback((key) => stateByType[key] || EMPTY_TYPE_STATE, [stateByType]);
   const updateTypeState = useCallback((key, patch) => {
     setStateByType(prev => ({ ...prev, [key]: { ...(prev[key] || EMPTY_TYPE_STATE), ...patch } }));
@@ -255,12 +299,18 @@ function VisualLearningPanelContent({ entryId }) {
   const Editor = EDITOR_BY_TYPE[selectedType];
   const elapsedSec = current.status === 'loading' ? Math.max(0, Math.floor((Date.now() - current.startedAt) / 1000)) : 0;
   const isBusy = current.saveStatus === 'saving';
+  const visibleTypes = savedOnly ? VISUALIZATION_TYPES.filter(({ key }) => stateByType[key]?.status === 'loaded') : VISUALIZATION_TYPES;
+
+  if (savedOnly && (savedStatus !== 'loaded' || visibleTypes.length === 0)) {
+    return <SavedModeState t={t} status={savedStatus} error={savedError}
+      onRetry={() => { setSavedError(''); setSavedStatus('loading'); }} />;
+  }
 
   return (
-    <div className="mb-detail-card" style={{ background: t.surface, border: `1px solid ${t.border}`,
+    <div className={savedOnly ? undefined : 'mb-detail-card'} style={savedOnly ? undefined : { background: t.surface, border: `1px solid ${t.border}`,
       borderRadius: RADIUS.lg, boxShadow: elevation(t, 'sm') }}>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: SPACE.md, flexWrap: 'wrap' }}>
+      {!savedOnly && <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: SPACE.md, flexWrap: 'wrap' }}>
         <div style={{ fontSize: FONT.size.micro, color: t.text4, letterSpacing: .8, fontWeight: FONT.weight.semibold,
           textTransform: 'uppercase', flex: 1, display: 'flex', alignItems: 'center', gap: 7 }}>
           <IconNetwork size={13} style={{ color: t.text4, flexShrink: 0 }} /> Visual Learning
@@ -269,17 +319,17 @@ function VisualLearningPanelContent({ entryId }) {
           padding: '2px 7px', fontWeight: FONT.weight.semibold }}>
           Preview
         </span>
-      </div>
+      </div>}
 
       {/* Type selector — explicit, never auto-generates. A ✓ marks a type
           already generated this session so switching back to it is known
           to be instant. */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: SPACE.sm }}>
-        {VISUALIZATION_TYPES.map(({ key, label }) => {
+        {visibleTypes.map(({ key, label }) => {
           const typeState = getTypeState(key);
           return (
             <button key={key} onClick={() => setSelectedType(key)} style={typeChipStyle(t, key === selectedType)}>
-              {typeState.status === 'loaded' && <span style={{ color: t.ok }}>✓</span>}
+              {!savedOnly && typeState.status === 'loaded' && <span style={{ color: t.ok }}>✓</span>}
               {label}
             </button>
           );
@@ -289,7 +339,7 @@ function VisualLearningPanelContent({ entryId }) {
       {/* Recommend — optional, advisory, never auto-generates anything.
           Picking a recommended chip only switches the selector above;
           generating still requires the usual explicit Generate click. */}
-      <div style={{ marginBottom: SPACE.md }}>
+      {!savedOnly && <div style={{ marginBottom: SPACE.md }}>
         {recommendState.status !== 'loaded' && (
           <button onClick={runRecommend} disabled={recommendState.status === 'loading'}
             style={{ background: 'none', border: 'none', color: t.text3, fontSize: FONT.size.xs,
@@ -319,13 +369,16 @@ function VisualLearningPanelContent({ entryId }) {
             </div>
           </div>
         )}
-      </div>
+      </div>}
+      {savedOnly && <div style={{ marginBottom: SPACE.sm }} />}
 
       {current.status === 'loaded' && current.result ? (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: SPACE.sm, flexWrap: 'wrap' }}>
             <span style={{ fontSize: FONT.size.xs, color: t.text4 }}>
-              {current.result.cached ? '✓ Loaded from cache (instant)' : `✓ Generated${current.result.timing?.totalMs ? ` in ${(current.result.timing.totalMs / 1000).toFixed(1)}s` : ''}`}
+              {savedOnly
+                ? `Saved${fmtSavedDate(current.result.visualization?.updatedAt) ? ` ${fmtSavedDate(current.result.visualization.updatedAt)}` : ''}`
+                : current.result.cached ? '✓ Loaded from cache (instant)' : `✓ Generated${current.result.timing?.totalMs ? ` in ${(current.result.timing.totalMs / 1000).toFixed(1)}s` : ''}`}
               {current.result.visualization?.aiModel ? ` · ${current.result.visualization.aiModel}` : ''}
               {current.result.visualization?.isEdited && !current.editMode && (
                 <span style={{ marginLeft: 6, color: t.navActiveText, fontWeight: FONT.weight.semibold }}>· Edited by you</span>
@@ -336,7 +389,12 @@ function VisualLearningPanelContent({ entryId }) {
                 Discard/Restore only ever appear once editing is actually
                 active or there's something to restore, so view mode stays
                 exactly as clean as Phase 3 shipped it. */}
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginLeft: 'auto' }}>
+            {savedOnly && current.result.visualization?.isEdited && (
+              <span style={{ fontSize: FONT.size.micro, color: t.text4 }}>· original AI version kept</span>
+            )}
+            {savedOnly ? (
+              <span style={{ fontSize: FONT.size.micro, color: t.text4, marginLeft: 'auto' }}>Edit or regenerate from the entry page</span>
+            ) : <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginLeft: 'auto' }}>
               {current.editMode ? (
                 <>
                   {current.isDirty && <span style={{ fontSize: FONT.size.micro, color: t.warn, alignSelf: 'center', fontWeight: FONT.weight.semibold }}>● Unsaved changes</span>}
@@ -354,7 +412,7 @@ function VisualLearningPanelContent({ entryId }) {
               {current.result.visualization?.isEdited && (
                 <button onClick={() => requestRestore(selectedType)} disabled={isBusy} style={regenerateButtonStyle(t)}>⟲ Restore Original AI Version</button>
               )}
-            </div>
+            </div>}
           </div>
 
           {/* Inline confirmation — shown instead of acting immediately
@@ -493,6 +551,36 @@ function VisualLearningPanelContent({ entryId }) {
   );
 }
 
+function SavedModeState({ t, status, error, onRetry }) {
+  const box = { border: `1px dashed ${t.border}`, borderRadius: RADIUS.lg, padding: '18px 16px',
+    fontSize: 12.5, color: t.text3, lineHeight: 1.6, textAlign: 'center' };
+  if (status === 'loading') {
+    return (
+      <div style={{ ...box, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+        <span style={{ display: 'inline-block', width: 12, height: 12, border: `2px solid ${t.border}`,
+          borderTop: `2px solid ${t.text3}`, borderRadius: RADIUS.circle, animation: 'medbook-spin .7s linear infinite' }} />
+        Loading saved visualizations…
+      </div>
+    );
+  }
+  if (status === 'error') {
+    return (
+      <div style={{ ...box, borderStyle: 'solid', borderColor: t.dangerBorder, background: t.dangerBg, color: t.danger }}>
+        {error}
+        <div style={{ marginTop: 10 }}>
+          <button onClick={onRetry} style={regenerateButtonStyle(t)}>Try again</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={box}>
+      <div style={{ fontWeight: FONT.weight.semibold, color: t.text2, marginBottom: 4 }}>No saved visualizations yet</div>
+      Open this entry's detail page to generate a Mind Map, Flowchart, or another diagram. It will show up here on your next review.
+    </div>
+  );
+}
+
 function generateButtonStyle(t, busy) {
   return {
     fontSize: FONT.size.xs, fontWeight: FONT.weight.semibold, fontFamily: 'Inter,sans-serif',
@@ -528,7 +616,7 @@ function saveButtonStyle(t, busy) {
  * own hooks). Keeps this self-contained — DetailView.js doesn't need to
  * know this check exists at all.
  */
-export default function VisualLearningPanel({ entryId }) {
+export default function VisualLearningPanel({ entryId, mode = 'full' }) {
   if (!VisualizationService.isConfigured()) return null;
-  return <VisualLearningPanelContent entryId={entryId} />;
+  return <VisualLearningPanelContent entryId={entryId} mode={mode} />;
 }

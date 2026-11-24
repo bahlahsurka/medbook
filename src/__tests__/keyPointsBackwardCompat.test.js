@@ -9,6 +9,7 @@
 // names it has always read).
 import { normalizeSections, isAllEmpty } from '../services/ai';
 import { hasKeyPoints } from '../components/ReviewKeyPoints';
+import { getSavedKeyPoints } from '../lib/keyPoints';
 
 const OLD_STYLE_SECTIONS = {
   keyLearningPoints: ['Point one', 'Point two'],
@@ -59,8 +60,10 @@ describe('a brand-new entry that only ever used Key Points (no legacy fields at 
     expect(isAllEmpty(out)).toBe(true);
   });
 
-  test('ReviewKeyPoints renders nothing for this entry — expected and deferred to Phase 6, not a crash', () => {
+  test('the legacy sections alone have nothing to show, but Phase 6 review shows the new Key Points', () => {
     expect(hasKeyPoints(normalizeSections(keyPointsOnlySections))).toBe(false);
+    const withBullets = { keyPoints: { content: { topic: 'x', sections: [{ heading: 'H', bullets: [{ text: 'b', emphasis: 'normal' }] }] } } };
+    expect(hasKeyPoints(normalizeSections(withBullets), getSavedKeyPoints(withBullets))).toBe(true);
   });
 });
 
