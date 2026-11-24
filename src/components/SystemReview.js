@@ -588,6 +588,14 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
     .mb-sr-scroll { scrollbar-width:thin; scrollbar-color:${t.borderStrong} transparent; }
     .mb-sr-scroll::-webkit-scrollbar { width:8px; }
     .mb-sr-scroll::-webkit-scrollbar-thumb { background:${t.borderStrong}; border-radius:8px; }
+    /* Laptop + revealed card with images: wider modal, text left (40%),
+       images right (60%) shown as close to their real size as fits. */
+    .mb-sr-img { width:100%; max-height:240px; }
+    @media (min-width:1024px) {
+      .mb-sr-wide { max-width:min(1680px, 96vw) !important; }
+      .mb-sr-content.has-side.has-images { grid-template-columns:minmax(0,4fr) minmax(0,6fr); gap:${SPACE.xl2+8}px; }
+      .mb-sr-content.has-images .mb-sr-img { width:auto; max-width:100%; height:auto; max-height:75vh; }
+    }
     .mb-sr-img { transition:transform ${MOTION.fast} ${MOTION.ease}; }
     .mb-sr-img:hover { transform:translateY(-2px); }
     .mb-sr-ratingbar {
@@ -628,7 +636,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
       {/* Wider than before (900 vs the old 580) — room for the card +
           supporting column, same two-column study surface ReviewQueue.js
           uses, just presented as a focused modal instead of a full page. */}
-      <div style={{background:t.surface,borderRadius:RADIUS.xl2,width:'100%',maxWidth:900,
+      <div className={showSide && cardHasImages ? 'mb-sr-wide' : undefined} style={{background:t.surface,borderRadius:RADIUS.xl2,width:'100%',maxWidth:900,
         maxHeight:'92vh',display:'flex',flexDirection:'column',
         boxShadow:`0 8px 32px ${t.shadowStrong}`}}>
 
@@ -663,7 +671,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
             short card (no dead gap), clings to the bottom of the visible
             area once a long answer actually needs scrolling. */}
         <div className="mb-sr-scroll" style={{flex:1,minHeight:0,overflowY:'auto',padding:`${SPACE.lg}px ${SPACE.xl}px`}}>
-          <div className={`mb-sr-content${showSide?' has-side':''}`}>
+          <div className={`mb-sr-content${showSide?' has-side':''}${showSide && cardHasImages?' has-images':''}`}>
             <div className="mb-sr-card-col" style={showSide?undefined:{maxWidth:620,margin:'0 auto',width:'100%'}}>
 
               {/* Card — the same colour-tinted wash + colour-matched glow
@@ -733,7 +741,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
                     <div style={{display:'flex',flexDirection:'column',gap:12}}>
                       {card.images.map((url,i)=>(
                         <img key={i} src={url} alt="" onClick={()=>setLightboxIdx(i)} className="mb-sr-img"
-                          style={{width:'100%',maxHeight:240,objectFit:'contain',borderRadius:RADIUS.xl,
+                          style={{objectFit:'contain',borderRadius:RADIUS.xl,
                             cursor:'zoom-in',background:t.surface2,display:'block',boxShadow:elevation(t,'sm')}} />
                       ))}
                     </div>
