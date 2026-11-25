@@ -29,6 +29,9 @@ import { STUDY_SCOPE_CLASS, suppressContextMenu } from '../lib/studyInteraction'
 import { toTitleCase } from '../lib/titleCase';
 import { sanitizeForStorage } from '../lib/bulletList';
 import HLPopover from './HLPopover';
+import useImageDims, { preloadImageDims } from '../lib/useImageDims';
+import { useElementWidth, useViewportHeight } from '../lib/useElementSize';
+import { planReviewLayout, LAYOUT as IMG_LAYOUT } from '../lib/reviewImageLayout';
 
 const SANS = 'Inter,sans-serif';
 
@@ -85,6 +88,40 @@ const SideColumn = memo(function SideColumn({ rt, images, aiSections, keyPoints,
       )}
       {hasKeyPoints && <ReviewKeyPoints sections={aiSections} keyPoints={keyPoints} isStale={keyPointsStale} />}
     </div>
+  );
+});
+
+// Image-aware gallery for the active review card. Each image is shown at
+// the exact size planned by lib/reviewImageLayout.js from its real
+// dimensions: complete, never cropped or stretched, never larger than its
+// real size. Opaque white holder (only visible behind transparent images),
+// no opacity or filters on the image itself.
+const ReviewImageGallery = memo(function ReviewImageGallery({ rt, images, rows, onImageClick, centered }) {
+  // Centered (images below/after the text): the whole block — heading
+  // included — is as wide as its widest row and centred under the card.
+  const blockWidth = Math.max(...rows.map(r => r.items.reduce((sum, it) => sum + it.width, 0) + (r.items.length - 1) * IMG_LAYOUT.imgGap));
+  return (
+    <section aria-label="Images" style={centered ? { width:blockWidth, maxWidth:'100%', margin:'0 auto' } : { minWidth:0 }}>
+      <div style={{ fontSize:FONT.size.xs, color:rt.text4, letterSpacing:.8, fontWeight:FONT.weight.bold,
+        textTransform:'uppercase', marginBottom:10, display:'flex', alignItems:'center', gap:6 }}>
+        Images{images.length > 1 && <span style={{ fontWeight:FONT.weight.semibold }}>· {images.length}</span>}
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', gap:IMG_LAYOUT.imgGap }}>
+        {rows.map((row, r) => (
+          <div key={r} style={{ display:'flex', gap:IMG_LAYOUT.imgGap, alignItems:'flex-start' }}>
+            {row.items.map(it => (
+              <img key={it.index} src={images[it.index]} alt={`Entry image ${it.index + 1}`}
+                className="mb-rq-gimg" onClick={() => onImageClick(it.index)}
+                width={it.width} height={it.height} decoding="async"
+                style={{ width:it.width, height:'auto', aspectRatio:`${it.width} / ${it.height}`, maxWidth:'100%',
+                  objectFit:'contain', display:'block', background:'#ffffff', cursor:'zoom-in',
+                  border:`1px solid ${rt.borderRich}`, borderRadius:RADIUS.md, flexShrink:0,
+                  boxShadow:`0 6px 18px -12px ${rt.shadowRich}` }} />
+            ))}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 });
 
@@ -612,6 +649,20 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   const cardHasKeyPoints = hasKeyPoints(cardAiSections, cardKeyPoints);
   const cardHasImages = card?.images?.length > 0;
 
+  // Image-aware layout (revealed cards with images). Plans from each
+  // image's real size, the review area's actual width (follows the
+  // sidebar) and the viewport height — see lib/reviewImageLayout.js.
+  const cardImages = useMemo(() => (Array.isArray(card?.images) ? card.images : []), [card]);
+  const imageDims = useImageDims(cardImages);
+  const [contentEl, setContentEl] = useState(null);
+  const contentWidth = useElementWidth(contentEl);
+  const viewportHeight = useViewportHeight();
+  // Measure the current and next couple of cards' images ahead of time, so
+  // the layout is already right the moment an answer is revealed.
+  useEffect(() => {
+    preloadImageDims(queue.slice(idx, idx + 3).flatMap(e => (Array.isArray(e?.images) ? e.images : [])));
+  }, [queue, idx]);
+
   // Visual Learning drawer — an overlay on top of this still-mounted
   // session. Closed automatically whenever the card changes.
   const [vlOpen, setVlOpen] = useState(false);
@@ -1047,15 +1098,13 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     .mb-rq-scroll::-webkit-scrollbar { width:8px; }
     .mb-rq-scroll::-webkit-scrollbar-thumb { background:${rt.borderRich}; border-radius:8px; }
 
-    /* Images: full column width, capped height on phones/tablets. On a
-       tablet or laptop, a revealed card with images goes wide: text left (45%),
-       images right (55%) shown as close to their real size as fits. */
+    /* A revealed card with images gets a wider review area; how it's split
+       between text, Key Points and images is planned from the images' real
+       sizes (lib/reviewImageLayout.js), not a fixed ratio. */
     .mb-rq-img { width:100%; max-height:280px; }
-    @media (min-width:768px) {
-      .mb-rq-wide { max-width:1680px !important; }
-      .mb-rq-content.has-side.has-images { grid-template-columns:minmax(0,45fr) minmax(0,55fr); gap:${SPACE.xl2+8}px; }
-      .mb-rq-content.has-images .mb-rq-img { width:auto; max-width:100%; height:auto; max-height:80vh; }
-    }
+    .mb-rq-wide { max-width:1680px !important; }
+    .mb-rq-gimg { transition:box-shadow ${MOTION.fast} ${MOTION.ease}; }
+    .mb-rq-gimg:hover { box-shadow:0 10px 24px -12px ${rt.shadowRich} !important; }
     .mb-rq-img { transition:transform ${MOTION.fast} ${MOTION.ease}, box-shadow ${MOTION.fast} ${MOTION.ease}; }
     .mb-rq-img:hover { transform:translateY(-2px); }
 
@@ -1484,6 +1533,35 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   // empty panel reserving dead space.
   const showSide = flipped && (cardHasImages || cardHasKeyPoints);
 
+  // Revealed card with images: plan the image-aware layout (null otherwise,
+  // which keeps the existing card / card + Key Points layout).
+  const plan = flipped && cardHasImages && contentWidth > 0
+    ? planReviewLayout({ dims: imageDims, count: cardImages.length, containerWidth: contentWidth,
+        viewportHeight, hasKeyPoints: cardHasKeyPoints })
+    : null;
+  const G = IMG_LAYOUT.gap;
+  const planGrid = !plan ? null
+    : plan.mode === 'stacked'
+      ? { display:'grid', gridTemplateColumns:'minmax(0,1fr)', rowGap:20, columnGap:0 }
+      : plan.sideWidth
+        ? { display:'grid', gridTemplateColumns:`minmax(0, ${plan.textWidth}px) ${plan.sideWidth}px`,
+            columnGap:G, rowGap:24, justifyContent:'center', alignItems:'start' }
+        : { display:'grid', gridTemplateColumns:'minmax(0,1fr)', rowGap:24, columnGap:0, alignItems:'start' };
+  const planCardCol = !plan ? null
+    : plan.mode === 'below' && !plan.sideWidth
+      ? { minWidth:0, maxWidth:plan.textWidth, width:'100%', margin:'0 auto' }
+      : { minWidth:0 };
+  const keyPointsEl = cardHasKeyPoints
+    ? <ReviewKeyPoints sections={cardAiSections} keyPoints={cardKeyPoints} isStale={cardKeyPointsStale} />
+    : null;
+  const galleryEl = plan
+    ? <ReviewImageGallery rt={rt} images={cardImages} rows={plan.gallery.rows} onImageClick={setLightboxIdx}
+        centered={plan.mode !== 'side'} />
+    : null;
+  // The rating bar lines up with the study content above it.
+  const ratingMaxWidth = plan ? (plan.mode === 'below' && !plan.sideWidth ? plan.galleryWidth : plan.totalWidth)
+    : (showSide ? undefined : 760);
+
   return (
     <div className={`mb-rq-fade${showSide && cardHasImages ? ' mb-rq-wide' : ''}`} style={{ maxWidth:1040, margin:'0 auto', width:'100%',
       fontFamily:SANS, height:'100%', display:'flex', flexDirection:'column' }}>
@@ -1643,15 +1721,18 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
             points, revealed state only); otherwise the card column alone
             takes a comfortably wide, centred measure instead of stretching
             edge to edge with nothing beside it. */}
-        <div className={`mb-rq-content${showSide ? ' has-side' : ''}${showSide && cardHasImages ? ' has-images' : ''}`} style={{ paddingTop:SPACE.lg, paddingBottom:SPACE.md }}>
-          <div className="mb-rq-card-col" style={showSide ? undefined : { maxWidth:760, margin:'0 auto', width:'100%' }}>
+        <div ref={setContentEl} className={`mb-rq-content${showSide && !plan ? ' has-side' : ''}`}
+          style={{ paddingTop:SPACE.lg, paddingBottom:SPACE.md, ...(planGrid || {}) }}>
+          <div className="mb-rq-card-col" style={plan ? planCardCol : (showSide ? undefined : { maxWidth:760, margin:'0 auto', width:'100%' })}>
 
             {/* Card — a soft colour-tinted wash fading into the surface plus
                 a colour-matched glow shadow, plus a richer border than the
                 quiet chrome around it — this is the one primary container
                 the whole screen exists to show. */}
             <div key={idx} className="mb-rq-fade mb-rq-card" style={{
-              background:`linear-gradient(180deg, ${color}14 0%, ${rt.surface} 220px)`,
+              // Tint layered OVER the opaque card surface (it used to fade
+              // from a translucent tint, letting the page show through).
+              background:`linear-gradient(180deg, ${color}14 0%, ${color}00 220px), ${rt.surface}`,
               border:`1px solid ${rt.borderRich}`, borderRadius:RADIUS.xl2, padding:SPACE.xl2,
               boxShadow:`0 24px 48px -20px ${color}40, 0 1px 2px ${rt.shadow}`, minHeight:260 }}>
 
@@ -1669,7 +1750,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
 
               {/* Title — always visible. */}
               <div style={{ fontFamily:SANS, fontSize:FONT.size.xl2, fontWeight:FONT.weight.bold,
-                color:rt.text, lineHeight:1.4, marginBottom:SPACE.xl }}>
+                color:rt.text, lineHeight:1.3, marginBottom:SPACE.xl, textWrap:'balance', overflowWrap:'anywhere' }}>
                 {card.title}
               </div>
 
@@ -1716,10 +1797,26 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
               (replacing the old cramped horizontal-scroll thumbnail strip),
               then the entry's existing AI key points, if any. Reuses the
               recovered space beside the card rather than leaving it empty. */}
-          {showSide && (
+          {showSide && !plan && (
             <SideColumn rt={rt} images={card.images} aiSections={cardAiSections}
               keyPoints={cardKeyPoints} keyPointsStale={cardKeyPointsStale}
               hasKeyPoints={cardHasKeyPoints} onImageClick={setLightboxIdx} />
+          )}
+
+          {/* Image-aware layout: Key Points sit above the images in the
+              right column ('side'); in 'below' mode Key Points keep the
+              right column and the images take the full width under both;
+              'stacked' is one column: card, Key Points, images. */}
+          {plan && plan.mode === 'side' && (
+            <div className="mb-rq-fade" style={{ minWidth:0, display:'flex', flexDirection:'column', gap:24 }}>
+              {keyPointsEl}
+              {galleryEl}
+            </div>
+          )}
+          {plan && plan.mode === 'below' && keyPointsEl && <div className="mb-rq-fade" style={{ minWidth:0 }}>{keyPointsEl}</div>}
+          {plan && plan.mode === 'stacked' && keyPointsEl}
+          {plan && plan.mode !== 'side' && (
+            <div style={{ gridColumn:'1 / -1', minWidth:0 }}>{galleryEl}</div>
           )}
         </div>
 
@@ -1743,6 +1840,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
             content scrolling underneath it. */}
         {flipped ? (
           <div className="mb-rq-fade mb-rq-ratingbar" style={{ position:'sticky', bottom:0, background:t.bg }}>
+            <div style={{ maxWidth:ratingMaxWidth, margin:'0 auto' }}>
             <div style={{ fontSize:FONT.size.xs, color:rt.text4, fontWeight:FONT.weight.semibold,
               textAlign:'center', marginBottom:SPACE.sm+2, letterSpacing:.4 }}>
               How well did you know this?
@@ -1751,7 +1849,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
               {RATINGS.map(r => (
                 <button key={r.key} className="mb-rq-rate mb-rq-btn" onClick={()=>rate(r.key)} style={{
                   background:toneBg[r.tone], border:`1px solid ${toneColor[r.tone]}33`,
-                  borderRadius:RADIUS.lg, padding:'14px 4px', minHeight:64, cursor:'pointer',
+                  borderRadius:RADIUS.lg, padding:'12px 6px', minHeight:60, cursor:'pointer',
                   fontFamily:SANS, display:'flex', flexDirection:'column',
                   alignItems:'center', justifyContent:'center', gap:3 }}>
                   <div style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.bold, color:toneColor[r.tone] }}>{r.label}</div>
@@ -1761,6 +1859,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
             </div>
             <div style={{ fontSize:FONT.size.micro, color:rt.text4, textAlign:'center', marginTop:8 }}>
               a · h · g · enter
+            </div>
             </div>
           </div>
         ) : (
