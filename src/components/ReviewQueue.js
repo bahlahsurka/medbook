@@ -19,7 +19,8 @@ import VisualizationService from '../services/visualization';
 import { getSavedKeyPoints, isKeyPointsStale } from '../lib/keyPoints';
 import { useContentHash } from '../lib/contentHash';
 import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
-  IconX, IconEdit } from '../lib/icons';
+  IconX, IconEdit, IconMaximize, IconMinimize } from '../lib/icons';
+import ZoomControl from './ZoomControl';
 import RichRuns from '../lib/RichRuns';
 import { rawOffsetAt } from './DetailView';
 import { clearRange } from '../lib/useHighlight';
@@ -146,6 +147,13 @@ function Lightbox({ images, start, onClose }) {
   const [idx, setIdx] = useState(start);
   const prev = () => setIdx(i => (i - 1 + images.length) % images.length);
   const next = () => setIdx(i => (i + 1) % images.length);
+
+  // Esc closes the viewer (the review keyboard is already off while it's open).
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.92)', zIndex:Z.lightbox,
@@ -891,6 +899,53 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   });
   const progress = total > 0 ? Math.round((sessionDone / total) * 100) : 0;
 
+  // ── Fullscreen review ──────────────────────────────────────────────────
+  // Real (device) fullscreen plus an in-app full-window layer that hides
+  // the app's top bar and sidebar; the review controls move into a slim
+  // strip of their own. Where supported (Chromium), Esc is captured via
+  // the Keyboard Lock API so it closes the image viewer first and only
+  // then leaves fullscreen; elsewhere the browser's own Esc exits it and
+  // 'fullscreenchange' brings this mode down with it. Where web fullscreen
+  // isn't available at all (iPhone), only the in-app layer applies.
+  // Stays on between cards; ends on pause/finish or leaving the screen.
+  const [fullscreen, setFullscreen] = useState(false);
+  const enterFullscreen = useCallback(async () => {
+    setFullscreen(true);
+    try {
+      const el = document.documentElement;
+      if (el.requestFullscreen && !document.fullscreenElement) await el.requestFullscreen({ navigationUI: 'hide' });
+    } catch { /* not allowed/supported: the in-app layer still applies */ }
+    try { if (document.fullscreenElement) await navigator.keyboard?.lock?.(['Escape']); } catch { /* unsupported */ }
+  }, []);
+  const exitFullscreen = useCallback(() => {
+    setFullscreen(false);
+    try { navigator.keyboard?.unlock?.(); } catch { /* unsupported */ }
+    try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {}); } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    const onChange = () => { if (!document.fullscreenElement) { setFullscreen(false); try { navigator.keyboard?.unlock?.(); } catch { /* ignore */ } } };
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+  useEffect(() => {
+    if (fullscreen && (!sessionStarted || done || ended)) exitFullscreen();
+  }, [fullscreen, sessionStarted, done, ended, exitFullscreen]);
+  useEffect(() => () => {
+    try { navigator.keyboard?.unlock?.(); } catch { /* ignore */ }
+    try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {}); } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    if (!fullscreen) return undefined;
+    // Topmost layer first: the image viewer, edit overlay and Visual
+    // Learning drawer each handle their own Esc.
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || lightboxIdx !== null || editingCard || vlOpen) return;
+      exitFullscreen();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [fullscreen, lightboxIdx, editingCard, vlOpen, exitFullscreen]);
+
   // ── Overview data — all real, all already-used definitions ──────────────
   //
   // Global (unscoped — every system, every difficulty) counts, used ONLY to
@@ -1103,6 +1158,21 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
        sizes (lib/reviewImageLayout.js), not a fixed ratio. */
     .mb-rq-img { width:100%; max-height:280px; }
     .mb-rq-wide { max-width:1680px !important; }
+    /* Fullscreen strip on narrow screens: icon-only exit, no title, slightly
+       smaller (still 36px) buttons; the timer steps aside on the smallest. */
+    @media (max-width:600px) {
+      .mb-rq-fs-title, .mb-rq-fs-exitlabel { display:none; }
+      .mb-rq-fsexit { padding:0 !important; width:40px !important; }
+    }
+    @media (max-width:480px) {
+      .mb-rq-fsroot { padding:0 12px !important; }
+      .mb-rq-fsprog { left:-12px !important; right:-12px !important; }
+      .mb-rq-fsbar, .mb-rq-fsctl { gap:6px !important; }
+      .mb-rq-fsbtn { width:36px !important; height:36px !important; }
+      .mb-rq-fsbar .mb-zoom-pct { display:none; }
+      .mb-rq-fsbar .mb-zoom-btn { padding:0 8px !important; }
+    }
+    @media (max-width:360px) { .mb-rq-fs-timer { display:none; } }
     .mb-rq-gimg { transition:box-shadow ${MOTION.fast} ${MOTION.ease}; }
     .mb-rq-gimg:hover { box-shadow:0 10px 24px -12px ${rt.shadowRich} !important; }
     .mb-rq-img { transition:transform ${MOTION.fast} ${MOTION.ease}, box-shadow ${MOTION.fast} ${MOTION.ease}; }
@@ -1558,13 +1628,78 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     ? <ReviewImageGallery rt={rt} images={cardImages} rows={plan.gallery.rows} onImageClick={setLightboxIdx}
         centered={plan.mode !== 'side'} />
     : null;
+  // Review controls — shared by the app's top bar (normal) and the slim
+  // strip shown in fullscreen, where they're larger. Edit only appears once
+  // the answer is revealed (nothing worth correcting before that).
+  const reviewControls = (large) => {
+    const size = large ? 40 : 28;
+    const btn = (disabled) => ({
+      background: large ? rt.surface : 'none', border: large ? `1px solid ${rt.border}` : 'none',
+      color: disabled ? rt.text4 : (large ? rt.text2 : rt.text3), opacity: disabled ? .45 : 1,
+      padding: 0, width: size, height: size, borderRadius: large ? RADIUS.md : RADIUS.sm,
+      cursor: disabled ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+    });
+    const icon = large ? 18 : 13;
+    const bc = large ? ' mb-rq-fsbtn' : '';
+    return (
+      <div className={large ? 'mb-rq-fsctl' : undefined} style={{ display:'flex', alignItems:'center', gap: large ? 10 : 6, marginLeft:'auto' }}>
+        {flipped && (
+          <button className={`mb-headerbtn${bc}`} onClick={openEditCard} title="Edit this entry" aria-label="Edit this entry" style={btn(false)}>
+            <IconEdit size={icon} />
+          </button>
+        )}
+        <button className={`mb-headerbtn${bc}`} onClick={goPrev} disabled={idx===0} title="Previous card" aria-label="Previous card" style={btn(idx===0)}>
+          <IconChevronLeft size={large ? 20 : 14} />
+        </button>
+        <span style={{ fontSize: large ? FONT.size.md : FONT.size.sm, color: large ? rt.text2 : rt.text3,
+          fontWeight: large ? FONT.weight.semibold : FONT.weight.medium, padding:'0 2px', whiteSpace:'nowrap' }}>{idx + 1} / {total}</span>
+        {/* Count-up session timer — freezes while paused; tabular-nums keeps
+            the cluster from jittering as seconds roll over. */}
+        <span className={large ? 'mb-rq-fs-timer' : undefined} style={{ fontSize: large ? FONT.size.sm : FONT.size.xs, color:rt.text4, fontVariantNumeric:'tabular-nums', padding:'0 2px' }}
+          title="Session time">
+          {formatElapsed(elapsedSec)}
+        </span>
+        <button className={`mb-headerbtn${bc}`} onClick={pauseSession} title="Pause session" aria-label="Pause session" style={btn(false)}>
+          <IconPause size={icon} />
+        </button>
+        {large ? (
+          <button className="mb-headerbtn mb-rq-fsbtn mb-rq-fsexit" onClick={exitFullscreen} title="Exit fullscreen (Esc)" aria-label="Exit fullscreen"
+            style={{ ...btn(false), width:'auto', padding:'0 14px', gap:8, fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:SANS }}>
+            <IconMinimize size={18} /> <span className="mb-rq-fs-exitlabel">Exit fullscreen</span>
+          </button>
+        ) : (
+          <button className="mb-headerbtn" onClick={enterFullscreen} title="Fullscreen" aria-label="Enter fullscreen" style={btn(false)}>
+            <IconMaximize size={icon} />
+          </button>
+        )}
+      </div>
+    );
+  };
+
   // The rating bar lines up with the study content above it.
   const ratingMaxWidth = plan ? (plan.mode === 'below' && !plan.sideWidth ? plan.galleryWidth : plan.totalWidth)
     : (showSide ? undefined : 760);
 
   return (
-    <div className={`mb-rq-fade${showSide && cardHasImages ? ' mb-rq-wide' : ''}`} style={{ maxWidth:1040, margin:'0 auto', width:'100%',
-      fontFamily:SANS, height:'100%', display:'flex', flexDirection:'column' }}>
+    <div className={`mb-rq-fade${showSide && cardHasImages && !fullscreen ? ' mb-rq-wide' : ''}${fullscreen ? ' mb-rq-fsroot' : ''}`}
+      style={fullscreen
+        ? { position:'fixed', inset:0, zIndex:Z.overlay, background:t.bg, fontFamily:SANS,
+            display:'flex', flexDirection:'column', padding:'0 20px' }
+        : { maxWidth:1040, margin:'0 auto', width:'100%', fontFamily:SANS, height:'100%', display:'flex', flexDirection:'column' }}>
+      {/* Fullscreen: a slim strip with the review controls (larger, easy to
+          hit) instead of the app's top bar; the progress fill runs along its
+          bottom edge. */}
+      {fullscreen && (
+        <div className="mb-rq-fsbar" style={{ position:'relative', display:'flex', alignItems:'center', gap:12, height:60, flexShrink:0,
+          borderBottom:`1px solid ${rt.border}` }}>
+          <span className="mb-rq-fs-title" style={{ fontWeight:FONT.weight.bold, fontSize:FONT.size.md, color:rt.text, whiteSpace:'nowrap' }}>Review Queue</span>
+          <ZoomControl />
+          {reviewControls(true)}
+          <div className="mb-rq-fsprog" style={{ position:'absolute', left:-20, right:-20, bottom:-1, height:3, background:rt.surfaceSunken }}>
+            <div style={{ height:'100%', background:rt.accent, width:`${progress}%`, transition:`width ${MOTION.slow} ${MOTION.ease}` }} />
+          </div>
+        </div>
+      )}
       <style>{localCss}</style>
 
       {lightboxIdx !== null && card?.images?.length > 0 && (
@@ -1648,51 +1783,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
           (see the headerSlot effect above) instead of a row drawn here, so
           this component contributes NOTHING to the top of the screen and
           the card gets the full height below the app's own header. */}
-      {headerSlot && createPortal(
-        <div style={{ display:'flex', alignItems:'center', gap:6, marginLeft:'auto' }}>
-          {/* Subtle quick-edit entry point — a small icon-only button, same
-              size/weight as Prev/Pause beside it, deliberately not called
-              out as its own feature. Opens a tiny overlay (below) and
-              returns to this exact card/position on save or cancel. Only
-              shown once the answer is revealed — before that, there's
-              nothing on screen yet worth a quick correction, and an Edit
-              icon sitting there while still trying to recall the answer
-              from memory is a small, pointless hint. */}
-          {flipped && (
-            <button className="mb-headerbtn" onClick={openEditCard}
-              title="Edit this entry" aria-label="Edit this entry" style={{
-              background:'none', border:'none', color:rt.text3, padding:6, width:28, height:28,
-              borderRadius:RADIUS.sm, cursor:'pointer',
-              display:'flex', alignItems:'center', justifyContent:'center' }}>
-              <IconEdit size={13} />
-            </button>
-          )}
-          <button className="mb-headerbtn" onClick={goPrev} disabled={idx===0}
-            title="Previous card" aria-label="Previous card" style={{
-            background:'none', border:'none', color: idx===0 ? rt.text4 : rt.text3,
-            opacity: idx===0 ? .45 : 1, padding:6, width:28, height:28, borderRadius:RADIUS.sm,
-            cursor: idx===0 ? 'default' : 'pointer',
-            display:'flex', alignItems:'center', justifyContent:'center' }}>
-            <IconChevronLeft size={14} />
-          </button>
-          <span style={{ fontSize:FONT.size.sm, color:rt.text3, fontWeight:FONT.weight.medium, padding:'0 2px', whiteSpace:'nowrap' }}>{idx + 1} / {total}</span>
-          {/* Count-up session timer — ticks via timerRunning (see its own
-              effect above), so it genuinely freezes while paused instead of
-              just visually looking frozen. tabular-nums keeps the digits
-              from jittering the whole cluster's width as seconds roll over. */}
-          <span style={{ fontSize:FONT.size.xs, color:rt.text4, fontVariantNumeric:'tabular-nums', padding:'0 2px' }}
-            title="Session time">
-            {formatElapsed(elapsedSec)}
-          </span>
-          <button className="mb-headerbtn" onClick={pauseSession} title="Pause session" aria-label="Pause session" style={{
-            background:'none', border:'none', color:rt.text3, padding:6, width:28, height:28,
-            borderRadius:RADIUS.sm, cursor:'pointer',
-            display:'flex', alignItems:'center', justifyContent:'center' }}>
-            <IconPause size={13} />
-          </button>
-        </div>,
-        headerSlot
-      )}
+      {headerSlot && !fullscreen && createPortal(reviewControls(false), headerSlot)}
 
       {/* Progress fill — portaled into App.js's header-bottom-border slot
           (see the progressSlot effect above), so the header's own bottom
