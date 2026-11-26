@@ -10,19 +10,14 @@ beforeEach(() => { container = document.createElement('div'); document.body.appe
 afterEach(() => { act(() => root.unmount()); container.remove(); });
 const render = (el) => act(() => { root.render(<ThemeProvider>{el}</ThemeProvider>); });
 
-test('detail box shows the clinical content only — no provenance or source quote', () => {
+test('detail box: the name as heading and its explanation as subtext — nothing else', () => {
   render(<DiagramDetailPanel onClose={() => {}} node={{
     label: 'Airway compromise', category: 'red_flag', explanation: 'Swelling can narrow the airway.',
     sourceType: 'ai_context', sourceRef: 'swelling can narrow the airway',
     connections: { out: [{ rel: 'can lead to', other: 'Stridor' }], inc: [] },
   }} />);
-  const text = container.textContent;
-  expect(text).toContain('Airway compromise');
-  expect(text).toContain('Red flag');
-  expect(text).toContain('Swelling can narrow the airway.');
-  expect(text).toContain('can lead to Stridor');
-  expect(text).not.toMatch(/supplementary context|From the entry|Added by you/i);
-  expect(text).not.toContain('"swelling can narrow the airway"');
+  const text = container.textContent.replace('✕', '');
+  expect(text).toBe('Airway compromiseSwelling can narrow the airway.');
 });
 
 test('an explanation that only repeats the title is not shown twice', () => {
