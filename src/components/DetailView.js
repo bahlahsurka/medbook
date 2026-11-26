@@ -1448,10 +1448,6 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
       {entry.notes && AIService.isConfigured() && (
         <div className="mb-e-kp"><KeyPointsPanel
           keyPoints={kp?.content || null}
-          fidelityWarnings={kp?.fidelityWarnings || []}
-          fidelityDisclaimer={kp?.fidelityDisclaimer}
-          generatedAt={kp?.generatedAt}
-          model={kp?.model}
           isStale={kpIsStale}
           busy={kpBusy}
           error={kpErr}

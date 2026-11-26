@@ -64,7 +64,6 @@ function Card({ h, t, critical, selected, onSelect }) {
         display: '-webkit-box', WebkitLineClamp: selected ? 'unset' : 3, WebkitBoxOrient: 'vertical', overflow: selected ? 'visible' : 'hidden' }}>
         {h.detail}
       </div>
-      {h.sourceType === 'ai_context' && <span style={{ fontSize: FONT.size.micro, color: t.text4 }}>From supplementary context</span>}
     </div>
   );
 }

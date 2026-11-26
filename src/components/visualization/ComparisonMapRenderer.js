@@ -57,9 +57,6 @@ export default function ComparisonMapRenderer({ diagram }) {
                 padding: '10px 12px', fontSize: FONT.size.sm, fontWeight: FONT.weight.bold, color: t.text, lineHeight: 1.3,
                 borderTop: `3px solid ${t.accent}`, borderBottom: `1px solid ${t.borderStrong}`, boxShadow: `inset 1px 0 0 ${t.border}` }}>
                 {s.label}
-                {s.sourceType === 'ai_context' && (
-                  <span style={{ display: 'block', marginTop: 2, fontSize: FONT.size.micro, fontWeight: FONT.weight.regular, color: t.text4 }}>supplementary context</span>
-                )}
               </th>
             ))}
           </tr>

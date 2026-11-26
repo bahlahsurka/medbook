@@ -2,9 +2,10 @@
 //
 // Read-only detail for a selected node/cell/highlight, shared by all six
 // renderers: title, a category tag, the explanation, the node's links
-// (graph types), and where it came from. Keeps the title clearly distinct
+// (graph types). Keeps the title clearly distinct
 // from the supporting explanation.
 import { useTheme, SPACE, RADIUS, FONT } from '../../lib/theme';
+import { conceptKey } from '../../services/ai/diagramLabels';
 
 const CATEGORY_LABEL = {
   central_topic: 'Central topic', branch: 'Branch', subtopic: 'Subtopic', red_flag: 'Red flag', high_yield: 'High yield',
@@ -29,6 +30,8 @@ export default function DiagramDetailPanel({ node, onClose }) {
   if (!node) return null;
   const tag = node.category && CATEGORY_LABEL[node.category];
   const tc = tagColors(t, node.category);
+  // An explanation that only restates the title adds nothing.
+  const showExplanation = !!String(node.explanation || '').trim() && conceptKey(node.explanation) !== conceptKey(node.label);
   const links = node.connections ? [...node.connections.out.map(c => ({ ...c, dir: '→' })), ...node.connections.inc.map(c => ({ ...c, dir: '←' }))] : [];
 
   return (
@@ -53,12 +56,12 @@ export default function DiagramDetailPanel({ node, onClose }) {
           {tag}
         </span>
       )}
-      {node.explanation && (
+      {showExplanation && (
         <div style={{ fontSize: FONT.size.sm, color: t.text2, lineHeight: 1.6, marginBottom: 10 }}>{node.explanation}</div>
       )}
       {node.extra}
       {links.length > 0 && (
-        <div style={{ marginBottom: 10 }}>
+        <div>
           <div style={{ fontSize: FONT.size.micro, color: t.text4, fontWeight: FONT.weight.semibold, textTransform: 'uppercase', letterSpacing: .6, marginBottom: 4 }}>
             Links
           </div>
@@ -71,14 +74,6 @@ export default function DiagramDetailPanel({ node, onClose }) {
           {links.length > 8 && <div style={{ fontSize: FONT.size.micro, color: t.text4 }}>+{links.length - 8} more</div>}
         </div>
       )}
-      <div style={{ fontSize: FONT.size.micro, color: t.text4, borderTop: `1px solid ${t.border}`, paddingTop: 8 }}>
-        {node.sourceType === 'ai_context' ? 'From supplementary context, not the entry itself'
-          : node.sourceType === 'user_added' ? 'Added by you during editing'
-          : 'From the entry'}
-        {node.sourceRef && (
-          <div style={{ marginTop: 4, fontStyle: 'italic', color: t.text3, lineHeight: 1.5 }}>"{node.sourceRef}"</div>
-        )}
-      </div>
     </div>
   );
 }

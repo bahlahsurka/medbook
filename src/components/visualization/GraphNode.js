@@ -42,20 +42,12 @@ function HexagonBackdrop({ width, height, fill, stroke, selectedRing }) {
   );
 }
 
-function provenanceMark(sourceType) {
-  if (sourceType === 'user_added') return { title: 'Added by you', glyph: '✎' };
-  if (sourceType === 'ai_context') return { title: 'From supplementary context, not your review', glyph: '+' };
-  return null;
-}
-
 function GraphNode({ data, selected, isConnectable }) {
   const { label, style = {}, shape = 'rect', icon, variant = 'standard', width, height } = data;
   const spec = NODE_VARIANTS[variant] || NODE_VARIANTS.standard;
   const isRoot = variant === 'root';
   const isHex = shape === 'hexagon';
   const isPill = shape === 'pill';
-  const mark = provenanceMark(data.sourceType);
-  const dashed = data.sourceType === 'ai_context';
   // Solid colour for the SVG fill (gradients aren't valid SVG fills).
   const solidFill = typeof style.background === 'string' && style.background.startsWith('linear-gradient')
     ? style.background.split('), ').pop() : style.background;
@@ -64,7 +56,6 @@ function GraphNode({ data, selected, isConnectable }) {
     <div
       role="button"
       aria-pressed={selected}
-      title={mark?.title}
       className={`mb-viz-node${isHex ? ' mb-viz-node--hex' : ''}${data.dimmed ? ' mb-viz-node--dim' : ''}`}
       style={{
         position: 'relative',
@@ -77,7 +68,7 @@ function GraphNode({ data, selected, isConnectable }) {
         padding: `${spec.padY}px ${spec.padX + (SHAPE_INSET[shape] || 0)}px`,
         background: isHex ? 'transparent' : style.background,
         color: style.color,
-        border: isHex ? 'none' : `1px ${dashed ? 'dashed' : 'solid'} ${style.border}`,
+        border: isHex ? 'none' : `1px solid ${style.border}`,
         borderLeft: !isHex && style.rule ? `3px solid ${style.rule}` : undefined,
         borderRadius: isPill || isRoot ? 999 : 10,
         boxShadow: isHex ? 'none' : [selected ? `0 0 0 3px ${style.ring}` : null, style.shadow || 'var(--mb-viz-node-shadow)'].filter(Boolean).join(', '),
@@ -96,13 +87,6 @@ function GraphNode({ data, selected, isConnectable }) {
         {icon && <span aria-hidden style={{ flexShrink: 0, lineHeight: spec.lineHeight }}>{icon}</span>}
         <span>{label}</span>
       </span>
-      {mark && (
-        <span aria-label={mark.title} style={{ position: 'absolute', top: -7, right: -7, width: 16, height: 16, borderRadius: 999,
-          background: 'var(--mb-viz-badge-bg)', color: 'var(--mb-viz-badge-fg)', fontSize: 9.5, fontWeight: 700,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--mb-viz-node-shadow)' }}>
-          {mark.glyph}
-        </span>
-      )}
     </div>
   );
 }

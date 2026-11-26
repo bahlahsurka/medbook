@@ -24,10 +24,8 @@ function specFor(category, isHub) {
   return isHub ? { variant: 'primary', tone: 'accent' } : { variant: 'secondary', tone: 'neutral' };
 }
 
-function edgeStyleFor(t, provenance) {
-  return provenance === 'entry'
-    ? { stroke: t.text4, strokeWidth: 1.5 }
-    : { stroke: t.text4, strokeWidth: 1.3, strokeDasharray: '5 4' };
+function edgeStyleFor(t) {
+  return { stroke: t.text4, strokeWidth: 1.5 };
 }
 
 // Computed once per (diagram, theme); selection highlighting is applied
@@ -85,7 +83,7 @@ export async function buildKnowledgeNetworkFlowGraph(diagram, t) {
   const flowEdges = edges.map((e, i) => {
     const s = positionOf(e.source), tp = positionOf(e.target);
     const dx = tp.x - s.x, dy = tp.y - s.y;
-    const style = edgeStyleFor(t, e.provenance);
+    const style = edgeStyleFor(t);
     return {
       id: `kn-e${i}-${e.source}-${e.target}`,
       source: e.source, target: e.target,
