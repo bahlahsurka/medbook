@@ -43,7 +43,7 @@ export async function buildKnowledgeNetworkFlowGraph(diagram, t) {
   const built = new Map(nodes.map(n => [n.id, nodeData(n, specOf(n))]));
 
   const showLabels = edges.length <= MAX_LABELLED_EDGES;
-  const labelText = (e) => e.label || humanizeRelationship(e.relationship);
+  const labelText = (e) => [humanizeRelationship(e.relationship), String(e.label || '').trim()].filter(Boolean).join(' · ');
   const labelSizes = edges.map(e => (labelText(e) ? measureNode(labelText(e), EDGE_LABEL_SPEC) : null));
   const avgW = nodes.length ? [...built.values()].reduce((s, b) => s + b.size.width, 0) / nodes.length : 150;
   const avgLabel = showLabels && labelSizes.some(Boolean)

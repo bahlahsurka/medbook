@@ -36,6 +36,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as GroqService from '../src/services/ai/GroqService.js';
 import { VisualizationValidationError } from '../src/services/ai/VisualizationValidator.js';
 import { computeContentHash } from '../src/services/ai/contentHash.js';
+import { normalizeGraphDiagram, checkDiagramQuality } from '../src/services/ai/diagramQuality.js';
 import { findUncoveredStatements, SOURCE_COVERAGE_DISCLAIMER } from '../src/services/ai/sourceCoverage.js';
 import { SUPPORTED_VIZ_TYPES, getVisualizationDefinition } from '../src/services/ai/visualizationRegistry.js';
 import { unwrapGraphData, toVisualizationResponseShape } from '../src/services/ai/visualizationStorage.js';
@@ -236,7 +237,7 @@ export default async function handler(req, res) {
       stale: existing.source_content_hash !== contentHash,
       visualization: toVisualizationResponseShape(existing),
       disclaimer: STRUCTURAL_VALIDATION_DISCLAIMER,
-      coverage: coverageResponse(notes, existingCurrent, vizDef),
+      coverage: coverageResponse(notes, existingCurrent, vizDef, vizType),
       timing: { totalMs: 0 }, // no Groq call on this path, by construction — not a measurement, a fact
     });
   }
@@ -340,6 +341,9 @@ export default async function handler(req, res) {
   let diagram;
   try {
     diagram = vizDef.validate(rawText, { allowAiContext: !!trimmedExtraContext });
+    // Mechanical repairs before saving (readable labels, merged duplicate
+    // concepts, restored hedges/qualifiers) — see diagramQuality.js.
+    diagram = normalizeGraphDiagram(diagram, vizType, { notes });
   } catch (e) {
     if (e instanceof VisualizationValidationError) {
       await releaseClaim();
@@ -385,7 +389,7 @@ export default async function handler(req, res) {
     cached: false,
     visualization: toVisualizationResponseShape(saved),
     disclaimer: STRUCTURAL_VALIDATION_DISCLAIMER,
-    coverage: coverageResponse(notes, diagram, vizDef),
+    coverage: coverageResponse(notes, diagram, vizDef, vizType),
     timing: { totalMs: totalGenerationMs, retries },
     usage: GroqService.getLastUsage(),
   });
@@ -401,9 +405,12 @@ export default async function handler(req, res) {
  * default {nodes:[...]} one for the four graph-based types, a dedicated
  * one for Comparison Map/Visual Summary (see visualizationRegistry.js).
  */
-function coverageResponse(notes, graphData, vizDef) {
+function coverageResponse(notes, graphData, vizDef, vizType) {
   return {
     uncoveredStatements: findUncoveredStatements(notes, graphData, { extractPairs: vizDef.extractCoveragePairs }),
+    // Heuristic "double-check this" notes for graph diagrams (unsupported
+    // quotes/links, lost details) — never a statement of medical accuracy.
+    qualityWarnings: checkDiagramQuality(notes, graphData, vizType),
     disclaimer: SOURCE_COVERAGE_DISCLAIMER,
   };
 }

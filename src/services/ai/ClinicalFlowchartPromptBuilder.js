@@ -67,6 +67,7 @@ STRUCTURE:
 - "outcome" nodes are where a pathway ends (a diagnosis confirmed, a disposition decided).
 - "red_flag" nodes are urgent findings/steps the review flags as needing immediate action — use this instead of "action"/"outcome" when a step IS the urgent one.
 - Every node needs a short, stable, lowercase_snake_case "id" referenced consistently in every edge touching it. Every node (except possibly a terminal outcome) needs at least one outgoing edge — a flowchart with a dead end that was never meant to be the end is a broken chart.
+- "label" is the human-readable text shown on the diagram: natural medical language with normal spaces, sentence case and correct medical capitalization (e.g. "Thrombosis of the internal jugular vein"). Never use underscores or snake_case in a label and never copy the id into it; keep important specifics (named nerves, numbers, thresholds).
 - Every node's "explanation" is one concise sentence preserving the exact criteria/thresholds from its source text.
 
 SOURCE CLASSIFICATION (every node is EITHER one or the other, never ambiguous):

@@ -173,6 +173,7 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible
   }, []);
 
   const [showCoverage, setShowCoverage] = useState(false);
+  const [showQuality, setShowQuality] = useState(false);
 
   const [recommendState, setRecommendState] = useState({ status: 'idle', recommended: [], rationale: '', error: '' });
   const recommendInFlight = useRef(false);
@@ -497,6 +498,21 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible
             <Suspense fallback={<RendererFallback t={t} />}>
               <Renderer diagram={current.result.visualization.graphData} />
             </Suspense>
+          )}
+
+          {current.result.coverage?.qualityWarnings?.length > 0 && (
+            <div style={{ marginTop: SPACE.sm }}>
+              <button onClick={() => setShowQuality(v => !v)}
+                style={{ background: 'none', border: 'none', color: t.warn, fontSize: FONT.size.sm,
+                  cursor: 'pointer', padding: '4px 0', fontWeight: FONT.weight.semibold, fontFamily: 'Inter,sans-serif' }}>
+                ⚠ {current.result.coverage.qualityWarnings.length} thing{current.result.coverage.qualityWarnings.length !== 1 ? 's' : ''} to double-check in this diagram {showQuality ? '▾' : '▸'}
+              </button>
+              {showQuality && (
+                <ul style={{ ...noticeStyle(t, 'warn'), margin: '6px 0 0', paddingLeft: 30 }}>
+                  {current.result.coverage.qualityWarnings.map((line, i) => <li key={i} style={{ marginBottom: 4 }}>{line}</li>)}
+                </ul>
+              )}
+            </div>
           )}
 
           {current.result.coverage?.uncoveredStatements?.length > 0 && (

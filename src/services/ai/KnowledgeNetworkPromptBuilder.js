@@ -66,6 +66,7 @@ ABSOLUTE RULES:
 
 STRUCTURE:
 - Every node needs a short, stable, lowercase_snake_case "id" referenced consistently in every edge touching it.
+- "label" is the human-readable text shown on the diagram: natural medical language with normal spaces, sentence case and correct medical capitalization (e.g. "Thrombosis of the internal jugular vein"). Never use underscores or snake_case in a label and never copy the id into it; keep important specifics (named nerves, numbers, thresholds).
 - "concept" is the default category for a node. "red_flag" is for findings indicating urgent diagnosis or management the review supports — never invented. "high_yield" is for the single highest-yield, most board-testable fact(s) the review supports.
 - Every node's "explanation" is one concise sentence preserving the qualifiers/numbers/timing from its source text.
 - Every node needs at least one edge connecting it to the network — an isolated node with no relationships at all isn't a network entry, it's a stray fact; either connect it to something real or leave it out.

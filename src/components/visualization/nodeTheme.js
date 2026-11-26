@@ -6,6 +6,7 @@
 // Layout code sizes nodes from the same variant table GraphNode renders
 // with, so the two can never disagree.
 import { measureNode } from './nodeMetrics';
+import { humanizeLabel } from '../../services/ai/diagramLabels';
 
 // Hierarchy, most to least prominent.
 export const NODE_VARIANTS = {
@@ -63,10 +64,13 @@ export function toneStyle(t, tone) {
 
 /** Builds the shared `data` payload every graph builder hands to GraphNode. */
 export function nodeData(n, { variant, tone, icon, shape = 'rect' }) {
-  const size = sizeForNode({ label: n.label, variant, icon, shape });
+  // Display text only — a saved diagram's own label is never rewritten
+  // (machine-style ids like "neck_stiffness" read as "Neck stiffness").
+  const label = humanizeLabel(n.label, { sourceRef: n.sourceRef });
+  const size = sizeForNode({ label, variant, icon, shape });
   return {
     data: {
-      label: n.label, variant, tone, icon, shape, width: size.width, height: size.height,
+      label, variant, tone, icon, shape, width: size.width, height: size.height,
       category: n.category, explanation: n.explanation, sourceType: n.sourceType, sourceRef: n.sourceRef,
     },
     size,

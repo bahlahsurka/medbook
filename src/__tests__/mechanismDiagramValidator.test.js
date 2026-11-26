@@ -54,7 +54,7 @@ describe('validateMechanismDiagram — structural rejections', () => {
   test('requires at least one consequence/red_flag terminal node', () => {
     const d = validDiagram();
     d.nodes.forEach(n => { if (n.category === 'consequence' || n.category === 'red_flag') n.category = 'mechanism'; });
-    expect(() => validateMechanismDiagram(raw(d))).toThrow(/no consequence or red-flag node/i);
+    expect(() => validateMechanismDiagram(raw(d))).toThrow(/no consequence, red-flag or clinical-feature node/i);
   });
 
   test('rejects an orphaned node not connected to the chain', () => {

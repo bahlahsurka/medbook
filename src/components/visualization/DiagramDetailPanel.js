@@ -9,14 +9,15 @@ import { useTheme, SPACE, RADIUS, FONT } from '../../lib/theme';
 const CATEGORY_LABEL = {
   central_topic: 'Central topic', branch: 'Branch', subtopic: 'Subtopic', red_flag: 'Red flag', high_yield: 'High yield',
   concept: 'Concept', start: 'Start', decision: 'Decision', action: 'Action', outcome: 'Outcome',
-  cause: 'Cause', mechanism: 'Mechanism', consequence: 'Consequence',
+  cause: 'Cause', mechanism: 'Mechanism', consequence: 'Consequence', manifestation: 'Clinical feature',
+  investigation: 'Investigation', management: 'Management',
   key_fact: 'Key fact', number: 'Number', pearl: 'Pearl',
 };
 
 function tagColors(t, category) {
   if (category === 'red_flag') return { bg: t.dangerBg, fg: t.danger, border: t.dangerBorder };
   if (category === 'high_yield' || category === 'number') return { bg: t.warnBg, fg: t.warn, border: t.warnBorder };
-  if (category === 'outcome' || category === 'pearl') return { bg: t.okBg, fg: t.ok, border: t.okBorder };
+  if (category === 'outcome' || category === 'pearl' || category === 'management') return { bg: t.okBg, fg: t.ok, border: t.okBorder };
   return { bg: t.surface2, fg: t.text3, border: t.border };
 }
 

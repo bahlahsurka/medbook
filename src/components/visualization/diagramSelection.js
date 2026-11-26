@@ -4,6 +4,7 @@
 // selected node and its direct neighbours stay fully visible, everything
 // else dims, and the selected node's own links always show their labels —
 // so even a dense network can be read one concept at a time.
+import { humanizeLabel, humanizeRelationship } from '../../services/ai/diagramLabels';
 
 export function applySelection(flowNodes, flowEdges, selectedId) {
   if (!selectedId) {
@@ -31,9 +32,10 @@ export function connectionsOf(diagram, nodeId) {
   const byId = new Map((diagram?.nodes || []).map(n => [n.id, n]));
   const out = [], inc = [];
   for (const e of diagram?.edges || []) {
-    const rel = e.label || String(e.relationship || '').replace(/_/g, ' ');
-    if (e.source === nodeId && byId.has(e.target)) out.push({ rel, other: byId.get(e.target).label });
-    if (e.target === nodeId && byId.has(e.source)) inc.push({ rel, other: byId.get(e.source).label });
+    const rel = [humanizeRelationship(e.relationship), e.label].filter(Boolean).join(' · ');
+    const name = (n) => humanizeLabel(n.label, { sourceRef: n.sourceRef });
+    if (e.source === nodeId && byId.has(e.target)) out.push({ rel, other: name(byId.get(e.target)) });
+    if (e.target === nodeId && byId.has(e.source)) inc.push({ rel, other: name(byId.get(e.source)) });
   }
   return { out, inc };
 }
