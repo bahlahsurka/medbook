@@ -39,7 +39,8 @@ describe('buildMechanismDiagramFlowGraph', () => {
   test('carries the edge label through for rendering', () => {
     const { flowEdges } = buildMechanismDiagramFlowGraph(DIAGRAM, FAKE_THEME);
     const labeled = flowEdges.find(e => e.source === 'mech' && e.target === 'conseq');
-    expect(labeled.label).toBe('eventually');
+    // Verb plus the qualifier, so the relationship itself is never hidden.
+    expect(labeled.label).toMatch(/· eventually$/);
   });
 
   test('every node gets a graphNode type and a style object', () => {

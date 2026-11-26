@@ -93,12 +93,6 @@ export default function EditableDiagramDetailPanel({ node, edges, nodesById, cat
         </>
       )}
 
-      <div style={{ fontSize: FONT.size.micro, color: t.text4, marginBottom: 10 }}>
-        {node.sourceType === 'ai_context' ? 'From supplementary context, not the entry itself'
-          : node.sourceType === 'user_added' ? 'Added by you during editing'
-          : 'From the entry'}
-      </div>
-
       {touchingEdges.length > 0 && (
         <div style={{ borderTop: `1px solid ${t.border}`, paddingTop: 10, marginBottom: 10 }}>
           <div style={labelStyle(t)}>Connections ({touchingEdges.length})</div>

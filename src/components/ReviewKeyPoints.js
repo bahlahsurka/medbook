@@ -96,8 +96,7 @@ export default function ReviewKeyPoints({ sections, keyPoints, isStale = false }
       <Collapse open={!collapsed}>
         <div style={{ paddingTop:4 }}>
           {useNew ? (
-            <KeyPointsContent sections={keyPoints.sections} fidelityWarnings={keyPoints.fidelityWarnings}
-              fidelityDisclaimer={keyPoints.fidelityDisclaimer} compact />
+            <KeyPointsContent sections={keyPoints.sections} compact />
           ) : legacy.map((s, i) => (
             <div key={s.key} style={{ borderLeft:`3px solid ${s.accent}`, paddingLeft:14,
               marginBottom: i < legacy.length - 1 ? 18 : 0 }}>

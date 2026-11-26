@@ -172,8 +172,6 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible
     setStateByType(prev => ({ ...prev, [key]: { ...(prev[key] || EMPTY_TYPE_STATE), ...patch } }));
   }, []);
 
-  const [showCoverage, setShowCoverage] = useState(false);
-
   const [recommendState, setRecommendState] = useState({ status: 'idle', recommended: [], rationale: '', error: '' });
   const recommendInFlight = useRef(false);
 
@@ -415,11 +413,6 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible
             {typeSelect}
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: FONT.size.sm, color: t.text3, flexWrap: 'wrap' }}>
               <span>{current.result.cached || savedOnly ? `Saved${savedAt ? ` · ${savedAt}` : ''}` : 'Generated and saved'}</span>
-              {current.result.visualization?.isEdited && !current.editMode && (
-                <span style={{ color: t.navActiveText, background: t.navActiveBg, border: `1px solid ${t.navActiveBorder}`,
-                  borderRadius: RADIUS.pill, padding: '2px 9px', fontWeight: FONT.weight.semibold, fontSize: FONT.size.xs }}>Edited by you</span>
-              )}
-              <InfoTip t={t} text="AI-generated from your notes. It has not been checked for medical accuracy, so verify it before relying on it." />
             </span>
             {!savedOnly && (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginLeft: 'auto', alignItems: 'center' }}>
@@ -444,8 +437,7 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible
 
           {isStale && !current.editMode && (
             <div role="status" style={noticeStyle(t, 'warn')}>
-              <strong style={{ color: t.warn }}>May be out of date</strong> — your Review changed after this diagram was made.
-              {savedOnly ? '' : ' Regenerate to update it.'}
+              <strong style={{ color: t.warn }}>Review updated</strong> since this was made.{savedOnly ? '' : ' Regenerate to refresh it.'}
             </div>
           )}
 
@@ -499,20 +491,6 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible
             </Suspense>
           )}
 
-          {current.result.coverage?.uncoveredStatements?.length > 0 && (
-            <div style={{ marginTop: SPACE.sm }}>
-              <button onClick={() => setShowCoverage(v => !v)}
-                style={{ background: 'none', border: 'none', color: t.warn, fontSize: FONT.size.sm,
-                  cursor: 'pointer', padding: '4px 0', fontWeight: FONT.weight.semibold, fontFamily: 'Inter,sans-serif' }}>
-                ⚠ {current.result.coverage.uncoveredStatements.length} statement{current.result.coverage.uncoveredStatements.length !== 1 ? 's' : ''} from your Review may not be shown {showCoverage ? '▾' : '▸'}
-              </button>
-              {showCoverage && (
-                <ul style={{ ...noticeStyle(t, 'warn'), margin: '6px 0 0', paddingLeft: 30 }}>
-                  {current.result.coverage.uncoveredStatements.map((line, i) => <li key={i} style={{ marginBottom: 4 }}>{line}</li>)}
-                </ul>
-              )}
-            </div>
-          )}
         </>
       ) : (
         <>
@@ -591,28 +569,6 @@ function TypeSelect({ t, isDark, value, onChange, options, isSaved }) {
       </select>
       <span aria-hidden style={{ position: 'absolute', right: 13, top: '50%', transform: 'translateY(-50%)',
         pointerEvents: 'none', color: t.text3, fontSize: FONT.size.sm }}>▼</span>
-    </span>
-  );
-}
-
-// ⓘ — the AI caveat, shown on hover/focus/tap instead of a paragraph.
-function InfoTip({ t, text }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <span style={{ position: 'relative', display: 'inline-flex' }}
-      onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
-      <button type="button" aria-label="About this diagram" title={text} onClick={() => setOpen(o => !o)}
-        onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
-        style={{ width: 22, height: 22, borderRadius: RADIUS.circle, border: `1px solid ${t.borderStrong}`, background: t.surface2,
-          color: t.text3, fontSize: FONT.size.xs, fontWeight: FONT.weight.bold, cursor: 'help', padding: 0, lineHeight: 1,
-          fontFamily: 'Georgia,serif', fontStyle: 'italic' }}>i</button>
-      {open && (
-        <span role="tooltip" style={{ position: 'absolute', top: 'calc(100% + 8px)', left: -8, zIndex: 30, width: 260,
-          background: t.surface, border: `1px solid ${t.border}`, borderRadius: RADIUS.md, boxShadow: elevation(t, 'lg'),
-          padding: '10px 12px', fontSize: FONT.size.sm, color: t.text2, lineHeight: 1.5, fontWeight: FONT.weight.regular }}>
-          {text}
-        </span>
-      )}
     </span>
   );
 }

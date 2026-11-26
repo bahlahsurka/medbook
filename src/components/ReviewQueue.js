@@ -19,7 +19,8 @@ import VisualizationService from '../services/visualization';
 import { getSavedKeyPoints, isKeyPointsStale } from '../lib/keyPoints';
 import { useContentHash } from '../lib/contentHash';
 import { IconPlay, IconPause, IconCheck, IconChevronLeft, IconChevronRight,
-  IconX, IconEdit } from '../lib/icons';
+  IconX, IconEdit, IconMaximize, IconMinimize } from '../lib/icons';
+import ZoomControl from './ZoomControl';
 import RichRuns from '../lib/RichRuns';
 import { rawOffsetAt } from './DetailView';
 import { clearRange } from '../lib/useHighlight';
@@ -29,6 +30,9 @@ import { STUDY_SCOPE_CLASS, suppressContextMenu } from '../lib/studyInteraction'
 import { toTitleCase } from '../lib/titleCase';
 import { sanitizeForStorage } from '../lib/bulletList';
 import HLPopover from './HLPopover';
+import useImageDims, { preloadImageDims } from '../lib/useImageDims';
+import { useElementWidth, useViewportHeight } from '../lib/useElementSize';
+import { planReviewLayout, LAYOUT as IMG_LAYOUT } from '../lib/reviewImageLayout';
 
 const SANS = 'Inter,sans-serif';
 
@@ -88,6 +92,40 @@ const SideColumn = memo(function SideColumn({ rt, images, aiSections, keyPoints,
   );
 });
 
+// Image-aware gallery for the active review card. Each image is shown at
+// the exact size planned by lib/reviewImageLayout.js from its real
+// dimensions: complete, never cropped or stretched, never larger than its
+// real size. Opaque white holder (only visible behind transparent images),
+// no opacity or filters on the image itself.
+const ReviewImageGallery = memo(function ReviewImageGallery({ rt, images, rows, onImageClick, centered }) {
+  // Centered (images below/after the text): the whole block — heading
+  // included — is as wide as its widest row and centred under the card.
+  const blockWidth = Math.max(...rows.map(r => r.items.reduce((sum, it) => sum + it.width, 0) + (r.items.length - 1) * IMG_LAYOUT.imgGap));
+  return (
+    <section aria-label="Images" style={centered ? { width:blockWidth, maxWidth:'100%', margin:'0 auto' } : { minWidth:0 }}>
+      <div style={{ fontSize:FONT.size.xs, color:rt.text4, letterSpacing:.8, fontWeight:FONT.weight.bold,
+        textTransform:'uppercase', marginBottom:10, display:'flex', alignItems:'center', gap:6 }}>
+        Images{images.length > 1 && <span style={{ fontWeight:FONT.weight.semibold }}>· {images.length}</span>}
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', gap:IMG_LAYOUT.imgGap }}>
+        {rows.map((row, r) => (
+          <div key={r} style={{ display:'flex', gap:IMG_LAYOUT.imgGap, alignItems:'flex-start' }}>
+            {row.items.map(it => (
+              <img key={it.index} src={images[it.index]} alt={`Entry image ${it.index + 1}`}
+                className="mb-rq-gimg" onClick={() => onImageClick(it.index)}
+                width={it.width} height={it.height} decoding="async"
+                style={{ width:it.width, height:'auto', aspectRatio:`${it.width} / ${it.height}`, maxWidth:'100%',
+                  objectFit:'contain', display:'block', background:'#ffffff', cursor:'zoom-in',
+                  border:`1px solid ${rt.borderRich}`, borderRadius:RADIUS.md, flexShrink:0,
+                  boxShadow:`0 6px 18px -12px ${rt.shadowRich}` }} />
+            ))}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+});
+
 function LbBtn({ onClick, title, style, children }) {
   return (
     <button className="mb-rq-btn" onClick={onClick} title={title} aria-label={title} style={{
@@ -109,6 +147,13 @@ function Lightbox({ images, start, onClose }) {
   const [idx, setIdx] = useState(start);
   const prev = () => setIdx(i => (i - 1 + images.length) % images.length);
   const next = () => setIdx(i => (i + 1) % images.length);
+
+  // Esc closes the viewer (the review keyboard is already off while it's open).
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.92)', zIndex:Z.lightbox,
@@ -612,6 +657,20 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   const cardHasKeyPoints = hasKeyPoints(cardAiSections, cardKeyPoints);
   const cardHasImages = card?.images?.length > 0;
 
+  // Image-aware layout (revealed cards with images). Plans from each
+  // image's real size, the review area's actual width (follows the
+  // sidebar) and the viewport height — see lib/reviewImageLayout.js.
+  const cardImages = useMemo(() => (Array.isArray(card?.images) ? card.images : []), [card]);
+  const imageDims = useImageDims(cardImages);
+  const [contentEl, setContentEl] = useState(null);
+  const contentWidth = useElementWidth(contentEl);
+  const viewportHeight = useViewportHeight();
+  // Measure the current and next couple of cards' images ahead of time, so
+  // the layout is already right the moment an answer is revealed.
+  useEffect(() => {
+    preloadImageDims(queue.slice(idx, idx + 3).flatMap(e => (Array.isArray(e?.images) ? e.images : [])));
+  }, [queue, idx]);
+
   // Visual Learning drawer — an overlay on top of this still-mounted
   // session. Closed automatically whenever the card changes.
   const [vlOpen, setVlOpen] = useState(false);
@@ -840,6 +899,53 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   });
   const progress = total > 0 ? Math.round((sessionDone / total) * 100) : 0;
 
+  // ── Fullscreen review ──────────────────────────────────────────────────
+  // Real (device) fullscreen plus an in-app full-window layer that hides
+  // the app's top bar and sidebar; the review controls move into a slim
+  // strip of their own. Where supported (Chromium), Esc is captured via
+  // the Keyboard Lock API so it closes the image viewer first and only
+  // then leaves fullscreen; elsewhere the browser's own Esc exits it and
+  // 'fullscreenchange' brings this mode down with it. Where web fullscreen
+  // isn't available at all (iPhone), only the in-app layer applies.
+  // Stays on between cards; ends on pause/finish or leaving the screen.
+  const [fullscreen, setFullscreen] = useState(false);
+  const enterFullscreen = useCallback(async () => {
+    setFullscreen(true);
+    try {
+      const el = document.documentElement;
+      if (el.requestFullscreen && !document.fullscreenElement) await el.requestFullscreen({ navigationUI: 'hide' });
+    } catch { /* not allowed/supported: the in-app layer still applies */ }
+    try { if (document.fullscreenElement) await navigator.keyboard?.lock?.(['Escape']); } catch { /* unsupported */ }
+  }, []);
+  const exitFullscreen = useCallback(() => {
+    setFullscreen(false);
+    try { navigator.keyboard?.unlock?.(); } catch { /* unsupported */ }
+    try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {}); } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    const onChange = () => { if (!document.fullscreenElement) { setFullscreen(false); try { navigator.keyboard?.unlock?.(); } catch { /* ignore */ } } };
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+  useEffect(() => {
+    if (fullscreen && (!sessionStarted || done || ended)) exitFullscreen();
+  }, [fullscreen, sessionStarted, done, ended, exitFullscreen]);
+  useEffect(() => () => {
+    try { navigator.keyboard?.unlock?.(); } catch { /* ignore */ }
+    try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {}); } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    if (!fullscreen) return undefined;
+    // Topmost layer first: the image viewer, edit overlay and Visual
+    // Learning drawer each handle their own Esc.
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || lightboxIdx !== null || editingCard || vlOpen) return;
+      exitFullscreen();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [fullscreen, lightboxIdx, editingCard, vlOpen, exitFullscreen]);
+
   // ── Overview data — all real, all already-used definitions ──────────────
   //
   // Global (unscoped — every system, every difficulty) counts, used ONLY to
@@ -1047,15 +1153,28 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
     .mb-rq-scroll::-webkit-scrollbar { width:8px; }
     .mb-rq-scroll::-webkit-scrollbar-thumb { background:${rt.borderRich}; border-radius:8px; }
 
-    /* Images: full column width, capped height on phones/tablets. On a
-       tablet or laptop, a revealed card with images goes wide: text left (45%),
-       images right (55%) shown as close to their real size as fits. */
+    /* A revealed card with images gets a wider review area; how it's split
+       between text, Key Points and images is planned from the images' real
+       sizes (lib/reviewImageLayout.js), not a fixed ratio. */
     .mb-rq-img { width:100%; max-height:280px; }
-    @media (min-width:768px) {
-      .mb-rq-wide { max-width:1680px !important; }
-      .mb-rq-content.has-side.has-images { grid-template-columns:minmax(0,45fr) minmax(0,55fr); gap:${SPACE.xl2+8}px; }
-      .mb-rq-content.has-images .mb-rq-img { width:auto; max-width:100%; height:auto; max-height:80vh; }
+    .mb-rq-wide { max-width:1680px !important; }
+    /* Fullscreen strip on narrow screens: icon-only exit, no title, slightly
+       smaller (still 36px) buttons; the timer steps aside on the smallest. */
+    @media (max-width:600px) {
+      .mb-rq-fs-title, .mb-rq-fs-exitlabel { display:none; }
+      .mb-rq-fsexit { padding:0 !important; width:40px !important; }
     }
+    @media (max-width:480px) {
+      .mb-rq-fsroot { padding:0 12px !important; }
+      .mb-rq-fsprog { left:-12px !important; right:-12px !important; }
+      .mb-rq-fsbar, .mb-rq-fsctl { gap:6px !important; }
+      .mb-rq-fsbtn { width:36px !important; height:36px !important; }
+      .mb-rq-fsbar .mb-zoom-pct { display:none; }
+      .mb-rq-fsbar .mb-zoom-btn { padding:0 8px !important; }
+    }
+    @media (max-width:360px) { .mb-rq-fs-timer { display:none; } }
+    .mb-rq-gimg { transition:box-shadow ${MOTION.fast} ${MOTION.ease}; }
+    .mb-rq-gimg:hover { box-shadow:0 10px 24px -12px ${rt.shadowRich} !important; }
     .mb-rq-img { transition:transform ${MOTION.fast} ${MOTION.ease}, box-shadow ${MOTION.fast} ${MOTION.ease}; }
     .mb-rq-img:hover { transform:translateY(-2px); }
 
@@ -1484,9 +1603,103 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
   // empty panel reserving dead space.
   const showSide = flipped && (cardHasImages || cardHasKeyPoints);
 
+  // Revealed card with images: plan the image-aware layout (null otherwise,
+  // which keeps the existing card / card + Key Points layout).
+  const plan = flipped && cardHasImages && contentWidth > 0
+    ? planReviewLayout({ dims: imageDims, count: cardImages.length, containerWidth: contentWidth,
+        viewportHeight, hasKeyPoints: cardHasKeyPoints })
+    : null;
+  const G = IMG_LAYOUT.gap;
+  const planGrid = !plan ? null
+    : plan.mode === 'stacked'
+      ? { display:'grid', gridTemplateColumns:'minmax(0,1fr)', rowGap:20, columnGap:0 }
+      : plan.sideWidth
+        ? { display:'grid', gridTemplateColumns:`minmax(0, ${plan.textWidth}px) ${plan.sideWidth}px`,
+            columnGap:G, rowGap:24, justifyContent:'center', alignItems:'start' }
+        : { display:'grid', gridTemplateColumns:'minmax(0,1fr)', rowGap:24, columnGap:0, alignItems:'start' };
+  const planCardCol = !plan ? null
+    : plan.mode === 'below' && !plan.sideWidth
+      ? { minWidth:0, maxWidth:plan.textWidth, width:'100%', margin:'0 auto' }
+      : { minWidth:0 };
+  const keyPointsEl = cardHasKeyPoints
+    ? <ReviewKeyPoints sections={cardAiSections} keyPoints={cardKeyPoints} isStale={cardKeyPointsStale} />
+    : null;
+  const galleryEl = plan
+    ? <ReviewImageGallery rt={rt} images={cardImages} rows={plan.gallery.rows} onImageClick={setLightboxIdx}
+        centered={plan.mode !== 'side'} />
+    : null;
+  // Review controls — shared by the app's top bar (normal) and the slim
+  // strip shown in fullscreen, where they're larger. Edit only appears once
+  // the answer is revealed (nothing worth correcting before that).
+  const reviewControls = (large) => {
+    const size = large ? 40 : 28;
+    const btn = (disabled) => ({
+      background: large ? rt.surface : 'none', border: large ? `1px solid ${rt.border}` : 'none',
+      color: disabled ? rt.text4 : (large ? rt.text2 : rt.text3), opacity: disabled ? .45 : 1,
+      padding: 0, width: size, height: size, borderRadius: large ? RADIUS.md : RADIUS.sm,
+      cursor: disabled ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+    });
+    const icon = large ? 18 : 13;
+    const bc = large ? ' mb-rq-fsbtn' : '';
+    return (
+      <div className={large ? 'mb-rq-fsctl' : undefined} style={{ display:'flex', alignItems:'center', gap: large ? 10 : 6, marginLeft:'auto' }}>
+        {flipped && (
+          <button className={`mb-headerbtn${bc}`} onClick={openEditCard} title="Edit this entry" aria-label="Edit this entry" style={btn(false)}>
+            <IconEdit size={icon} />
+          </button>
+        )}
+        <button className={`mb-headerbtn${bc}`} onClick={goPrev} disabled={idx===0} title="Previous card" aria-label="Previous card" style={btn(idx===0)}>
+          <IconChevronLeft size={large ? 20 : 14} />
+        </button>
+        <span style={{ fontSize: large ? FONT.size.md : FONT.size.sm, color: large ? rt.text2 : rt.text3,
+          fontWeight: large ? FONT.weight.semibold : FONT.weight.medium, padding:'0 2px', whiteSpace:'nowrap' }}>{idx + 1} / {total}</span>
+        {/* Count-up session timer — freezes while paused; tabular-nums keeps
+            the cluster from jittering as seconds roll over. */}
+        <span className={large ? 'mb-rq-fs-timer' : undefined} style={{ fontSize: large ? FONT.size.sm : FONT.size.xs, color:rt.text4, fontVariantNumeric:'tabular-nums', padding:'0 2px' }}
+          title="Session time">
+          {formatElapsed(elapsedSec)}
+        </span>
+        <button className={`mb-headerbtn${bc}`} onClick={pauseSession} title="Pause session" aria-label="Pause session" style={btn(false)}>
+          <IconPause size={icon} />
+        </button>
+        {large ? (
+          <button className="mb-headerbtn mb-rq-fsbtn mb-rq-fsexit" onClick={exitFullscreen} title="Exit fullscreen (Esc)" aria-label="Exit fullscreen"
+            style={{ ...btn(false), width:'auto', padding:'0 14px', gap:8, fontSize:FONT.size.sm, fontWeight:FONT.weight.semibold, fontFamily:SANS }}>
+            <IconMinimize size={18} /> <span className="mb-rq-fs-exitlabel">Exit fullscreen</span>
+          </button>
+        ) : (
+          <button className="mb-headerbtn" onClick={enterFullscreen} title="Fullscreen" aria-label="Enter fullscreen" style={btn(false)}>
+            <IconMaximize size={icon} />
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  // The rating bar lines up with the study content above it.
+  const ratingMaxWidth = plan ? (plan.mode === 'below' && !plan.sideWidth ? plan.galleryWidth : plan.totalWidth)
+    : (showSide ? undefined : 760);
+
   return (
-    <div className={`mb-rq-fade${showSide && cardHasImages ? ' mb-rq-wide' : ''}`} style={{ maxWidth:1040, margin:'0 auto', width:'100%',
-      fontFamily:SANS, height:'100%', display:'flex', flexDirection:'column' }}>
+    <div className={`mb-rq-fade${showSide && cardHasImages && !fullscreen ? ' mb-rq-wide' : ''}${fullscreen ? ' mb-rq-fsroot' : ''}`}
+      style={fullscreen
+        ? { position:'fixed', inset:0, zIndex:Z.overlay, background:t.bg, fontFamily:SANS,
+            display:'flex', flexDirection:'column', padding:'0 20px' }
+        : { maxWidth:1040, margin:'0 auto', width:'100%', fontFamily:SANS, height:'100%', display:'flex', flexDirection:'column' }}>
+      {/* Fullscreen: a slim strip with the review controls (larger, easy to
+          hit) instead of the app's top bar; the progress fill runs along its
+          bottom edge. */}
+      {fullscreen && (
+        <div className="mb-rq-fsbar" style={{ position:'relative', display:'flex', alignItems:'center', gap:12, height:60, flexShrink:0,
+          borderBottom:`1px solid ${rt.border}` }}>
+          <span className="mb-rq-fs-title" style={{ fontWeight:FONT.weight.bold, fontSize:FONT.size.md, color:rt.text, whiteSpace:'nowrap' }}>Review Queue</span>
+          <ZoomControl />
+          {reviewControls(true)}
+          <div className="mb-rq-fsprog" style={{ position:'absolute', left:-20, right:-20, bottom:-1, height:3, background:rt.surfaceSunken }}>
+            <div style={{ height:'100%', background:rt.accent, width:`${progress}%`, transition:`width ${MOTION.slow} ${MOTION.ease}` }} />
+          </div>
+        </div>
+      )}
       <style>{localCss}</style>
 
       {lightboxIdx !== null && card?.images?.length > 0 && (
@@ -1570,51 +1783,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
           (see the headerSlot effect above) instead of a row drawn here, so
           this component contributes NOTHING to the top of the screen and
           the card gets the full height below the app's own header. */}
-      {headerSlot && createPortal(
-        <div style={{ display:'flex', alignItems:'center', gap:6, marginLeft:'auto' }}>
-          {/* Subtle quick-edit entry point — a small icon-only button, same
-              size/weight as Prev/Pause beside it, deliberately not called
-              out as its own feature. Opens a tiny overlay (below) and
-              returns to this exact card/position on save or cancel. Only
-              shown once the answer is revealed — before that, there's
-              nothing on screen yet worth a quick correction, and an Edit
-              icon sitting there while still trying to recall the answer
-              from memory is a small, pointless hint. */}
-          {flipped && (
-            <button className="mb-headerbtn" onClick={openEditCard}
-              title="Edit this entry" aria-label="Edit this entry" style={{
-              background:'none', border:'none', color:rt.text3, padding:6, width:28, height:28,
-              borderRadius:RADIUS.sm, cursor:'pointer',
-              display:'flex', alignItems:'center', justifyContent:'center' }}>
-              <IconEdit size={13} />
-            </button>
-          )}
-          <button className="mb-headerbtn" onClick={goPrev} disabled={idx===0}
-            title="Previous card" aria-label="Previous card" style={{
-            background:'none', border:'none', color: idx===0 ? rt.text4 : rt.text3,
-            opacity: idx===0 ? .45 : 1, padding:6, width:28, height:28, borderRadius:RADIUS.sm,
-            cursor: idx===0 ? 'default' : 'pointer',
-            display:'flex', alignItems:'center', justifyContent:'center' }}>
-            <IconChevronLeft size={14} />
-          </button>
-          <span style={{ fontSize:FONT.size.sm, color:rt.text3, fontWeight:FONT.weight.medium, padding:'0 2px', whiteSpace:'nowrap' }}>{idx + 1} / {total}</span>
-          {/* Count-up session timer — ticks via timerRunning (see its own
-              effect above), so it genuinely freezes while paused instead of
-              just visually looking frozen. tabular-nums keeps the digits
-              from jittering the whole cluster's width as seconds roll over. */}
-          <span style={{ fontSize:FONT.size.xs, color:rt.text4, fontVariantNumeric:'tabular-nums', padding:'0 2px' }}
-            title="Session time">
-            {formatElapsed(elapsedSec)}
-          </span>
-          <button className="mb-headerbtn" onClick={pauseSession} title="Pause session" aria-label="Pause session" style={{
-            background:'none', border:'none', color:rt.text3, padding:6, width:28, height:28,
-            borderRadius:RADIUS.sm, cursor:'pointer',
-            display:'flex', alignItems:'center', justifyContent:'center' }}>
-            <IconPause size={13} />
-          </button>
-        </div>,
-        headerSlot
-      )}
+      {headerSlot && !fullscreen && createPortal(reviewControls(false), headerSlot)}
 
       {/* Progress fill — portaled into App.js's header-bottom-border slot
           (see the progressSlot effect above), so the header's own bottom
@@ -1643,15 +1812,18 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
             points, revealed state only); otherwise the card column alone
             takes a comfortably wide, centred measure instead of stretching
             edge to edge with nothing beside it. */}
-        <div className={`mb-rq-content${showSide ? ' has-side' : ''}${showSide && cardHasImages ? ' has-images' : ''}`} style={{ paddingTop:SPACE.lg, paddingBottom:SPACE.md }}>
-          <div className="mb-rq-card-col" style={showSide ? undefined : { maxWidth:760, margin:'0 auto', width:'100%' }}>
+        <div ref={setContentEl} className={`mb-rq-content${showSide && !plan ? ' has-side' : ''}`}
+          style={{ paddingTop:SPACE.lg, paddingBottom:SPACE.md, ...(planGrid || {}) }}>
+          <div className="mb-rq-card-col" style={plan ? planCardCol : (showSide ? undefined : { maxWidth:760, margin:'0 auto', width:'100%' })}>
 
             {/* Card — a soft colour-tinted wash fading into the surface plus
                 a colour-matched glow shadow, plus a richer border than the
                 quiet chrome around it — this is the one primary container
                 the whole screen exists to show. */}
             <div key={idx} className="mb-rq-fade mb-rq-card" style={{
-              background:`linear-gradient(180deg, ${color}14 0%, ${rt.surface} 220px)`,
+              // Tint layered OVER the opaque card surface (it used to fade
+              // from a translucent tint, letting the page show through).
+              background:`linear-gradient(180deg, ${color}14 0%, ${color}00 220px), ${rt.surface}`,
               border:`1px solid ${rt.borderRich}`, borderRadius:RADIUS.xl2, padding:SPACE.xl2,
               boxShadow:`0 24px 48px -20px ${color}40, 0 1px 2px ${rt.shadow}`, minHeight:260 }}>
 
@@ -1669,7 +1841,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
 
               {/* Title — always visible. */}
               <div style={{ fontFamily:SANS, fontSize:FONT.size.xl2, fontWeight:FONT.weight.bold,
-                color:rt.text, lineHeight:1.4, marginBottom:SPACE.xl }}>
+                color:rt.text, lineHeight:1.3, marginBottom:SPACE.xl, textWrap:'balance', overflowWrap:'anywhere' }}>
                 {card.title}
               </div>
 
@@ -1716,10 +1888,26 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
               (replacing the old cramped horizontal-scroll thumbnail strip),
               then the entry's existing AI key points, if any. Reuses the
               recovered space beside the card rather than leaving it empty. */}
-          {showSide && (
+          {showSide && !plan && (
             <SideColumn rt={rt} images={card.images} aiSections={cardAiSections}
               keyPoints={cardKeyPoints} keyPointsStale={cardKeyPointsStale}
               hasKeyPoints={cardHasKeyPoints} onImageClick={setLightboxIdx} />
+          )}
+
+          {/* Image-aware layout: Key Points sit above the images in the
+              right column ('side'); in 'below' mode Key Points keep the
+              right column and the images take the full width under both;
+              'stacked' is one column: card, Key Points, images. */}
+          {plan && plan.mode === 'side' && (
+            <div className="mb-rq-fade" style={{ minWidth:0, display:'flex', flexDirection:'column', gap:24 }}>
+              {keyPointsEl}
+              {galleryEl}
+            </div>
+          )}
+          {plan && plan.mode === 'below' && keyPointsEl && <div className="mb-rq-fade" style={{ minWidth:0 }}>{keyPointsEl}</div>}
+          {plan && plan.mode === 'stacked' && keyPointsEl}
+          {plan && plan.mode !== 'side' && (
+            <div style={{ gridColumn:'1 / -1', minWidth:0 }}>{galleryEl}</div>
           )}
         </div>
 
@@ -1743,6 +1931,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
             content scrolling underneath it. */}
         {flipped ? (
           <div className="mb-rq-fade mb-rq-ratingbar" style={{ position:'sticky', bottom:0, background:t.bg }}>
+            <div style={{ maxWidth:ratingMaxWidth, margin:'0 auto' }}>
             <div style={{ fontSize:FONT.size.xs, color:rt.text4, fontWeight:FONT.weight.semibold,
               textAlign:'center', marginBottom:SPACE.sm+2, letterSpacing:.4 }}>
               How well did you know this?
@@ -1751,7 +1940,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
               {RATINGS.map(r => (
                 <button key={r.key} className="mb-rq-rate mb-rq-btn" onClick={()=>rate(r.key)} style={{
                   background:toneBg[r.tone], border:`1px solid ${toneColor[r.tone]}33`,
-                  borderRadius:RADIUS.lg, padding:'14px 4px', minHeight:64, cursor:'pointer',
+                  borderRadius:RADIUS.lg, padding:'12px 6px', minHeight:60, cursor:'pointer',
                   fontFamily:SANS, display:'flex', flexDirection:'column',
                   alignItems:'center', justifyContent:'center', gap:3 }}>
                   <div style={{ fontSize:FONT.size.sm, fontWeight:FONT.weight.bold, color:toneColor[r.tone] }}>{r.label}</div>
@@ -1761,6 +1950,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
             </div>
             <div style={{ fontSize:FONT.size.micro, color:rt.text4, textAlign:'center', marginTop:8 }}>
               a · h · g · enter
+            </div>
             </div>
           </div>
         ) : (

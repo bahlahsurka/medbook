@@ -80,12 +80,6 @@ export default function VisualSummaryEditor({ diagram, onDraftChange }) {
               {CATEGORY_OPTIONS.map(v => <option key={v} value={v}>{v}</option>)}
             </select>
           </div>
-
-          <div style={{ fontSize: FONT.size.micro, color: t.text4 }}>
-            {h.sourceType === 'ai_context' ? 'From supplementary context, not the entry itself'
-              : h.sourceType === 'user_added' ? 'Added by you during editing'
-              : 'From the entry'}
-          </div>
         </div>
       ))}
 

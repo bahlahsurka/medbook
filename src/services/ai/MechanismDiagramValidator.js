@@ -14,7 +14,8 @@ import {
 import { MECHANISM_NODE_CATEGORIES } from './MechanismDiagramPromptBuilder.js';
 
 const CATEGORY_SET = new Set(MECHANISM_NODE_CATEGORIES);
-const TERMINAL_CATEGORIES = new Set(['consequence', 'red_flag']);
+// Where a branch can end: a result, or a finding/test/treatment attached to the condition.
+const TERMINAL_CATEGORIES = new Set(['consequence', 'red_flag', 'manifestation', 'investigation', 'management']);
 
 function assertAcyclic(nodes, edges) {
   const adjacency = new Map(nodes.map(n => [n.id, []]));
@@ -66,7 +67,7 @@ export function validateMechanismDiagram(rawText, { allowAiContext = false } = {
     throw new VisualizationValidationError('The mechanism diagram has no cause node — every causal chain needs a starting point.');
   }
   if (!nodes.some(n => TERMINAL_CATEGORIES.has(n.category))) {
-    throw new VisualizationValidationError('The mechanism diagram has no consequence or red-flag node — every causal chain needs somewhere to end.');
+    throw new VisualizationValidationError('The mechanism diagram has no consequence, red-flag or clinical-feature node — every causal chain needs somewhere to end.');
   }
 
   if (nodes.length > 1) {

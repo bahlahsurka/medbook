@@ -23,7 +23,7 @@ const WAYPOINT_LANE = 14;
  * @returns {{positions:Map<string,{x:number,y:number}>, routes:Map<number,Array<{x:number,y:number}>>}}
  *   top-left node positions, and waypoints (by edge index) for links that skip layers
  */
-export function computeSequentialLayoutWithRoutes(nodes, edges, { sizeOf = () => DEFAULT_SIZE, direction = 'RIGHT', layerGap } = {}) {
+export function computeSequentialLayoutWithRoutes(nodes, edges, { sizeOf = () => DEFAULT_SIZE, direction = 'RIGHT', layerGap, groupRank } = {}) {
   const positions = new Map();
   if (nodes.length === 0) return { positions, routes: new Map() };
   const horizontal = direction !== 'DOWN';
@@ -89,6 +89,11 @@ export function computeSequentialLayoutWithRoutes(nodes, edges, { sizeOf = () =>
   chains.forEach(chain => chain.forEach(pushTo));
   for (let l = 0; l < layers.length; l++) layers[l] = layers[l] || [];
 
+  // Optional grouping: within a stage, siblings tied on position keep a
+  // group order (e.g. continuing chains first, clinical features last).
+  const rankOf = (id) => (groupRank && idSet.has(id) ? groupRank(id) || 0 : 0);
+  if (groupRank) layers.forEach(L => L.sort((a, b) => rankOf(a) - rankOf(b)));
+
   // Barycenter ordering sweeps (down then up) to reduce edge crossings.
   const index = new Map();
   const reindex = () => layers.forEach(L => L.forEach((id, i) => index.set(id, i)));
@@ -98,8 +103,8 @@ export function computeSequentialLayoutWithRoutes(nodes, edges, { sizeOf = () =>
     return ns.length ? ns.reduce((s, n) => s + index.get(n), 0) / ns.length : index.get(id);
   };
   for (let pass = 0; pass < 4; pass++) {
-    for (let l = 1; l < layers.length; l++) { layers[l].sort((a, b) => bary(a, preds) - bary(b, preds)); reindex(); }
-    for (let l = layers.length - 2; l >= 0; l--) { layers[l].sort((a, b) => bary(a, succs) - bary(b, succs)); reindex(); }
+    for (let l = 1; l < layers.length; l++) { layers[l].sort((a, b) => (bary(a, preds) - bary(b, preds)) || (rankOf(a) - rankOf(b))); reindex(); }
+    for (let l = layers.length - 2; l >= 0; l--) { layers[l].sort((a, b) => (bary(a, succs) - bary(b, succs)) || (rankOf(a) - rankOf(b))); reindex(); }
   }
 
   const along = (id) => (horizontal ? size.get(id).width : size.get(id).height);   // extent in flow direction

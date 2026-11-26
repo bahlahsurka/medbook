@@ -83,12 +83,12 @@ describe('buildFlowGraph', () => {
     expect(flowEdges.find(fe => fe.target === 'branch').label).toBe('via fluids');
   });
 
-  test('an entry-grounded edge is solid; a non-entry edge is dashed', () => {
+  test('edges are drawn the same whatever their source (no provenance styling)', () => {
     const { flowEdges } = buildFlowGraph(d, LIGHT_T, {});
     const entryEdge = flowEdges.find(fe => fe.target === 'branch');
     const mixedEdge = flowEdges.find(fe => fe.target === 'ctx');
     expect(entryEdge.style.strokeDasharray).toBeUndefined();
-    expect(mixedEdge.style.strokeDasharray).toBeDefined();
+    expect(mixedEdge.style.strokeDasharray).toBeUndefined();
   });
 
   test('each edge resolves a concrete source/target handle id', () => {

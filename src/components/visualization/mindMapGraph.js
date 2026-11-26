@@ -14,13 +14,11 @@ import { measureNode } from './nodeMetrics';
 const HANDLE_IDS = ['top', 'right', 'bottom', 'left'];
 
 // Branch-level connections are heavier and accent-tinted (they carry the
-// map's structure); deeper ones are quieter. A relationship not grounded
-// in the review (touches an ai_context node) is dashed.
-function edgeStyleFor(t, provenance, fromCentre) {
-  const base = fromCentre
+// map's structure); deeper ones are quieter.
+function edgeStyleFor(t, fromCentre) {
+  return fromCentre
     ? { stroke: `${t.accent}99`, strokeWidth: 2.2 }
     : { stroke: t.borderStrong, strokeWidth: 1.6 };
-  return provenance === 'entry' ? base : { ...base, stroke: t.text4, strokeDasharray: '5 4' };
 }
 
 const OUTLINE_STEM = 14; // outline connectors drop from this far inside the parent's left edge
@@ -128,7 +126,7 @@ export function buildFlowGraph(diagram, t, { selectedId, mode, container } = {})
       type: route ? 'routed' : 'branch',
       label: e.label || undefined,
       labelStyle: { fill: t.text3, fontSize: 10.5, fontWeight: 600 },
-      style: edgeStyleFor(t, e.provenance, fromCentre),
+      style: edgeStyleFor(t, fromCentre),
       data: route
         ? { points: route, sourceAt: layoutRect(s), targetAt: layoutRect(tg), showLabel: fitting.has(i) }
         : { axis: dragged ? 'auto' : 'x', showLabel: fitting.has(i) },

@@ -99,7 +99,8 @@ test('no extra helper text, model name or long disclaimer; format is a dropdown'
   expect(text).not.toMatch(/never changed|Preview|structural validation|additional medical context/i);
   expect(text).not.toContain(SAVED_MIND_MAP.aiModel);
   expect(container.querySelector('select[aria-label="Diagram format"]').value).toBe('mind_map');
-  expect(button('About this diagram')).toBeTruthy();
+  expect(button('About this diagram')).toBeFalsy();                 // no AI caveat tooltip
+  expect(text).not.toMatch(/double-check|may not be shown|Edited by you|medical accuracy/i);
 });
 
 test('collapsible top mode starts expanded and can collapse', async () => {

@@ -38,8 +38,11 @@ export const CATEGORY_OPTIONS_BY_TYPE = {
   mechanism_diagram: [
     { value: 'cause', label: 'Cause' },
     { value: 'mechanism', label: 'Mechanism' },
+    { value: 'manifestation', label: 'Clinical feature' },
     { value: 'consequence', label: 'Consequence' },
     { value: 'red_flag', label: 'Red flag' },
+    { value: 'investigation', label: 'Investigation' },
+    { value: 'management', label: 'Management' },
   ],
 };
 

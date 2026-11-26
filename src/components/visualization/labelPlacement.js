@@ -8,7 +8,7 @@
 /** Typography of relationship/edge label pills (matches EdgeLabelPill). */
 export const EDGE_LABEL_SPEC = { fontSize: 10.5, weight: 600, lineHeight: 1.3, padX: 7, padY: 2, minWidth: 0, maxWidth: 170, extraX: 2, extraY: 2 };
 
-export const humanizeRelationship = (r) => String(r || '').replace(/_/g, ' ').trim();
+export { humanizeRelationship } from '../../services/ai/diagramLabels';
 
 const hit = (a, b, pad) => a.x < b.x + b.width + pad && b.x < a.x + a.width + pad && a.y < b.y + b.height + pad && b.y < a.y + a.height + pad;
 

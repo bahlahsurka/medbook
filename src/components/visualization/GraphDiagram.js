@@ -25,7 +25,7 @@ import DiagramToolbar from './DiagramToolbar';
 import DiagramDetailPanel from './DiagramDetailPanel';
 import EditableDiagramDetailPanel from './EditableDiagramDetailPanel';
 import { EDGE_TYPES } from './diagramEdges';
-import { applySelection, connectionsOf } from './diagramSelection';
+import { applySelection } from './diagramSelection';
 import { diagramCss, prefersReducedMotion } from './diagramStyles';
 import { boundsOf, computeViewport, preferredCanvasHeight, maxCanvasHeight, ABSOLUTE_MIN_ZOOM } from './viewport';
 import { toneStyle } from './nodeTheme';
@@ -240,7 +240,7 @@ function GraphCanvas({ diagram, editable, onDraftChange, config, size, onBounds,
         />
       ) : (
         <DiagramDetailPanel
-          node={selectedNode && { ...selectedNode, connections: connectionsOf(diagram, selectedNode.id) }}
+          node={selectedNode}
           onClose={() => setSelectedId(null)}
         />
       )}

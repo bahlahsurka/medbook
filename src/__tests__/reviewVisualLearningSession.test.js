@@ -169,7 +169,7 @@ async function openDrawerAndCheck(e, onReviewed) {
 
   if (e === ALPHA) {
     expect(drawer().textContent).toContain('mind_map:Edited root');    // saved edit wins
-    expect(drawer().textContent).toContain('Edited by you');
+    expect(drawer().textContent).not.toContain('Edited by you');      // no provenance badge
     expect(drawer().textContent).not.toContain('Knowledge Network');   // only saved types offered
     const select = drawer().querySelector('select[aria-label="Diagram format"]');
     expect(Array.from(select.options).map(o => o.value)).toEqual(['mind_map', 'comparison_map']);

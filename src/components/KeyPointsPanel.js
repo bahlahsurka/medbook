@@ -26,22 +26,15 @@ function Collapse({ open, children }) {
   );
 }
 
-function fmtDate(iso) {
-  try {
-    return new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-  } catch { return ''; }
-}
-
 /**
  * @param {{
  *   keyPoints: {topic:string, sections:Array<{heading:string, bullets:Array<{text,emphasis,sourceRef}>}>}|null,
- *   fidelityWarnings?: string[], fidelityDisclaimer?: string,
- *   generatedAt?: string, model?: string, isStale?: boolean,
+ *   isStale?: boolean,
  *   busy?: boolean, error?: string,
  *   onGenerate: () => void,
  * }} props
  */
-export default function KeyPointsPanel({ keyPoints, fidelityWarnings = [], fidelityDisclaimer, generatedAt, model, isStale, busy, error, onGenerate }) {
+export default function KeyPointsPanel({ keyPoints, isStale, busy, error, onGenerate }) {
   const { t } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
   const hasContent = !!keyPoints && Array.isArray(keyPoints.sections) && keyPoints.sections.length > 0;
@@ -108,13 +101,7 @@ export default function KeyPointsPanel({ keyPoints, fidelityWarnings = [], fidel
 
           {hasContent ? (
             <>
-              <KeyPointsContent sections={keyPoints.sections} fidelityWarnings={fidelityWarnings} fidelityDisclaimer={fidelityDisclaimer} />
-
-              {generatedAt && (
-                <div style={{ fontSize: fs(10.5), color: t.text4, textAlign: 'right', marginTop: 10 }}>
-                  Generated {fmtDate(generatedAt)}{model ? ` · ${model}` : ''}
-                </div>
-              )}
+              <KeyPointsContent sections={keyPoints.sections} />
             </>
           ) : !busy && !error && (
             <div style={{ fontSize: fs(12.5), color: t.text4, lineHeight: 1.6 }}>

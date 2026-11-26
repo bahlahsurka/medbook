@@ -7,7 +7,15 @@
 // rather than ELK — see that file's own header comment on why a staged
 // chain doesn't need ELK's weight the way Knowledge Network/Clinical
 // Flowchart genuinely do.
-export const MECHANISM_NODE_CATEGORIES = ['cause', 'mechanism', 'consequence', 'red_flag'];
+export const MECHANISM_NODE_CATEGORIES = ['cause', 'mechanism', 'manifestation', 'consequence', 'red_flag', 'investigation', 'management'];
+
+// Preferred relationship vocabulary (free text in the schema — see
+// visualizationValidationHelpers.js on why relationships aren't an enum).
+export const MECHANISM_RELATIONSHIPS = [
+  'causes', 'results_in', 'leads_to', 'progresses_to', 'extends_into', 'spreads_through', 'spreads_to',
+  'presents_with', 'complicated_by', 'associated_with', 'increases_risk_of', 'requires', 'diagnosed_by', 'treated_with',
+  'can_cause', 'can_result_in', 'can_lead_to', 'can_extend_into', 'can_spread_to', 'may_present_with',
+];
 
 export const GROQ_MECHANISM_DIAGRAM_SCHEMA = {
   type: 'object',
@@ -58,15 +66,36 @@ ABSOLUTE RULES:
 - Preserve exact mechanism language, hedges ("proposed", "thought to"), numeric values, and thresholds EXACTLY as written — a proposed mechanism must stay "proposed", not become a stated fact.
 - Do not invent extra intermediate steps the review never mentions just to make the chain look more detailed.
 
-STRUCTURE:
-- "cause" nodes are the root trigger(s) — usually just one, but a review can support more than one contributing cause.
-- "mechanism" nodes are the intermediate step(s) connecting a cause to its consequence — there can be one or several in sequence, or a cause can branch into two parallel mechanisms that both contribute to the same consequence.
-- "consequence" nodes are the end result(s) of the chain.
-- "red_flag" is for a consequence that is itself an urgent/dangerous finding — use this instead of "consequence" when that's the case.
-- Every edge should point FORWARD along the causal chain (source = the earlier step, target = the later one it leads to) — never backward.
-- Every node needs a short, stable, lowercase_snake_case "id" referenced consistently in every edge touching it, and at least one edge connecting it into the chain.
-- Every node's "explanation" is one concise sentence preserving the exact mechanism language/hedges/numbers from its source text.
-- Every edge needs a "relationship" — a short lowercase label for the causal link (e.g. "leads_to", "causes", "triggers", "results_in" — pick whatever fits). "label" may be empty, or a short clarifying phrase (e.g. "if untreated").
+NODE CATEGORIES (use each only for what it really is):
+- "cause": the root trigger(s) / etiology / initiating event — nothing comes before it.
+- "mechanism": an intermediate pathophysiological or anatomical-spread step between a cause and its results.
+- "manifestation": a symptom, sign or examination finding of a condition (e.g. fever, odynophagia, neck stiffness). Connect it FROM the condition it belongs to with "presents_with" — a symptom is not a step in the causal chain.
+- "consequence": a resulting condition or complication at the end of a branch.
+- "red_flag": a consequence that is itself dangerous / life-threatening / needs urgent action, as the review describes it. Do not mark ordinary findings as red flags.
+- "investigation": a test the review says to do (connect with "diagnosed_by" or "requires").
+- "management": a treatment/intervention the review states (connect with "treated_with" or "requires").
+Only include categories the review actually supports.
+
+ORGANIZATION:
+- Build meaningful BRANCHES rather than linking everything to one central node: the initiating event -> the core condition -> separate branches for (a) its clinical manifestations, (b) each distinct route of spread / mechanism chain in order, (c) the complications each route produces, and (d) investigations/management attached to the condition or complication they belong to.
+- Keep a multi-step route as a chain (A extends into B, which spreads to C, which results in D) instead of joining every step back to the centre.
+- If the review says two things happen together or in parallel (e.g. "extends into X, with spread to Y"), connect them the way the sentence does; do not invent a sequence the review doesn't state.
+
+LABELS:
+- "label" is the human-readable text shown on the diagram: natural medical language with normal spaces, sentence case and correct medical capitalization/abbreviations (e.g. "Thrombosis of the internal jugular vein", "Cranial nerve IX–XII deficits", "Chest X-ray: widened mediastinum"). NEVER use underscores or snake_case in a label, and never copy the id into the label.
+- Keep labels short (about 2–7 words) but keep the specifics that matter: named nerves, numbers, thresholds, laterality.
+- "id" is internal only: a short, stable, lowercase_snake_case identifier, referenced consistently in every edge touching that node.
+
+RELATIONSHIPS:
+- Every edge needs a "relationship" that states the actual medical link, in lowercase_snake_case, chosen from: causes, results_in, leads_to, progresses_to, extends_into, spreads_through, spreads_to, presents_with, complicated_by, associated_with, increases_risk_of, requires, diagnosed_by, treated_with — or a hedged form when the review hedges it: can_cause, can_result_in, can_lead_to, can_extend_into, can_spread_to, may_present_with. Prefer the most specific accurate verb; avoid using "causes"/"leads_to" for everything.
+- Keep the review's certainty: if it says "can", "may", "potentially", "proposed", use the hedged form (or put the qualifier in "label"). Never turn a possibility into a certainty.
+- "label" may be empty, or a short qualifier from the review (e.g. "rapidly", "if untreated", "especially with renal impairment").
+- Only draw an edge the review states or clearly implies. Do not add links to make the diagram look complete.
+- Edges point FORWARD (source = the earlier step or the condition, target = what follows from it / what it presents with) — never backward.
+
+OTHER RULES:
+- Every node needs at least one edge connecting it into the diagram.
+- Every node's "explanation" is one concise sentence preserving the exact language, hedges and numbers from its source text.
 
 SOURCE CLASSIFICATION (every node is EITHER one or the other, never ambiguous):
 - "entry": built from the student's own review notes. "sourceRef" must be a short, verbatim or near-verbatim quote supporting this exact node.
@@ -90,10 +119,10 @@ Example correct output:
     {"source":"cause","target":"receptor_upregulation","relationship":"requires","label":"in burn/denervation injury"},
     {"source":"receptor_upregulation","target":"depolarization","relationship":"leads_to","label":""},
     {"source":"depolarization","target":"hyperkalemia","relationship":"causes","label":""},
-    {"source":"hyperkalemia","target":"arrhythmia","relationship":"can_precipitate","label":"especially with renal impairment"}
+    {"source":"hyperkalemia","target":"arrhythmia","relationship":"can_result_in","label":"especially with renal impairment"}
   ]
 }
-Notice the chain runs strictly forward (cause -> mechanism -> mechanism -> consequence -> red_flag) and "can precipitate" stays a hedge, not a certainty. Match this on the real review below.
+Notice the chain runs strictly forward (cause -> mechanism -> mechanism -> consequence -> red_flag), labels are natural text (no underscores), and "can precipitate" stays a hedge ("can_result_in"), not a certainty. If a review also lists symptoms, they become "manifestation" nodes linked from the condition with "presents_with"; a recommended test becomes an "investigation" node, and a stated treatment a "management" node. Match this on the real review below.
 
 Return ONLY the structured JSON the response schema requires — no extra commentary, no markdown fences, nothing outside the schema.`;
 

@@ -1,8 +1,7 @@
 // Shared, read-only rendering of Key Points sections/bullets — used by the
 // entry detail view (KeyPointsPanel) and the review screens (ReviewKeyPoints)
 // so the two always present the same content the same way.
-import { useState } from 'react';
-import { useTheme, SPACE, RADIUS, FONT, fs } from '../lib/theme';
+import { useTheme, FONT, fs } from '../lib/theme';
 import { splitLeadTerm } from '../lib/keyPoints';
 
 function emphasisStyle(t, emphasis) {
@@ -13,9 +12,8 @@ function emphasisStyle(t, emphasis) {
   }
 }
 
-export default function KeyPointsContent({ sections, fidelityWarnings = [], fidelityDisclaimer, compact = false }) {
+export default function KeyPointsContent({ sections, compact = false }) {
   const { t } = useTheme();
-  const [showWarnings, setShowWarnings] = useState(false);
   const sectionGap = compact ? 12 : 14;
 
   return (
@@ -41,26 +39,6 @@ export default function KeyPointsContent({ sections, fidelityWarnings = [], fide
         </div>
       ))}
 
-      {fidelityWarnings.length > 0 && (
-        <div style={{ marginTop: SPACE.sm }}>
-          <button onClick={() => setShowWarnings(s => !s)}
-            style={{ background: 'none', border: 'none', color: t.warn, fontSize: FONT.size.xs,
-              cursor: 'pointer', padding: 0, fontWeight: FONT.weight.semibold, fontFamily: 'Inter,sans-serif' }}>
-            ⚠ {fidelityWarnings.length} potential issue{fidelityWarnings.length !== 1 ? 's' : ''} found {showWarnings ? '▾' : '▸'}
-          </button>
-          {showWarnings && (
-            <div style={{ background: t.warnBg, border: `1px solid ${t.warnBorder}`, borderRadius: RADIUS.md,
-              padding: '10px 12px', marginTop: 6, fontSize: fs(11.5), color: t.text2 }}>
-              <ul style={{ margin: '0 0 8px', paddingLeft: 16 }}>
-                {fidelityWarnings.map((w, i) => <li key={i} style={{ marginBottom: 4 }}>{w}</li>)}
-              </ul>
-              {fidelityDisclaimer && (
-                <div style={{ color: t.text4, fontSize: FONT.size.micro, lineHeight: 1.5 }}>{fidelityDisclaimer}</div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
     </>
   );
 }
