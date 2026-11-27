@@ -63,7 +63,7 @@ function callVisualizeEndpoint(payload) {
 
 // Same "is this a finished diagram, not an in-progress claim row" checks as
 // visualizationRegistry.js's isRealDiagram (that module is server-only).
-function isRealSavedDiagram(vizType, diagram) {
+export function isRealSavedDiagram(vizType, diagram) {
   if (!diagram || typeof diagram !== 'object') return false;
   if (vizType === 'comparison_map') return Array.isArray(diagram.cells) && diagram.cells.length > 0;
   if (vizType === 'visual_summary') return Array.isArray(diagram.highlights) && diagram.highlights.length > 0;

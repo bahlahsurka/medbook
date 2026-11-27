@@ -9,11 +9,12 @@ import RichRuns from '../lib/RichRuns';
 import { useHighlight, clearRange } from '../lib/useHighlight';
 import { useTheme, SPACE, RADIUS, FONT, Z, MOTION, elevation, fs } from '../lib/theme';
 import { IconChevronLeft, IconChevronRight, IconEdit, IconCheck, IconTrash, IconPin,
-  IconImages, IconSparkle, IconX, IconDownload, IconChart, IconListBullet } from '../lib/icons';
+  IconImages, IconSparkle, IconX, IconDownload, IconChart, IconListBullet, IconShare } from '../lib/icons';
 import HLToolbar from './HLToolbar';
 import HLPopover from './HLPopover';
 import { FlashcardSection } from './AISections';
 import KeyPointsPanel from './KeyPointsPanel';
+import ShareEntryDialog from './ShareEntryDialog';
 import { useContentHash } from '../lib/contentHash';
 import { isKeyPointsStale } from '../lib/keyPoints';
 import VisualLearningPanel from './visualization/VisualLearningPanel';
@@ -323,6 +324,7 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   const [lb,      setLb]      = useState(null);
   const [editing, setEditing] = useState(false);
   const [deleting,setDel]     = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   // Edit state
   const [editTitle, setET]  = useState(entry.title);
@@ -517,14 +519,14 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
     if (editing) return;
     const onKeyDown = (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (lb !== null) return; // lightbox open — let it own the keyboard
+      if (lb !== null || sharing) return; // lightbox / share dialog open — let it own the keyboard
       if (isTypingTarget(document.activeElement)) return;
       if (e.key === 'ArrowLeft' && hasPrev) { e.preventDefault(); onPrev(); }
       else if (e.key === 'ArrowRight' && hasNext) { e.preventDefault(); onNext(); }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [editing, lb, hasPrev, hasNext, onPrev, onNext]);
+  }, [editing, lb, sharing, hasPrev, hasNext, onPrev, onNext]);
 
   useEffect(() => {
     if (!hlViewOn) { clearSelState(); return; }
@@ -1276,6 +1278,8 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
   return (
     <div className="mb-detail-shell" style={{fontFamily:'Inter,sans-serif',animation:'medbook-fade-in 200ms ease'}}>
       {lb!==null && <Lightbox images={entry.images} start={lb} onClose={()=>setLb(null)} />}
+      {sharing && <ShareEntryDialog entryId={entry.id} entryTitle={entry.title} userId={userId} color={color}
+        onClose={()=>setSharing(false)} />}
 
       {/* Floating highlight bar — only in view mode, only while Highlight is on,
           and never on top of the fullscreen lightbox. */}
@@ -1372,6 +1376,8 @@ export default function DetailView({ entry, onBack, onDeleted, onUpdated, userId
               onClick={openEdit} />
             <ActionButton t={t} tone={entry.pinned?'warn':'neutral'} icon={<IconPin size={14} />}
               label={entry.pinned?'Unpin entry':'Pin entry'} onClick={togglePin} />
+            <ActionButton t={t} tone="neutral" icon={<IconShare size={14} />} label="Share entry"
+              onClick={()=>setSharing(true)} />
             <ActionButton t={t} tone="neutral" icon={<IconDownload size={14} />} label="Export as PDF"
               onClick={exportPDF} />
             <ActionButton t={t} tone="danger" label={deleting?'Deleting…':'Delete entry'}
