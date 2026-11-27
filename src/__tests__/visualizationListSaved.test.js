@@ -200,3 +200,16 @@ describe('generate() in flight (review drawer can close mid-generation)', () => 
     expect(VisualizationService.pendingGenerations('e1')).toEqual([]);
   });
 });
+
+test('getSavedRevision changes when an entry\'s saved diagrams change (generate, save, delete), not for other entries', async () => {
+  const r0 = VisualizationService.getSavedRevision('e1');
+  await VisualizationService.generate('mind_map', 'e1', {});
+  const r1 = VisualizationService.getSavedRevision('e1');
+  expect(r1).not.toBe(r0);
+  await VisualizationService.saveEdit('mind_map', 'e1', mindMap, {});
+  const r2 = VisualizationService.getSavedRevision('e1');
+  expect(r2).not.toBe(r1);
+  await VisualizationService.deleteSaved('mind_map', 'e1');
+  expect(VisualizationService.getSavedRevision('e1')).not.toBe(r2);
+  expect(VisualizationService.getSavedRevision('e2')).toBe(0);
+});

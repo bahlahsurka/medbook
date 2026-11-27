@@ -90,9 +90,16 @@ function rememberTypes(entryId, types) {
   while (typesCache.size > TYPES_CACHE_LIMIT) typesCache.delete(typesCache.keys().next().value);
 }
 
+// Bumped whenever an entry's saved diagrams change (generate, save, restore,
+// delete), so views showing one (the review card) know to re-read.
+const revisions = new Map();
+function bumpRevision(entryId) { revisions.set(entryId, (revisions.get(entryId) || 0) + 1); }
+
 function invalidateSaved(entryId) {
   savedCache.delete(entryId);
-  if (typesCache.delete(entryId)) notify();
+  typesCache.delete(entryId);
+  bumpRevision(entryId);
+  notify();
 }
 
 function rememberSaved(entryId, value) {
@@ -112,10 +119,12 @@ function recordGenerated(entryId, vizType, res) {
   savedCache.delete(entryId);
   const known = typesCache.get(entryId);
   if (!res?.visualization) { invalidateSaved(entryId); return; }
+  bumpRevision(entryId);
   if (known) {
     if (!known.includes(vizType)) rememberTypes(entryId, [...known, vizType]);
     notify();
   } else {
+    notify();
     VisualizationService.listSaved(entryId).catch(() => {});
   }
 }
@@ -221,6 +230,11 @@ const VisualizationService = {
     // Same array instance until it changes (listSaved also records here),
     // as useSyncExternalStore requires.
     return typesCache.get(entryId);
+  },
+
+  /** A number that changes whenever this entry's saved diagrams change (for useSyncExternalStore). */
+  getSavedRevision(entryId) {
+    return revisions.get(entryId) || 0;
   },
 
   /** Subscribe to changes in saved-type knowledge (for useSyncExternalStore). */

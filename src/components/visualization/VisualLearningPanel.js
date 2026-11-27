@@ -19,6 +19,7 @@
 import { useState, useRef, useEffect, lazy, Suspense, useCallback, useMemo } from 'react';
 import { useTheme, SPACE, RADIUS, FONT, elevation } from '../../lib/theme';
 import { IconSparkle, IconNetwork } from '../../lib/icons';
+import { VISUALIZATION_TYPES, TYPE_BY_KEY, RENDERER_BY_TYPE } from './rendererRegistry';
 import VisualizationService, { VisualizationServiceError } from '../../services/visualization';
 import { cloneDiagram } from './graphDiagramEdits';
 import useSavedVisualizationTypes from './useSavedVisualizationTypes';
@@ -35,26 +36,8 @@ import { contentHashHex } from '../../lib/contentHash';
 // shaped types edit in place inside their own existing Renderer (passed
 // `editable`+`onDraftChange`); the other two swap in a dedicated
 // purpose-built editor component instead of a graph editor.
-const VISUALIZATION_TYPES = [
-  { key: 'mind_map', label: 'Mind Map', family: 'graph' },
-  { key: 'knowledge_network', label: 'Knowledge Network', family: 'graph' },
-  { key: 'clinical_flowchart', label: 'Clinical Flowchart', family: 'graph' },
-  { key: 'mechanism_diagram', label: 'Mechanism Diagram', family: 'graph' },
-  { key: 'comparison_map', label: 'Comparison Map', family: 'comparison' },
-  { key: 'visual_summary', label: 'Visual Summary', family: 'summary' },
-];
-const TYPE_BY_KEY = Object.fromEntries(VISUALIZATION_TYPES.map(t => [t.key, t]));
-
-// One lazy import per type — created once at module scope (not inside the
-// component) so each is a stable component reference across re-renders.
-const RENDERER_BY_TYPE = {
-  mind_map: lazy(() => import('./MindMapRenderer')),
-  knowledge_network: lazy(() => import('./KnowledgeNetworkRenderer')),
-  clinical_flowchart: lazy(() => import('./ClinicalFlowchartRenderer')),
-  mechanism_diagram: lazy(() => import('./MechanismDiagramRenderer')),
-  comparison_map: lazy(() => import('./ComparisonMapRenderer')),
-  visual_summary: lazy(() => import('./VisualSummaryRenderer')),
-};
+// The six formats and their renderers live in rendererRegistry.js (shared
+// with the review card's on-card diagram).
 
 // Phase 4: the two non-graph types get their own dedicated editor
 // component instead of reusing their Renderer with an `editable` prop —
@@ -115,7 +98,7 @@ function RendererFallback({ t }) {
  *   (DetailView's own runAnalyze) owns the AI Analysis request instead of
  *   AISections.js making it.
  */
-function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible = false, onHasDiagramChange }) {
+function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible = false, onHasDiagramChange, onGenerated }) {
   const { t, isDark } = useTheme();
   // mode="saved": read-only view of already-saved diagrams.
   // Loads them once via VisualizationService.listSaved (a plain RLS-scoped
@@ -203,6 +186,11 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible
     return () => clearInterval(id);
   }, [anyLoading]);
 
+  const mountedRef = useRef(false);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+  const onGeneratedRef = useRef(onGenerated);
+  onGeneratedRef.current = onGenerated;
+
   // Shows a generation's progress and result. The request itself lives in
   // VisualizationService, so it carries on (and saves) if this panel closes.
   const follow = useCallback(async (key, start) => {
@@ -213,6 +201,7 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible
     try {
       const res = await (pending ? pending.promise : start());
       updateTypeState(key, { status: 'loaded', result: res });
+      if (mountedRef.current) onGeneratedRef.current?.(key);
     } catch (e) {
       const message = e instanceof VisualizationServiceError ? e.message : 'Something went wrong generating this diagram.';
       updateTypeState(key, { status: 'error', error: message, errorKind: e instanceof VisualizationServiceError ? e.kind : '' });

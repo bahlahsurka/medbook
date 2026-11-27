@@ -30,6 +30,7 @@ jest.mock('../services/visualization', () => {
       peekSaved: jest.fn(() => undefined),
       getSavedTypes: jest.fn(() => undefined),
       subscribeSaved: jest.fn(() => () => {}),
+      getSavedRevision: jest.fn(() => 0),
       prefetchSavedTypes: jest.fn(async () => {}),
       generate: jest.fn(), pendingGenerations: jest.fn(() => []), generateMindMap: jest.fn(), recommend: jest.fn(),
       saveEdit: jest.fn(), restoreOriginal: jest.fn(),
@@ -79,7 +80,7 @@ function entry(id, title, aiSections, overdueDays) {
 const ALPHA = entry('alpha', 'Alpha Entry', { keyPoints: NEW_KEY_POINTS, clinicalPearls: ['Old pearl text'], keyLearningPoints: ['Old learning point'] }, 3);
 const BETA = entry('beta', 'Beta Entry', { highYield: ['Legacy high-yield fact'] }, 2);
 
-const SAVED = {
+const BASE_SAVED = {
   alpha: [
     { id: 'v1', entryId: 'alpha', vizType: 'mind_map', graphData: { nodes: [{ id: 'a', label: 'Edited root' }], edges: [] },
       originalGraphData: { nodes: [{ id: 'a', label: 'Original root' }], edges: [] }, isEdited: true, updatedAt: '2026-11-21T00:00:00Z' },
@@ -89,14 +90,36 @@ const SAVED = {
   beta: [],
 };
 
-const SAVED_TYPES = Object.fromEntries(Object.entries(SAVED).map(([id, list]) => [id, list.map(v => v.vizType)]));
+// A tiny in-memory stand-in for the service's saved index: generate() mocks
+// call saveDiagram() to record a new diagram and notify subscribers, like
+// the real service does after a successful generation.
+let SAVED, SAVED_TYPES, revisions, savedListeners;
+function resetSaved() {
+  SAVED = Object.fromEntries(Object.entries(BASE_SAVED).map(([id, list]) => [id, [...list]]));
+  SAVED_TYPES = Object.fromEntries(Object.entries(SAVED).map(([id, list]) => [id, list.map(v => v.vizType)]));
+  revisions = {};
+  savedListeners = new Set();
+}
+function saveDiagram(v) {
+  SAVED[v.entryId] = [...(SAVED[v.entryId] || []).filter(x => x.vizType !== v.vizType), v];
+  SAVED_TYPES[v.entryId] = SAVED[v.entryId].map(x => x.vizType);
+  revisions[v.entryId] = (revisions[v.entryId] || 0) + 1;
+  savedListeners.forEach(fn => fn());
+}
+const diagramFor = (entryId, vizType, label, updatedAt = '2026-11-27T00:00:00Z') => ({
+  id: `${entryId}-${vizType}`, entryId, vizType, graphData: { nodes: [{ id: 'r', label }], edges: [] },
+  originalGraphData: null, isEdited: false, updatedAt,
+});
 
 let container, root, warnSpy;
 beforeEach(() => {
   window.localStorage.clear();
   mockLoaded.length = 0;
   jest.clearAllMocks();
+  resetSaved();
   VisualizationService.listSaved.mockImplementation(async (id) => SAVED[id] || []);
+  VisualizationService.subscribeSaved.mockImplementation(fn => { savedListeners.add(fn); return () => savedListeners.delete(fn); });
+  VisualizationService.getSavedRevision.mockImplementation(id => revisions[id] || 0);
   VisualizationService.generate.mockReset();
   VisualizationService.pendingGenerations.mockImplementation(() => []);
   // Stable arrays per entry, as the real service returns (useSyncExternalStore requires it).
@@ -123,6 +146,20 @@ const key = (k, target = document.body) => act(() => {
 });
 async function flush() {
   for (let i = 0; i < 5; i++) await act(async () => { await Promise.resolve(); });
+}
+
+// The latest saved diagram sits on the card above the notes; an entry with
+// none loads no diagram code and reads no diagram payloads.
+const cardDiagram = () => container.querySelector('[data-testid="review-card-diagram"]');
+function expectCardDiagramFor(e) {
+  if (e === ALPHA) {
+    expect(cardDiagram().textContent).toContain('mind_map:Edited root');
+    expect(cardDiagram().textContent).toContain('Mind Map');
+    expect(VisualizationService.listSaved).toHaveBeenCalledWith('alpha');
+  } else {
+    expect(cardDiagram()).toBeNull();
+    expect(VisualizationService.listSaved).not.toHaveBeenCalledWith('beta');
+  }
 }
 
 function expectKeyPointsFor(e) {
@@ -228,8 +265,8 @@ test('ReviewQueue: Key Points and Visual Learning never disturb the session or g
   const second = first === ALPHA ? BETA : ALPHA;
   act(() => { findButton(b => b.textContent.includes('Tap to reveal')).click(); });
   expectKeyPointsFor(first);
-  expect(mockLoaded).toEqual([]); // no visualization code loaded before opening
-  expect(VisualizationService.listSaved).not.toHaveBeenCalled(); // no diagram payloads fetched just by reviewing
+  await flush();
+  expectCardDiagramFor(first);
   // Only the lightweight saved-types lookup, batched for the queue window.
   expect(VisualizationService.prefetchSavedTypes).toHaveBeenCalled();
   expect(VisualizationService.prefetchSavedTypes.mock.calls[0][0]).toEqual(expect.arrayContaining(['alpha', 'beta']));
@@ -255,6 +292,8 @@ test('ReviewQueue: Key Points and Visual Learning never disturb the session or g
 
   act(() => { findButton(b => b.textContent.includes('Tap to reveal')).click(); });
   expectKeyPointsFor(second);
+  await flush();
+  expectCardDiagramFor(second);
   await openDrawerAndCheck(second, onReviewed);
 
   expect(onReviewed).toHaveBeenCalledTimes(1);
@@ -276,7 +315,8 @@ test('SystemReview: Key Points and Visual Learning never disturb the session or 
   const second = first === ALPHA ? BETA : ALPHA;
   act(() => { findButton(b => b.textContent.includes('Tap to reveal')).click(); });
   expectKeyPointsFor(first);
-  expect(mockLoaded).toEqual([]);
+  await flush();
+  expectCardDiagramFor(first);
 
   await openDrawerAndCheck(first, onReviewed);
 
@@ -286,6 +326,8 @@ test('SystemReview: Key Points and Visual Learning never disturb the session or 
 
   act(() => { findButton(b => b.textContent.includes('Tap to reveal')).click(); });
   expectKeyPointsFor(second);
+  await flush();
+  expectCardDiagramFor(second);
   await openDrawerAndCheck(second, onReviewed);
 
   expectNoGeneration();
@@ -315,13 +357,13 @@ test('"Back to review" returns to the same revealed card, and mouse rating still
   expect(drawer()).toBeNull();
 });
 
-test('generating from the review drawer: Generate makes and shows the diagram without touching the review', async () => {
+test('generating from the review drawer: the drawer closes when it finishes and the diagram shows on the card above the notes', async () => {
   const onReviewed = jest.fn();
-  VisualizationService.generate.mockImplementation(async (vizType, entryId) => ({
-    cached: false, stale: false,
-    visualization: { id: 'new', entryId, vizType, graphData: { nodes: [{ id: 'r', label: 'Generated root' }], edges: [] },
-      originalGraphData: null, isEdited: false, updatedAt: '2026-11-27T00:00:00Z' },
-  }));
+  VisualizationService.generate.mockImplementation(async (vizType, entryId) => {
+    const v = diagramFor(entryId, vizType, 'Generated root');
+    saveDiagram(v);
+    return { cached: false, stale: false, visualization: v };
+  });
   act(() => {
     root.render(
       <ThemeProvider>
@@ -331,6 +373,8 @@ test('generating from the review drawer: Generate makes and shows the diagram wi
     );
   });
   act(() => { findButton(b => b.textContent.includes('Tap to reveal')).click(); });
+  await flush();
+  expect(cardDiagram()).toBeNull(); // nothing saved yet
   const snapshotBefore = sessionSnapshots();
   act(() => { findButton(b => b.textContent.startsWith('Visual Learning')).click(); });
   await flush();
@@ -340,23 +384,57 @@ test('generating from the review drawer: Generate makes and shows the diagram wi
   await flush();
   expect(VisualizationService.generate).toHaveBeenCalledTimes(1);
   expect(VisualizationService.generate).toHaveBeenCalledWith('mind_map', 'beta', { regenerate: false });
-  expect(drawer().textContent).toContain('mind_map:Generated root');
-  expect(findButton(b => b.textContent.includes('Regenerate'))).toBeTruthy();
-  expect(findButton(b => /✎ Edit/.test(b.textContent))).toBeUndefined();
+  // Drawer closed by itself; the new diagram is on the card, above the notes.
+  expect(drawer()).toBeNull();
+  expect(cardDiagram().textContent).toContain('mind_map:Generated root');
+  const card = cardDiagram().parentElement;
+  expect(card.textContent.indexOf('mind_map:Generated root')).toBeLessThan(card.textContent.indexOf('Detailed notes for Beta Entry'));
+  expect(ratingBarVisible()).toBe(true);
+  expect(onReviewed).not.toHaveBeenCalled();
+  expect(sessionSnapshots()).toEqual(snapshotBefore);
 
-  // Regenerate asks the service for a fresh one.
+  // Collapse hides it on this card only.
+  act(() => { findButton(b => b.textContent.includes('Collapse')).click(); });
+  expect(cardDiagram().textContent).not.toContain('mind_map:Generated root');
+  act(() => { findButton(b => b.textContent.includes('Expand')).click(); });
+  expect(cardDiagram().textContent).toContain('mind_map:Generated root');
+
+  // Regenerate from the drawer also closes it and updates the card.
+  VisualizationService.generate.mockImplementation(async (vizType, entryId) => {
+    const v = diagramFor(entryId, vizType, 'Regenerated root', '2026-11-27T01:00:00Z');
+    saveDiagram(v);
+    return { cached: false, stale: false, visualization: v };
+  });
+  act(() => { findButton(b => b.textContent.startsWith('Visual Learning')).click(); });
+  await flush();
+  expect(findButton(b => /✎ Edit/.test(b.textContent))).toBeUndefined();
   act(() => { findButton(b => b.textContent.includes('Regenerate')).click(); });
   await flush();
   expect(VisualizationService.generate).toHaveBeenLastCalledWith('mind_map', 'beta', { regenerate: true });
-
-  expect(onReviewed).not.toHaveBeenCalled();
-  act(() => { findButton(b => b.textContent.includes('Back to review')).click(); });
   expect(drawer()).toBeNull();
-  expect(ratingBarVisible()).toBe(true);
-  expect(sessionSnapshots()).toEqual(snapshotBefore);
+  expect(cardDiagram().textContent).toContain('mind_map:Regenerated root');
+  expect(onReviewed).not.toHaveBeenCalled();
 });
 
-test('re-opening the drawer while a generation started earlier is still running shows its progress, not a second Generate', async () => {
+test('the card shows the most recent of several saved diagrams', async () => {
+  SAVED.alpha = [...SAVED.alpha, diagramFor('alpha', 'knowledge_network', 'Newest network', '2026-11-25T00:00:00Z')];
+  SAVED_TYPES.alpha = SAVED.alpha.map(v => v.vizType);
+  act(() => {
+    root.render(
+      <ThemeProvider>
+        <SystemReview system="Cardiology" entries={[ALPHA]} color="#2563eb"
+          onReviewed={jest.fn()} onClose={() => {}} userId="test-user" />
+      </ThemeProvider>
+    );
+  });
+  act(() => { findButton(b => b.textContent.includes('Tap to reveal')).click(); });
+  await flush();
+  expect(cardDiagram().textContent).toContain('knowledge_network:Newest network');
+  expect(cardDiagram().textContent).toContain('Knowledge Network');
+  expect(cardDiagram().textContent).not.toContain('mind_map:');
+});
+
+test('re-opening the drawer while a generation started earlier is still running shows its progress; it closes when that finishes', async () => {
   let finish;
   const promise = new Promise(r => { finish = r; });
   VisualizationService.pendingGenerations.mockImplementation(id => (id === 'beta' ? [{ vizType: 'knowledge_network', promise, startedAt: Date.now() }] : []));
@@ -375,8 +453,9 @@ test('re-opening the drawer while a generation started earlier is still running 
   expect(drawer().textContent).toMatch(/Generating…|Still working/);
   expect(VisualizationService.generate).not.toHaveBeenCalled();
   VisualizationService.pendingGenerations.mockImplementation(() => []);
-  await act(async () => { finish({ cached: false, visualization: { id: 'k', entryId: 'beta', vizType: 'knowledge_network',
-    graphData: { nodes: [{ id: 'n', label: 'Net root' }], edges: [] }, originalGraphData: null, isEdited: false, updatedAt: '2026-11-27T00:00:00Z' } }); });
+  const v = diagramFor('beta', 'knowledge_network', 'Net root');
+  await act(async () => { saveDiagram(v); finish({ cached: false, visualization: v }); });
   await flush();
-  expect(drawer().textContent).toContain('knowledge_network:Net root');
+  expect(drawer()).toBeNull();
+  expect(cardDiagram().textContent).toContain('knowledge_network:Net root');
 });
