@@ -101,6 +101,25 @@ function rememberSaved(entryId, value) {
   while (savedCache.size > SAVED_CACHE_LIMIT) savedCache.delete(savedCache.keys().next().value);
 }
 
+// In-flight generate() calls, by entry + type.
+const generations = new Map();
+const generationKey = (entryId, vizType) => `${entryId}\u0000${vizType}`;
+
+// After a successful generation: the saved list is re-read next time, and
+// the saved-types index gains this type at once (so a review screen's
+// "N saved" count updates even if the panel was closed meanwhile).
+function recordGenerated(entryId, vizType, res) {
+  savedCache.delete(entryId);
+  const known = typesCache.get(entryId);
+  if (!res?.visualization) { invalidateSaved(entryId); return; }
+  if (known) {
+    if (!known.includes(vizType)) rememberTypes(entryId, [...known, vizType]);
+    notify();
+  } else {
+    VisualizationService.listSaved(entryId).catch(() => {});
+  }
+}
+
 async function fetchSaved(entryId) {
   const { data, error } = await supabase
     .from('entry_visualizations')
@@ -130,11 +149,35 @@ const VisualizationService = {
   async generate(vizType, entryId, { extraContext, regenerate = false } = {}) {
     if (!entryId) throw new VisualizationServiceError('Missing entry id.', 'validation');
     if (!vizType) throw new VisualizationServiceError('Missing visualization type.', 'validation');
-    try {
-      return await callVisualizeEndpoint({ entryId, vizType, extraContext, regenerate: !!regenerate });
-    } finally {
-      invalidateSaved(entryId);
-    }
+    const key = generationKey(entryId, vizType);
+    const pending = generations.get(key);
+    if (pending) return pending.promise;
+    const promise = (async () => {
+      try {
+        const res = await callVisualizeEndpoint({ entryId, vizType, extraContext, regenerate: !!regenerate });
+        recordGenerated(entryId, vizType, res);
+        return res;
+      } catch (e) {
+        invalidateSaved(entryId);
+        throw e;
+      } finally {
+        generations.delete(key);
+      }
+    })();
+    generations.set(key, { promise, startedAt: Date.now() });
+    return promise;
+  },
+
+  /**
+   * Generations still running for an entry — they keep going (and save)
+   * when the panel that started them closes, so a panel opened again
+   * meanwhile can show their progress instead of offering Generate again.
+   * @returns {{vizType:string, promise:Promise, startedAt:number}[]}
+   */
+  pendingGenerations(entryId) {
+    const out = [];
+    generations.forEach((g, k) => { const [id, vizType] = k.split('\u0000'); if (id === entryId) out.push({ vizType, ...g }); });
+    return out;
   },
 
   /**

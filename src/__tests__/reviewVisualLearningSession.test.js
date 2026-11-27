@@ -31,7 +31,7 @@ jest.mock('../services/visualization', () => {
       getSavedTypes: jest.fn(() => undefined),
       subscribeSaved: jest.fn(() => () => {}),
       prefetchSavedTypes: jest.fn(async () => {}),
-      generate: jest.fn(), generateMindMap: jest.fn(), recommend: jest.fn(),
+      generate: jest.fn(), pendingGenerations: jest.fn(() => []), generateMindMap: jest.fn(), recommend: jest.fn(),
       saveEdit: jest.fn(), restoreOriginal: jest.fn(),
     },
   };
@@ -97,6 +97,8 @@ beforeEach(() => {
   mockLoaded.length = 0;
   jest.clearAllMocks();
   VisualizationService.listSaved.mockImplementation(async (id) => SAVED[id] || []);
+  VisualizationService.generate.mockReset();
+  VisualizationService.pendingGenerations.mockImplementation(() => []);
   // Stable arrays per entry, as the real service returns (useSyncExternalStore requires it).
   VisualizationService.getSavedTypes.mockImplementation(id => SAVED_TYPES[id]);
   global.fetch = jest.fn();
@@ -170,17 +172,23 @@ async function openDrawerAndCheck(e, onReviewed) {
   if (e === ALPHA) {
     expect(drawer().textContent).toContain('mind_map:Edited root');    // saved edit wins
     expect(drawer().textContent).not.toContain('Edited by you');      // no provenance badge
-    expect(drawer().textContent).not.toContain('Knowledge Network');   // only saved types offered
+    // Every format is offered; saved ones are ticked.
     const select = drawer().querySelector('select[aria-label="Diagram format"]');
-    expect(Array.from(select.options).map(o => o.value)).toEqual(['mind_map', 'comparison_map']);
+    const opts = Array.from(select.options);
+    expect(opts).toHaveLength(6);
+    expect(opts.filter(o => o.textContent.includes('✓')).map(o => o.value)).toEqual(['mind_map', 'comparison_map']);
+    expect(findButton(b => b.textContent.includes('Regenerate'))).toBeTruthy();
     act(() => { select.value = 'comparison_map'; select.dispatchEvent(new Event('change', { bubbles: true })); });
     await flush();
     expect(drawer().textContent).toContain('comparison_map:Drug A');
   } else {
-    expect(drawer().textContent).toContain('No saved visualizations yet');
+    // Nothing saved yet: the drawer offers generation right here.
+    expect(drawer().querySelector('select[aria-label="Diagram format"]').value).toBe('mind_map');
+    expect(findButton(b => b.textContent.includes('Generate Mind Map'))).toBeTruthy();
+    expect(findButton(b => b.textContent.includes('Suggest the best format'))).toBeTruthy();
   }
-  // No generation controls in review.
-  expect(findButton(b => /Generate|Regenerate|Suggest|Edit$|Delete|More actions/.test(b.textContent + (b.getAttribute('aria-label') || '')))).toBeUndefined();
+  // Editing, deleting and restoring stay on the entry page.
+  expect(findButton(b => /✎ Edit|Delete|Restore/.test(b.textContent) || b.getAttribute('aria-label') === 'More actions')).toBeUndefined();
 
   // Review shortcuts must be inert while the drawer is open.
   key('g'); key('Enter'); key('a'); key('ArrowLeft'); key(' ');
@@ -205,7 +213,7 @@ function expectNoGeneration() {
   expect(global.fetch).not.toHaveBeenCalled();
 }
 
-test('ReviewQueue: Key Points and Visual Learning never disturb the session or generate anything', async () => {
+test('ReviewQueue: Key Points and Visual Learning never disturb the session or generate on their own', async () => {
   const onReviewed = jest.fn();
   act(() => {
     root.render(
@@ -253,7 +261,7 @@ test('ReviewQueue: Key Points and Visual Learning never disturb the session or g
   expectNoGeneration();
 });
 
-test('SystemReview: Key Points and Visual Learning never disturb the session or generate anything', async () => {
+test('SystemReview: Key Points and Visual Learning never disturb the session or generate on their own', async () => {
   const onReviewed = jest.fn();
   act(() => {
     root.render(
@@ -305,4 +313,70 @@ test('"Back to review" returns to the same revealed card, and mouse rating still
   act(() => { findButton(b => b.textContent.startsWith('Good')).click(); });
   expect(onReviewed).toHaveBeenCalledTimes(1);
   expect(drawer()).toBeNull();
+});
+
+test('generating from the review drawer: Generate makes and shows the diagram without touching the review', async () => {
+  const onReviewed = jest.fn();
+  VisualizationService.generate.mockImplementation(async (vizType, entryId) => ({
+    cached: false, stale: false,
+    visualization: { id: 'new', entryId, vizType, graphData: { nodes: [{ id: 'r', label: 'Generated root' }], edges: [] },
+      originalGraphData: null, isEdited: false, updatedAt: '2026-11-27T00:00:00Z' },
+  }));
+  act(() => {
+    root.render(
+      <ThemeProvider>
+        <SystemReview system="Cardiology" entries={[BETA]} color="#2563eb"
+          onReviewed={onReviewed} onClose={() => {}} userId="test-user" />
+      </ThemeProvider>
+    );
+  });
+  act(() => { findButton(b => b.textContent.includes('Tap to reveal')).click(); });
+  const snapshotBefore = sessionSnapshots();
+  act(() => { findButton(b => b.textContent.startsWith('Visual Learning')).click(); });
+  await flush();
+  expect(VisualizationService.generate).not.toHaveBeenCalled(); // opening alone never generates
+
+  act(() => { findButton(b => b.textContent.includes('Generate Mind Map')).click(); });
+  await flush();
+  expect(VisualizationService.generate).toHaveBeenCalledTimes(1);
+  expect(VisualizationService.generate).toHaveBeenCalledWith('mind_map', 'beta', { regenerate: false });
+  expect(drawer().textContent).toContain('mind_map:Generated root');
+  expect(findButton(b => b.textContent.includes('Regenerate'))).toBeTruthy();
+  expect(findButton(b => /✎ Edit/.test(b.textContent))).toBeUndefined();
+
+  // Regenerate asks the service for a fresh one.
+  act(() => { findButton(b => b.textContent.includes('Regenerate')).click(); });
+  await flush();
+  expect(VisualizationService.generate).toHaveBeenLastCalledWith('mind_map', 'beta', { regenerate: true });
+
+  expect(onReviewed).not.toHaveBeenCalled();
+  act(() => { findButton(b => b.textContent.includes('Back to review')).click(); });
+  expect(drawer()).toBeNull();
+  expect(ratingBarVisible()).toBe(true);
+  expect(sessionSnapshots()).toEqual(snapshotBefore);
+});
+
+test('re-opening the drawer while a generation started earlier is still running shows its progress, not a second Generate', async () => {
+  let finish;
+  const promise = new Promise(r => { finish = r; });
+  VisualizationService.pendingGenerations.mockImplementation(id => (id === 'beta' ? [{ vizType: 'knowledge_network', promise, startedAt: Date.now() }] : []));
+  act(() => {
+    root.render(
+      <ThemeProvider>
+        <SystemReview system="Cardiology" entries={[BETA]} color="#2563eb"
+          onReviewed={jest.fn()} onClose={() => {}} userId="test-user" />
+      </ThemeProvider>
+    );
+  });
+  act(() => { findButton(b => b.textContent.includes('Tap to reveal')).click(); });
+  act(() => { findButton(b => b.textContent.startsWith('Visual Learning')).click(); });
+  await flush();
+  expect(drawer().querySelector('select[aria-label="Diagram format"]').value).toBe('knowledge_network');
+  expect(drawer().textContent).toMatch(/Generating…|Still working/);
+  expect(VisualizationService.generate).not.toHaveBeenCalled();
+  VisualizationService.pendingGenerations.mockImplementation(() => []);
+  await act(async () => { finish({ cached: false, visualization: { id: 'k', entryId: 'beta', vizType: 'knowledge_network',
+    graphData: { nodes: [{ id: 'n', label: 'Net root' }], edges: [] }, originalGraphData: null, isEdited: false, updatedAt: '2026-11-27T00:00:00Z' } }); });
+  await flush();
+  expect(drawer().textContent).toContain('knowledge_network:Net root');
 });

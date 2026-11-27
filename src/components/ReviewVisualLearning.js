@@ -1,6 +1,7 @@
 // Visual Learning access for the review screens (ReviewQueue, SystemReview):
-// a compact trigger plus an in-context drawer showing the entry's SAVED
-// diagrams via VisualLearningPanel's read-only mode="saved". The parent owns
+// a compact trigger plus an in-context drawer showing the entry's saved
+// diagrams via VisualLearningPanel's mode="review", where a diagram can also
+// be generated or regenerated (not edited or deleted). The parent owns
 // `open` so it can pause its own review keyboard shortcuts while the drawer
 // is up; the review session itself stays mounted underneath.
 import { lazy, Suspense, useEffect, useRef } from 'react';
@@ -37,7 +38,7 @@ export function ReviewVisualLearningButton({ entryId, onOpen, colors }) {
 
   return (
     <button type="button" onClick={onOpen} aria-haspopup="dialog" className="mb-drawer-btn"
-      title={none ? 'No diagrams saved for this entry yet' : undefined}
+      title={none ? 'No diagrams yet — open to generate one' : undefined}
       style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minHeight: 40, padding: '8px 14px',
         background: none ? 'transparent' : c.bg, border: `1px solid ${c.border}`, borderRadius: RADIUS.pill, cursor: 'pointer',
         fontFamily: 'Inter,sans-serif', fontSize: FONT.size.sm, fontWeight: FONT.weight.semibold, color: none ? c.muted : c.text }}>
@@ -119,7 +120,7 @@ export function ReviewVisualLearningDrawer({ entryId, entryTitle, entryNotes, on
         </div>
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: `${SPACE.lg}px ${SPACE.lg}px ${SPACE.xl}px` }}>
           <Suspense fallback={null}>
-            <VisualLearningPanel key={entryId} entryId={entryId} mode="saved" notes={entryNotes} />
+            <VisualLearningPanel key={entryId} entryId={entryId} mode="review" notes={entryNotes} />
           </Suspense>
         </div>
       </div>

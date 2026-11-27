@@ -162,3 +162,41 @@ test('deleteSaved surfaces a database error', async () => {
   mockError = { message: 'denied' };
   await expect(VisualizationService.deleteSaved('mind_map', 'e1')).rejects.toThrow('denied');
 });
+
+describe('generate() in flight (review drawer can close mid-generation)', () => {
+  test('a second call for the same entry+type shares the running request; pendingGenerations lists it until done', async () => {
+    let release;
+    global.fetch = jest.fn(() => new Promise(r => { release = () => r({ ok: true, json: async () => ({ visualization: { vizType: 'mind_map' } }) }); }));
+    const a = VisualizationService.generate('mind_map', 'e1', {});
+    const b = VisualizationService.generate('mind_map', 'e1', {});
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(VisualizationService.pendingGenerations('e1').map(g => g.vizType)).toEqual(['mind_map']);
+    expect(VisualizationService.pendingGenerations('e2')).toEqual([]);
+    for (let i = 0; i < 20 && !release; i++) await Promise.resolve();
+    release();
+    const [ra, rb] = await Promise.all([a, b]);
+    expect(ra).toBe(rb);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(VisualizationService.pendingGenerations('e1')).toEqual([]);
+  });
+
+  test('a successful generation adds its type to the known saved types (the review button count updates)', async () => {
+    mockRows = [{ entry_id: 'e1', viz_type: 'comparison_map' }];
+    await VisualizationService.prefetchSavedTypes(['e1']);
+    const listener = jest.fn();
+    VisualizationService.subscribeSaved(listener);
+    await VisualizationService.generate('mind_map', 'e1', {});
+    expect(VisualizationService.getSavedTypes('e1')).toEqual(['comparison_map', 'mind_map']);
+    expect(listener).toHaveBeenCalled();
+    expect(VisualizationService.peekSaved('e1')).toBeUndefined(); // full list re-read next time
+  });
+
+  test('a failed generation forgets the entry\'s cached state and is no longer pending', async () => {
+    mockRows = [{ entry_id: 'e1', viz_type: 'comparison_map' }];
+    await VisualizationService.prefetchSavedTypes(['e1']);
+    global.fetch = jest.fn(async () => ({ ok: false, status: 502, json: async () => ({ error: 'upstream' }) }));
+    await expect(VisualizationService.generate('mind_map', 'e1', {})).rejects.toBeTruthy();
+    expect(VisualizationService.getSavedTypes('e1')).toBeUndefined();
+    expect(VisualizationService.pendingGenerations('e1')).toEqual([]);
+  });
+});

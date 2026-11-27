@@ -21,7 +21,7 @@ jest.mock('../services/visualization', () => {
       subscribeSaved: jest.fn(() => () => {}),
       prefetchSavedTypes: jest.fn(async () => {}),
       deleteSaved: jest.fn(async () => {}),
-      generate: jest.fn(), generateMindMap: jest.fn(), recommend: jest.fn(),
+      generate: jest.fn(), pendingGenerations: jest.fn(() => []), generateMindMap: jest.fn(), recommend: jest.fn(),
       saveEdit: jest.fn(), restoreOriginal: jest.fn(),
     },
   };
@@ -43,6 +43,7 @@ const SAVED_MIND_MAP = {
 let container, root;
 beforeEach(() => {
   jest.clearAllMocks();
+  VisualizationService.pendingGenerations.mockImplementation(() => []);
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
