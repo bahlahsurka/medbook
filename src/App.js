@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { supabase } from './lib/supabase';
+import { fetchAllEntries } from './lib/entriesApi';
 import { loadSystems, saveSystems, DEFAULT_SYSTEMS } from './lib/systems';
 import { SYS_COLOR } from './lib/constants';
 import { useScrollRestore } from './lib/useScrollRestore';
@@ -270,10 +271,7 @@ export default function App() {
     if (!uid) { setEntries({}); return; }
     setFetching(true); setFetchErr('');
     try {
-      const { data, error } = await supabase
-        .from('entries').select('*')
-        .eq('user_id', uid)
-        .order('created_at', { ascending: false });
+      const { data, error } = await fetchAllEntries(uid);
       if (error) throw error;
       // Instant ratings (lib/ratingOutbox.js) — a rating made just before a
       // reload/kill may still be sitting in the local outbox, unsynced.

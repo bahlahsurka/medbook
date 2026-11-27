@@ -20,6 +20,7 @@
 // separate backfill needed for that part.
 
 import { supabase } from '../supabase';
+import { fetchAllRows } from '../fetchAllRows';
 
 // Same fields a rating can change, and therefore the exact snapshot Undo
 // needs to restore — identical list to imported api.js's own
@@ -55,6 +56,15 @@ function applySystemScope(query, system) {
  * from each card's own last_reviewed_at, not a separate ledger) and why
  * that's good enough for a soft daily cap.
  */
+/** Every My Cards card, newest first — paged (a single read stops at 1000 rows). */
+export function fetchAllOwnCards(userId) {
+  return fetchAllRows((from, to) => supabase.from('flashcards').select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: true })
+    .range(from, to));
+}
+
 export async function getSessionCards({ userId, system, limit = 50, newCardsPerDay = 20 } = {}) {
   const nowIso = new Date().toISOString();
   const dayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
@@ -156,9 +166,10 @@ export async function getOwnCardsReviewStats(userId) {
     const since = new Date(Date.now() - 90 * 86400_000).toISOString();
     const [{ count, error: countErr }, { data: rows, error: rowsErr }] = await Promise.all([
       supabase.from('flashcard_review_log').select('*', { count: 'exact', head: true }).eq('user_id', userId),
-      supabase.from('flashcard_review_log')
+      fetchAllRows((from, to) => supabase.from('flashcard_review_log')
         .select('rating, reviewed_at, flashcards!inner(review_count)')
-        .eq('user_id', userId).gte('reviewed_at', since).order('reviewed_at', { ascending: true }),
+        .eq('user_id', userId).gte('reviewed_at', since)
+        .order('reviewed_at', { ascending: true }).order('id', { ascending: true }).range(from, to)),
     ]);
     if (countErr || rowsErr) throw (countErr || rowsErr);
     return {
@@ -186,9 +197,9 @@ export async function getOwnCardsReviewStats(userId) {
  */
 export async function getWeakSpots(userId, minReviews) {
   try {
-    const { data, error } = await supabase.from('flashcard_review_log')
+    const { data, error } = await fetchAllRows((from, to) => supabase.from('flashcard_review_log')
       .select('rating, flashcards!inner(system)')
-      .eq('user_id', userId);
+      .eq('user_id', userId).order('id', { ascending: true }).range(from, to));
     if (error) throw error;
     const bySystem = {};
     (data || []).forEach(r => {
@@ -223,10 +234,11 @@ export async function getDueForecast(userId, days = 7) {
   const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
   const horizon = new Date(todayStart.getTime() + days * 86400_000);
   const buckets = new Array(days).fill(0);
-  const { data, error } = await supabase.from('flashcards')
+  const { data, error } = await fetchAllRows((from, to) => supabase.from('flashcards')
     .select('due_at').eq('user_id', userId)
     .neq('state', 'new').neq('state', 'suspended')
-    .not('due_at', 'is', null).lte('due_at', horizon.toISOString());
+    .not('due_at', 'is', null).lte('due_at', horizon.toISOString())
+    .order('id', { ascending: true }).range(from, to));
   if (error) return buckets;
   (data || []).forEach(r => {
     const dayIdx = Math.max(0, Math.floor((new Date(r.due_at).getTime() - todayStart.getTime()) / 86400_000));

@@ -24,6 +24,7 @@
 export const MOCK_MODE = false;
 
 import { supabase } from '../supabase';
+import { fetchAllRows } from '../fetchAllRows';
 import mock from './mockData';
 
 const PAGE_SIZE = 50;
@@ -86,8 +87,9 @@ async function liveDueCounts(userId) {
   const nowIso = new Date().toISOString();
   const [{ data: decks }, { data: dueCards }] = await Promise.all([
     supabase.from('imported_decks').select('id, parent_id').eq('user_id', userId),
-    supabase.from('imported_cards').select('deck_id').eq('user_id', userId)
-      .in('state', ['learning', 'review']).lte('due_at', nowIso),
+    fetchAllRows((from, to) => supabase.from('imported_cards').select('deck_id').eq('user_id', userId)
+      .in('state', ['learning', 'review']).lte('due_at', nowIso)
+      .order('id', { ascending: true }).range(from, to)),
   ]);
   const childrenOf = {};
   (decks || []).forEach(d => { (childrenOf[d.parent_id] ||= []).push(d.id); });
@@ -316,8 +318,9 @@ export async function browseCards(deckId, { search, state, tag, flag, page = 0, 
 export async function getDeckTags(deckId, userId) {
   if (MOCK_MODE) return [...new Set(mock.cards.flatMap(c => c.tags || []))].sort();
   const deckIds = await collectDescendantDeckIds(userId, deckId);
-  const { data, error } = await supabase.from('imported_cards')
-    .select('imported_notes!inner(tags)').in('deck_id', deckIds);
+  const { data, error } = await fetchAllRows((from, to) => supabase.from('imported_cards')
+    .select('imported_notes!inner(tags)').in('deck_id', deckIds)
+    .order('id', { ascending: true }).range(from, to));
   if (error) throw new Error(error.message);
   const set = new Set();
   (data || []).forEach(r => (r.imported_notes?.tags || []).forEach(tg => set.add(tg)));
@@ -647,8 +650,9 @@ export async function getImportedReviewStats(userId) {
     const since = new Date(Date.now() - 90 * 86400_000).toISOString();
     const [{ count, error: countErr }, { data: rows, error: rowsErr }] = await Promise.all([
       supabase.from('imported_review_log').select('*', { count: 'exact', head: true }).eq('user_id', userId),
-      supabase.from('imported_review_log').select('rating, reviewed_at')
-        .eq('user_id', userId).gte('reviewed_at', since).order('reviewed_at', { ascending: true }),
+      fetchAllRows((from, to) => supabase.from('imported_review_log').select('rating, reviewed_at')
+        .eq('user_id', userId).gte('reviewed_at', since)
+        .order('reviewed_at', { ascending: true }).order('id', { ascending: true }).range(from, to)),
     ]);
     if (countErr || rowsErr) throw (countErr || rowsErr);
     return { totalAllTime: count || 0, rows: rows || [] };
