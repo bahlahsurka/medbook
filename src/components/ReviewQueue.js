@@ -14,7 +14,7 @@ import { computeOverallProgress, buildSystemRegister } from '../lib/syllabusProg
 import { OverallSyllabusProgress, SystemProgressRegister } from './SyllabusProgress';
 import { formatDueCount } from '../lib/dueCount';
 import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
-import { ReviewVisualLearningButton, ReviewVisualLearningDrawer } from './ReviewVisualLearning';
+import { ReviewVisualLearningButton, ReviewVisualLearningDrawer, ReviewCardDiagram } from './ReviewVisualLearning';
 import VisualizationService from '../services/visualization';
 import { getSavedKeyPoints, isKeyPointsStale } from '../lib/keyPoints';
 import { useContentHash } from '../lib/contentHash';
@@ -1856,6 +1856,7 @@ export default function ReviewQueue({ allEntries, onReviewed, userSystems, initi
               ) : (
                 <div className="mb-rq-fade">
                   <div style={{ height:1, background:rt.border, marginBottom:SPACE.lg }} />
+                  {card.notes && <ReviewCardDiagram key={card.id} entryId={card.id} />}
                   {card.notes ? (
                     // No maxHeight/scroll clamp here — this card sits inside
                     // the shared study-surface scroll area above, so a long

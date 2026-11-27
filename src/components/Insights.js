@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { fetchAllRows } from '../lib/fetchAllRows';
 import { useTheme, SPACE, RADIUS, FONT, MOTION, elevation } from '../lib/theme';
 import { computeSystemStats } from '../lib/systemStats';
 import { timeAgo } from '../lib/timeAgo';
@@ -71,19 +72,7 @@ function SampleTag({ t }) {
 // Exported (like DetailView.js's RenderedNotes/rawOffsetAt) purely so a
 // test can exercise this exact pagination logic directly against a mocked
 // paginated response, without a parallel reimplementation of it.
-const PAGE_SIZE = 1000;
-export async function fetchAllRows(buildQuery) {
-  let all = [];
-  let from = 0;
-  for (;;) {
-    const { data, error } = await buildQuery(from, from + PAGE_SIZE - 1);
-    if (error) return { data: null, error };
-    if (data) all = all.concat(data);
-    if (!data || data.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
-  return { data: all, error: null };
-}
+export { fetchAllRows };
 
 // Today/yesterday are just minutesByDay's own last two buckets —
 // `last7Days` (built by the component, below) runs oldest-to-newest ending

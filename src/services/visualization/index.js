@@ -63,7 +63,7 @@ function callVisualizeEndpoint(payload) {
 
 // Same "is this a finished diagram, not an in-progress claim row" checks as
 // visualizationRegistry.js's isRealDiagram (that module is server-only).
-function isRealSavedDiagram(vizType, diagram) {
+export function isRealSavedDiagram(vizType, diagram) {
   if (!diagram || typeof diagram !== 'object') return false;
   if (vizType === 'comparison_map') return Array.isArray(diagram.cells) && diagram.cells.length > 0;
   if (vizType === 'visual_summary') return Array.isArray(diagram.highlights) && diagram.highlights.length > 0;
@@ -90,15 +90,43 @@ function rememberTypes(entryId, types) {
   while (typesCache.size > TYPES_CACHE_LIMIT) typesCache.delete(typesCache.keys().next().value);
 }
 
+// Bumped whenever an entry's saved diagrams change (generate, save, restore,
+// delete), so views showing one (the review card) know to re-read.
+const revisions = new Map();
+function bumpRevision(entryId) { revisions.set(entryId, (revisions.get(entryId) || 0) + 1); }
+
 function invalidateSaved(entryId) {
   savedCache.delete(entryId);
-  if (typesCache.delete(entryId)) notify();
+  typesCache.delete(entryId);
+  bumpRevision(entryId);
+  notify();
 }
 
 function rememberSaved(entryId, value) {
   savedCache.delete(entryId);
   savedCache.set(entryId, value);
   while (savedCache.size > SAVED_CACHE_LIMIT) savedCache.delete(savedCache.keys().next().value);
+}
+
+// In-flight generate() calls, by entry + type.
+const generations = new Map();
+const generationKey = (entryId, vizType) => `${entryId}\u0000${vizType}`;
+
+// After a successful generation: the saved list is re-read next time, and
+// the saved-types index gains this type at once (so a review screen's
+// "N saved" count updates even if the panel was closed meanwhile).
+function recordGenerated(entryId, vizType, res) {
+  savedCache.delete(entryId);
+  const known = typesCache.get(entryId);
+  if (!res?.visualization) { invalidateSaved(entryId); return; }
+  bumpRevision(entryId);
+  if (known) {
+    if (!known.includes(vizType)) rememberTypes(entryId, [...known, vizType]);
+    notify();
+  } else {
+    notify();
+    VisualizationService.listSaved(entryId).catch(() => {});
+  }
 }
 
 async function fetchSaved(entryId) {
@@ -130,11 +158,35 @@ const VisualizationService = {
   async generate(vizType, entryId, { extraContext, regenerate = false } = {}) {
     if (!entryId) throw new VisualizationServiceError('Missing entry id.', 'validation');
     if (!vizType) throw new VisualizationServiceError('Missing visualization type.', 'validation');
-    try {
-      return await callVisualizeEndpoint({ entryId, vizType, extraContext, regenerate: !!regenerate });
-    } finally {
-      invalidateSaved(entryId);
-    }
+    const key = generationKey(entryId, vizType);
+    const pending = generations.get(key);
+    if (pending) return pending.promise;
+    const promise = (async () => {
+      try {
+        const res = await callVisualizeEndpoint({ entryId, vizType, extraContext, regenerate: !!regenerate });
+        recordGenerated(entryId, vizType, res);
+        return res;
+      } catch (e) {
+        invalidateSaved(entryId);
+        throw e;
+      } finally {
+        generations.delete(key);
+      }
+    })();
+    generations.set(key, { promise, startedAt: Date.now() });
+    return promise;
+  },
+
+  /**
+   * Generations still running for an entry — they keep going (and save)
+   * when the panel that started them closes, so a panel opened again
+   * meanwhile can show their progress instead of offering Generate again.
+   * @returns {{vizType:string, promise:Promise, startedAt:number}[]}
+   */
+  pendingGenerations(entryId) {
+    const out = [];
+    generations.forEach((g, k) => { const [id, vizType] = k.split('\u0000'); if (id === entryId) out.push({ vizType, ...g }); });
+    return out;
   },
 
   /**
@@ -178,6 +230,11 @@ const VisualizationService = {
     // Same array instance until it changes (listSaved also records here),
     // as useSyncExternalStore requires.
     return typesCache.get(entryId);
+  },
+
+  /** A number that changes whenever this entry's saved diagrams change (for useSyncExternalStore). */
+  getSavedRevision(entryId) {
+    return revisions.get(entryId) || 0;
   },
 
   /** Subscribe to changes in saved-type knowledge (for useSyncExternalStore). */

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { supabase } from './lib/supabase';
+import { fetchAllEntries } from './lib/entriesApi';
 import { loadSystems, saveSystems, DEFAULT_SYSTEMS } from './lib/systems';
 import { SYS_COLOR } from './lib/constants';
 import { useScrollRestore } from './lib/useScrollRestore';
@@ -28,6 +29,8 @@ import SystemReview from './components/SystemReview';
 import SystemHome from './components/SystemHome';
 import FilterChips from './components/FilterChips';
 import PendingSyncIndicator from './components/PendingSyncIndicator';
+import SharedEntryModal from './components/SharedEntryModal';
+import { parseShareToken, rememberPendingShare, takePendingShare } from './lib/entrySharing';
 
 const ONBOARD_KEY = 'medbook_onboarded';
 
@@ -61,6 +64,14 @@ export default function App() {
   const [pathname, setPathname] = useState(() =>
     typeof window !== 'undefined' ? window.location.pathname : '/'
   );
+  // A shared-entry link (/s/<token>): remembered right away so it survives
+  // signing in (Google's sign-in returns to the site root).
+  useState(() => {
+    const token = typeof window !== 'undefined' ? parseShareToken(window.location.pathname) : null;
+    if (token) rememberPendingShare(token);
+    return token;
+  });
+  const [shareToken, setShareToken] = useState(null);
   useEffect(() => {
     const onPop = () => setPathname(window.location.pathname);
     window.addEventListener('popstate', onPop);
@@ -260,10 +271,7 @@ export default function App() {
     if (!uid) { setEntries({}); return; }
     setFetching(true); setFetchErr('');
     try {
-      const { data, error } = await supabase
-        .from('entries').select('*')
-        .eq('user_id', uid)
-        .order('created_at', { ascending: false });
+      const { data, error } = await fetchAllEntries(uid);
       if (error) throw error;
       // Instant ratings (lib/ratingOutbox.js) — a rating made just before a
       // reload/kill may still be sitting in the local outbox, unsynced.
@@ -372,6 +380,42 @@ export default function App() {
     }));
     setSelected(updated);
   }, []);
+
+  // ── Shared-entry links ─────────────────────────────────────────────────
+  // Opened once signed in and the notebook has loaded (an own-entry link
+  // opens that entry, which needs the loaded list).
+  const entriesReady = systemsLoaded && !fetching && Object.keys(entries).length > 0;
+  useEffect(() => {
+    if (!session || !entriesReady || shareToken) return;
+    const token = takePendingShare();
+    if (!token) return;
+    setShareToken(token);
+    if (window.location.pathname.startsWith('/s/')) {
+      window.history.replaceState(null, '', '/app');
+      setPathname('/app');
+    }
+  }, [session, entriesReady, shareToken]);
+
+  const closeShare = useCallback(() => setShareToken(null), []);
+  const openOwnShared = useCallback((entryId) => {
+    setShareToken(null);
+    const own = Object.values(entries).flat().find(e => e.id === entryId);
+    if (own) { setAS(own.system); openEntry(own); }
+    else showToast('This entry is no longer available', 'warn');
+  }, [entries, openEntry, showToast]);
+  const onSharedSaved = useCallback(({ entry, systems, addedSystem, failedImages, failedDiagrams }) => {
+    setShareToken(null);
+    if (addedSystem) setUS(systems);
+    setEntries(prev => ({ ...prev, [entry.system]: [entry, ...(prev[entry.system] || [])] }));
+    setAS(entry.system);
+    openEntry(entry);
+    const missed = [
+      failedImages ? `${failedImages} image${failedImages !== 1 ? 's' : ''}` : '',
+      failedDiagrams ? `${failedDiagrams} diagram${failedDiagrams !== 1 ? 's' : ''}` : '',
+    ].filter(Boolean);
+    showToast(missed.length ? `Saved to ${entry.system} · ${missed.join(' and ')} couldn't be copied` : `Saved to ${entry.system} ✓`,
+      missed.length ? 'warn' : 'ok');
+  }, [openEntry, showToast]);
 
   const onReviewed = useCallback((updated) => {
     setEntries(prev => ({
@@ -669,6 +713,8 @@ export default function App() {
       {showOnboard && <Onboarding onDone={()=>{localStorage.setItem(ONBOARD_KEY,'1');setOnboard(false);}} />}
       {showManage  && <ManageSystems systems={userSystems} onSave={handleSaveSystems} onClose={()=>setManage(false)} userId={session.user.id} />}
       {showQuickAdd && <QuickAdd userId={session.user.id} activeSystem={activeSystem} userSystems={userSystems} color={color} onSaved={onSaved} onClose={()=>setQuickAdd(false)} />}
+      {shareToken && <SharedEntryModal token={shareToken} userId={session.user.id} userSystems={userSystems}
+        onClose={closeShare} onOpenOwn={openOwnShared} onSaved={onSharedSaved} />}
       {showSysReview && <SystemReview system={activeSystem} entries={entries[activeSystem]||[]} color={color} onReviewed={onReviewed} onClose={()=>setSysReview(false)} userId={session.user.id} />}
 
       {isMobile && sidebarOpen && (

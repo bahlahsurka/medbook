@@ -258,9 +258,7 @@ export default function FlashCards({ userId, userSystems }) {
   // same reason DeckBrowser bumps its own refreshSignal after Study.
   const refetchCards = useCallback(() => {
     if (!userId) return;
-    return supabase.from('flashcards').select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
+    return ownCardsApi.fetchAllOwnCards(userId)
       .then(({ data, error }) => {
         // Instant ratings (lib/ratingOutbox.js) — a rating made just
         // before a reload/kill, or whose background flush just hasn't

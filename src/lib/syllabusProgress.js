@@ -48,6 +48,7 @@
 // module needs to additionally filter.
 
 import { supabase } from './supabase';
+import { fetchAllRows } from './fetchAllRows';
 import { SYS_COLOR } from './constants';
 
 // Flattens the {systemName: [entries...]} shape every screen already uses
@@ -175,19 +176,6 @@ export function flattenRegister(register) {
 // own fetchAllRows for the first place this bit MedBook. A 7-day review_log
 // window is normally nowhere near that, but a heavy/long-running account
 // deserves the same safety net rather than a second, unguarded fetch path.
-const PAGE_SIZE = 1000;
-async function fetchAllRows(buildQuery) {
-  let all = [];
-  let from = 0;
-  for (;;) {
-    const { data, error } = await buildQuery(from, from + PAGE_SIZE - 1);
-    if (error) return { data: null, error };
-    if (data) all = all.concat(data);
-    if (!data || data.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
-  return { data: all, error: null };
-}
 
 // ─── Daily activity ─────────────────────────────────────────────────────
 //

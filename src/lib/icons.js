@@ -102,6 +102,16 @@ export function IconDownload({ size=14, style, className }) {
   </Svg>;
 }
 
+export function IconShare({ size=14, style, className }) {
+  return <Svg size={size} style={style} className={className}>
+    <circle cx="18" cy="5" r="3" />
+    <circle cx="6" cy="12" r="3" />
+    <circle cx="18" cy="19" r="3" />
+    <line x1="8.6" y1="13.5" x2="15.4" y2="17.5" />
+    <line x1="15.4" y1="6.5" x2="8.6" y2="10.5" />
+  </Svg>;
+}
+
 export function IconUpload({ size=14, style, className }) {
   return <Svg size={size} style={style} className={className}>
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />

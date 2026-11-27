@@ -8,7 +8,7 @@ import { normalizeSections } from '../services/ai';
 import { loadSession, saveSession, clearSession, newSessionId } from '../lib/reviewSessionStore';
 import { enqueueRating, newRatingId, flushNow } from '../lib/ratingOutbox';
 import ReviewKeyPoints, { hasKeyPoints } from './ReviewKeyPoints';
-import { ReviewVisualLearningButton, ReviewVisualLearningDrawer } from './ReviewVisualLearning';
+import { ReviewVisualLearningButton, ReviewVisualLearningDrawer, ReviewCardDiagram } from './ReviewVisualLearning';
 import VisualizationService from '../services/visualization';
 import { getSavedKeyPoints, isKeyPointsStale } from '../lib/keyPoints';
 import { useContentHash } from '../lib/contentHash';
@@ -711,6 +711,7 @@ export default function SystemReview({ system, entries, color, onReviewed, onClo
                 ) : (
                   <div>
                     <div style={{height:1,background:t.border,marginBottom:SPACE.lg}} />
+                    {card.notes && <ReviewCardDiagram key={card.id} entryId={card.id} />}
                     {card.notes ? (
                       <div ref={notesRef} className={STUDY_SCOPE_CLASS} data-selectable="true"
                         onContextMenu={suppressContextMenu}

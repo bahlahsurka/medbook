@@ -14,12 +14,12 @@
 // alone never triggers a request either — see `stateByType` below. The
 // only things that ever trigger a network call are the explicit Generate/
 // Regenerate buttons (per type) and the explicit Recommend button.
-// Exceptions (table reads only, never a generation): mode="saved" (review
-// screens) reads the already-saved rows on mount, and full mode does one
-// tiny read of WHICH types are saved, to mark them on the type chips.
+// Exceptions (table reads only, never a generation): every mode reads the
+// entry's already-saved rows on mount, so saved diagrams show straight away.
 import { useState, useRef, useEffect, lazy, Suspense, useCallback, useMemo } from 'react';
 import { useTheme, SPACE, RADIUS, FONT, elevation } from '../../lib/theme';
 import { IconSparkle, IconNetwork } from '../../lib/icons';
+import { VISUALIZATION_TYPES, TYPE_BY_KEY, RENDERER_BY_TYPE } from './rendererRegistry';
 import VisualizationService, { VisualizationServiceError } from '../../services/visualization';
 import { cloneDiagram } from './graphDiagramEdits';
 import useSavedVisualizationTypes from './useSavedVisualizationTypes';
@@ -36,26 +36,8 @@ import { contentHashHex } from '../../lib/contentHash';
 // shaped types edit in place inside their own existing Renderer (passed
 // `editable`+`onDraftChange`); the other two swap in a dedicated
 // purpose-built editor component instead of a graph editor.
-const VISUALIZATION_TYPES = [
-  { key: 'mind_map', label: 'Mind Map', family: 'graph' },
-  { key: 'knowledge_network', label: 'Knowledge Network', family: 'graph' },
-  { key: 'clinical_flowchart', label: 'Clinical Flowchart', family: 'graph' },
-  { key: 'mechanism_diagram', label: 'Mechanism Diagram', family: 'graph' },
-  { key: 'comparison_map', label: 'Comparison Map', family: 'comparison' },
-  { key: 'visual_summary', label: 'Visual Summary', family: 'summary' },
-];
-const TYPE_BY_KEY = Object.fromEntries(VISUALIZATION_TYPES.map(t => [t.key, t]));
-
-// One lazy import per type — created once at module scope (not inside the
-// component) so each is a stable component reference across re-renders.
-const RENDERER_BY_TYPE = {
-  mind_map: lazy(() => import('./MindMapRenderer')),
-  knowledge_network: lazy(() => import('./KnowledgeNetworkRenderer')),
-  clinical_flowchart: lazy(() => import('./ClinicalFlowchartRenderer')),
-  mechanism_diagram: lazy(() => import('./MechanismDiagramRenderer')),
-  comparison_map: lazy(() => import('./ComparisonMapRenderer')),
-  visual_summary: lazy(() => import('./VisualSummaryRenderer')),
-};
+// The six formats and their renderers live in rendererRegistry.js (shared
+// with the review card's on-card diagram).
 
 // Phase 4: the two non-graph types get their own dedicated editor
 // component instead of reusing their Renderer with an `editable` prop —
@@ -116,13 +98,19 @@ function RendererFallback({ t }) {
  *   (DetailView's own runAnalyze) owns the AI Analysis request instead of
  *   AISections.js making it.
  */
-function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible = false, onHasDiagramChange }) {
+function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible = false, onHasDiagramChange, onGenerated }) {
   const { t, isDark } = useTheme();
-  // mode="saved" (review screens): read-only view of already-saved diagrams.
+  // mode="saved": read-only view of already-saved diagrams.
   // Loads them once via VisualizationService.listSaved (a plain RLS-scoped
   // table read, never /api/visualize, so never Groq) and hides every
   // generate/regenerate/recommend/edit control.
   const savedOnly = mode === 'saved';
+  // mode="review" (review screens' drawer): saved diagrams plus Generate,
+  // Suggest format and Regenerate — no editing, deleting or restoring,
+  // which stay on the entry page. No card chrome: the drawer has its own.
+  const inReview = mode === 'review';
+  const canManage = !savedOnly && !inReview;
+  const bare = savedOnly || inReview;
   // Both modes show the entry's saved diagrams straight away (a read-only
   // table read — never Groq): saved diagrams belong to the entry and stay
   // until the user deletes them.
@@ -157,7 +145,10 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible
           for (const [k, st] of Object.entries(prev)) if (st.status !== 'idle') next[k] = st;
           return next;
         });
-        if (list.length) setSelectedType(prev => (list.some(v => v.vizType === prev) ? prev : firstSavedType(list)));
+        if (list.length) {
+          setSelectedType(prev => (list.some(v => v.vizType === prev) || VisualizationService.pendingGenerations(entryId).some(g => g.vizType === prev)
+            ? prev : firstSavedType(list)));
+        }
       }
       setSavedStatus('loaded');
     }, e => {
@@ -195,13 +186,22 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible
     return () => clearInterval(id);
   }, [anyLoading]);
 
-  const run = useCallback(async (key, regenerate) => {
+  const mountedRef = useRef(false);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+  const onGeneratedRef = useRef(onGenerated);
+  onGeneratedRef.current = onGenerated;
+
+  // Shows a generation's progress and result. The request itself lives in
+  // VisualizationService, so it carries on (and saves) if this panel closes.
+  const follow = useCallback(async (key, start) => {
     if (requestInFlight.current.has(key)) return;
     requestInFlight.current.add(key);
-    updateTypeState(key, { status: 'loading', error: '', errorKind: '', startedAt: Date.now() });
+    const pending = VisualizationService.pendingGenerations(entryId).find(g => g.vizType === key);
+    updateTypeState(key, { status: 'loading', error: '', errorKind: '', startedAt: pending?.startedAt || Date.now() });
     try {
-      const res = await VisualizationService.generate(key, entryId, { regenerate });
+      const res = await (pending ? pending.promise : start());
       updateTypeState(key, { status: 'loaded', result: res });
+      if (mountedRef.current) onGeneratedRef.current?.(key);
     } catch (e) {
       const message = e instanceof VisualizationServiceError ? e.message : 'Something went wrong generating this diagram.';
       updateTypeState(key, { status: 'error', error: message, errorKind: e instanceof VisualizationServiceError ? e.kind : '' });
@@ -209,6 +209,16 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible
       requestInFlight.current.delete(key);
     }
   }, [entryId, updateTypeState]);
+  const run = useCallback((key, regenerate) => follow(key, () => VisualizationService.generate(key, entryId, { regenerate })), [follow, entryId]);
+
+  // Re-opened while a generation started earlier is still running: show it.
+  useEffect(() => {
+    if (savedOnly) return;
+    const pending = VisualizationService.pendingGenerations(entryId);
+    if (!pending.length) return;
+    setSelectedType(pending[0].vizType);
+    pending.forEach(g => follow(g.vizType));
+  }, [savedOnly, entryId, follow]);
 
   const runRecommend = useCallback(async () => {
     if (recommendInFlight.current) return;
@@ -362,6 +372,10 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible
   const [collapsed, setCollapsed] = useState(false);
   const canCollapse = collapsible && hasDiagram;
 
+  if (inReview && savedStatus !== 'loaded' && !Object.values(stateByType).some(st => st.status === 'loading')) {
+    return <SavedModeState t={t} status={savedStatus} error={savedError}
+      onRetry={() => { setSavedError(''); setSavedStatus('loading'); }} />;
+  }
   if (savedOnly && (savedStatus !== 'loaded' || visibleTypes.length === 0)) {
     return <SavedModeState t={t} status={savedStatus} error={savedError}
       onRetry={() => { setSavedError(''); setSavedStatus('loading'); }} />;
@@ -375,19 +389,19 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible
   );
 
   const moreItems = [];
-  if (loaded && !savedOnly && !current.editMode && current.result.visualization?.isEdited) {
+  if (loaded && canManage && !current.editMode && current.result.visualization?.isEdited) {
     moreItems.push({ label: '⟲ Restore original AI version', onClick: () => requestRestore(selectedType) });
   }
-  if (loaded && !savedOnly && !current.editMode) {
+  if (loaded && canManage && !current.editMode) {
     moreItems.push({ label: `🗑 Delete ${currentMeta.label}`, danger: true, onClick: () => requestDelete(selectedType) });
   }
 
   return (
-    <div className={savedOnly ? undefined : 'mb-detail-card'} data-testid={savedOnly ? undefined : 'visual-learning-panel'}
-      style={savedOnly ? undefined : { background: t.surface, border: `1px solid ${t.border}`,
+    <div className={bare ? undefined : 'mb-detail-card'} data-testid={bare ? undefined : 'visual-learning-panel'}
+      style={bare ? undefined : { background: t.surface, border: `1px solid ${t.border}`,
         borderRadius: RADIUS.lg, boxShadow: elevation(t, 'sm') }}>
 
-      {!savedOnly && (
+      {!bare && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: collapsed && canCollapse ? 0 : SPACE.lg }}>
           <div style={{ fontSize: FONT.size.xs, color: t.text3, letterSpacing: .8, fontWeight: FONT.weight.bold,
             textTransform: 'uppercase', flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -426,7 +440,7 @@ function VisualLearningPanelContent({ entryId, mode = 'full', notes, collapsible
                   </>
                 ) : (
                   <>
-                    <button onClick={() => startEdit(selectedType)} style={secondaryButtonStyle(t)}>✎ Edit</button>
+                    {canManage && <button onClick={() => startEdit(selectedType)} style={secondaryButtonStyle(t)}>✎ Edit</button>}
                     <button onClick={() => requestRegenerate(selectedType)} disabled={current.status === 'loading'} style={secondaryButtonStyle(t)}>↻ Regenerate</button>
                     {moreItems.length > 0 && <MoreMenu t={t} items={moreItems} />}
                   </>

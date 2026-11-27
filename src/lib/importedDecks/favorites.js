@@ -26,6 +26,7 @@
 // pointed at real data.
 
 import { supabase } from '../supabase';
+import { fetchAllRows } from '../fetchAllRows';
 import { MOCK_MODE } from './api';
 import mock from './mockData';
 
@@ -63,8 +64,9 @@ export async function isFavorite(cardId, userId) {
  *  screen a later batch builds. */
 export async function getFavoriteCardIds(userId) {
   if (MOCK_MODE) return new Set(mockSetFor(userId));
-  const { data, error } = await supabase.from('imported_card_favorites')
-    .select('imported_card_id').eq('user_id', userId);
+  const { data, error } = await fetchAllRows((from, to) => supabase.from('imported_card_favorites')
+    .select('imported_card_id').eq('user_id', userId)
+    .order('id', { ascending: true }).range(from, to));
   if (error) throw new Error(error.message);
   return new Set((data || []).map(r => r.imported_card_id));
 }
@@ -148,10 +150,12 @@ export async function getFavoriteCards(userId) {
   // here carries exactly the same shape browseCards()/getSessionCards()
   // already produce, with no risk of quietly dropping a column Scheduler
   // needs the next time it changes.
-  const { data, error } = await supabase.from('imported_card_favorites')
+  const { data, error } = await fetchAllRows((from, to) => supabase.from('imported_card_favorites')
     .select('favorited_at, imported_cards!inner(*, imported_notes!inner(sort_field, fields, tags))')
     .eq('user_id', userId)
-    .order('favorited_at', { ascending: false });
+    .order('favorited_at', { ascending: false })
+    .order('id', { ascending: true })
+    .range(from, to));
   if (error) throw new Error(error.message);
 
   // Filter out rows whose card no longer exists — shouldn't happen (the FK
